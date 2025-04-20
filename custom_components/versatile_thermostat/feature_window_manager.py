@@ -292,19 +292,20 @@ class FeatureWindowManager(BaseFeatureManager):
                     self._window_state = new_state
                 return False
 
-            # self._window_state = new_state
-            if self._vtherm.last_central_mode in [CENTRAL_MODE_AUTO, None]:
-                if self._window_action in [
-                    CONF_WINDOW_TURN_OFF,
-                    CONF_WINDOW_FAN_ONLY,
-                ]:
-                    self._vtherm.save_hvac_mode()
-                elif self._window_action in [
-                    CONF_WINDOW_FROST_TEMP,
-                    CONF_WINDOW_ECO_TEMP,
-                ]:
-                    self._vtherm.save_target_temp()
+            # Save the current state *before* applying the window action,
+            # but only if the action requires it (turn_off, fan_only, frost, eco)
+            if self._window_action in [
+                CONF_WINDOW_TURN_OFF,
+                CONF_WINDOW_FAN_ONLY,
+            ]:
+                self._vtherm.save_hvac_mode()
+            elif self._window_action in [
+                CONF_WINDOW_FROST_TEMP,
+                CONF_WINDOW_ECO_TEMP,
+            ]:
+                self._vtherm.save_target_temp()
 
+            # Apply the window action
             if (
                 self._window_action == CONF_WINDOW_FAN_ONLY
                 and HVACMode.FAN_ONLY in self._vtherm.hvac_modes
