@@ -143,6 +143,9 @@ CONF_VALVE_2 = "valve_entity2_id"
 CONF_VALVE_3 = "valve_entity3_id"
 CONF_VALVE_4 = "valve_entity4_id"
 
+CONF_AUTO_TPI_MODE = "auto_tpi_mode"
+
+
 # Global params into configuration.yaml
 CONF_SHORT_EMA_PARAMS = "short_ema_params"
 CONF_SAFETY_MODE = "safety_mode"
@@ -385,6 +388,7 @@ SERVICE_SET_WINDOW_BYPASS = "set_window_bypass"
 SERVICE_SET_AUTO_REGULATION_MODE = "set_auto_regulation_mode"
 SERVICE_SET_AUTO_FAN_MODE = "set_auto_fan_mode"
 SERVICE_SET_HVAC_MODE_SLEEP = "set_hvac_mode_sleep"
+SERVICE_SET_AUTO_TPI_MODE = "set_auto_tpi_mode"
 
 DEFAULT_SAFETY_MIN_ON_PERCENT = 0.5
 DEFAULT_SAFETY_DEFAULT_ON_PERCENT = 0.1
@@ -505,6 +509,7 @@ class EventType(Enum):
     PRESET_EVENT = "versatile_thermostat_preset_event"
     WINDOW_AUTO_EVENT = "versatile_thermostat_window_auto_event"
     AUTO_START_STOP_EVENT = "versatile_thermostat_auto_start_stop_event"
+    AUTO_TPI_EVENT = "versatile_thermostat_auto_tpi_event"
 
 
 def send_vtherm_event(hass, event_type: EventType, entity, data: dict):

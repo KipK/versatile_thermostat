@@ -641,5 +641,17 @@
         "name": "Boost ac away"
       }
     }
+  },
+  "services": {
+    "set_auto_tpi_mode": {
+      "name": "Set Auto TPI mode",
+      "description": "Enable or disable the Auto TPI learning mode",
+      "fields": {
+        "auto_tpi_mode": {
+          "name": "Auto TPI mode",
+          "description": "Enable (true) or disable (false) the Auto TPI learning"
+        }
+      }
+    }
   }
 }

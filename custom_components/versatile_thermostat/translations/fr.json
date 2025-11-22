@@ -645,5 +645,17 @@
         "name": "Boost clim abs"
       }
     }
+  },
+  "services": {
+    "set_auto_tpi_mode": {
+      "name": "Définir le mode Auto TPI",
+      "description": "Active ou désactive le mode d'apprentissage Auto TPI",
+      "fields": {
+        "auto_tpi_mode": {
+          "name": "Mode Auto TPI",
+          "description": "Activer (vrai) ou désactiver (faux) l'apprentissage Auto TPI"
+        }
+      }
+    }
   }
 }
