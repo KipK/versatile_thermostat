@@ -326,6 +326,10 @@ class AutoTpiSensor(VersatileThermostatBaseEntity, SensorEntity):
             "progression": f"{manager.progression}%",
             "data_points": manager.data_points,
             "min_data_points": manager.min_data_points,
+            "heating_cycles_count": manager.heating_cycles_count,
+            "learning_quality": manager.learning_quality,
+            "time_constant_hours": manager.time_constant,
+            "confidence": manager.confidence,
         }
         
         calculated = manager.get_calculated_params()
