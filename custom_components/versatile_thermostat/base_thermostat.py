@@ -27,6 +27,7 @@ from homeassistant.helpers.device_registry import DeviceInfo, DeviceEntryType
 
 from homeassistant.helpers.event import (
     async_track_state_change_event,
+    async_call_later,
 )
 
 
@@ -68,6 +69,7 @@ from .state_manager import StateManager
 from .vtherm_state import VThermState
 from .vtherm_preset import VThermPreset, HIDDEN_PRESETS, PRESET_AC_SUFFIX
 from .vtherm_hvac_mode import VThermHvacMode, VThermHvacMode_OFF
+from .auto_tpi_manager import AutoTpiManager
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -113,6 +115,7 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
         self._name = name
         self._prop_algorithm = None
         self._async_cancel_cycle = None
+        self._cycle_timer = None
 
         self._state_manager = StateManager()
         # self._hvac_mode = None
@@ -134,6 +137,9 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
         self._last_ext_temperature_measure = None
         self._last_temperature_measure = None
         self._cur_ext_temp = None
+
+        self._humidity_sensor_entity_id = None
+        self._cur_humidity = None
 
         self._should_relaunch_control_heating = None
 
@@ -313,6 +319,7 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
             CONF_LAST_SEEN_TEMP_SENSOR
         )
         self._ext_temp_sensor_entity_id = entry_infos.get(CONF_EXTERNAL_TEMP_SENSOR)
+        self._humidity_sensor_entity_id = entry_infos.get(CONF_HUMIDITY_SENSOR)
 
         self._tpi_coef_int = entry_infos.get(CONF_TPI_COEF_INT)
         self._tpi_coef_ext = entry_infos.get(CONF_TPI_COEF_EXT)
@@ -322,6 +329,13 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
         if self._tpi_threshold_low == 0.0 or self._tpi_threshold_high == 0.0:
             self._tpi_threshold_low = 0.0
             self._tpi_threshold_high = 0.0
+
+        self._last_notified_tpi_coef_int = self._tpi_coef_int
+        self._last_notified_tpi_coef_ext = self._tpi_coef_ext
+
+        _LOGGER.info("DEBUG: entry_infos keys: %s", entry_infos.keys())
+        self._auto_tpi_enable_update_config = entry_infos.get(CONF_AUTO_TPI_ENABLE_UPDATE_CONFIG, False)
+        _LOGGER.info("DEBUG: auto_tpi_enable_update_config: %s", self._auto_tpi_enable_update_config)
 
         self.set_hvac_list()
 
@@ -341,6 +355,7 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
         self._swing_mode = None
         self._cur_temp = None
         self._cur_ext_temp = None
+        self._cur_humidity = None
 
         # Fix parameters for TPI
         if (
@@ -409,9 +424,37 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
             self.unique_id,
         )
 
+        # Initialize Auto TPI Manager here because we need self._cycle_min which is initialized in post_init
+        self._auto_tpi_manager = AutoTpiManager(
+            self._hass,
+            self.unique_id,
+            self.name,
+            self._cycle_min,
+            self._tpi_threshold_low,
+            self._tpi_threshold_high,
+            coef_int=self._tpi_coef_int,
+            coef_ext=self._tpi_coef_ext,
+        )
+
     async def async_added_to_hass(self):
         """Run when entity about to be added."""
         _LOGGER.debug("Calling async_added_to_hass")
+
+        # Load data from Auto TPI Manager
+        if self._auto_tpi_manager:
+            await self._auto_tpi_manager.async_load_data()
+            # If we have learned parameters, apply them
+            learned_params = self._auto_tpi_manager.get_calculated_params()
+            if learned_params:
+                if self._auto_tpi_enable_update_config:
+                    self._tpi_coef_int = learned_params.get(CONF_TPI_COEF_INT, self._tpi_coef_int)
+                    self._tpi_coef_ext = learned_params.get(CONF_TPI_COEF_EXT, self._tpi_coef_ext)
+                    _LOGGER.info("%s - Restored Auto TPI parameters: %s", self, learned_params)
+                else:
+                    _LOGGER.info("%s - Auto TPI parameters found but not applied because auto_tpi_enable_update_config is False", self)
+            
+            if self._auto_tpi_manager.learning_active:
+                _LOGGER.info("%s - Auto TPI learning is active (restored from storage)", self)
 
         await super().async_added_to_hass()
 
@@ -441,6 +484,15 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
                 )
             )
 
+        if self._humidity_sensor_entity_id:
+            self.async_on_remove(
+                async_track_state_change_event(
+                    self.hass,
+                    [self._humidity_sensor_entity_id],
+                    self._async_humidity_changed,
+                )
+            )
+
         self.async_on_remove(self.remove_thermostat)
 
         # issue 428. Link to others entities will start at link
@@ -460,12 +512,19 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
 
         self.stop_recalculate_later()
 
+        if self._cycle_timer:
+            self._cycle_timer()
+            self._cycle_timer = None
+
         # stop listening for all managers
         for manager in self._managers:
             manager.stop_listening()
 
         for under in self._underlyings:
             under.remove_entity()
+
+        if self._auto_tpi_manager:
+            self.hass.async_create_task(self._auto_tpi_manager.async_save_data())
 
     def stop_recalculate_later(self):
         """Stop any scheduled call later tasks if any."""
@@ -531,6 +590,27 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
                 "cause no external sensor",
                 self,
             )
+
+        if self._humidity_sensor_entity_id:
+            humidity_state = self.hass.states.get(
+                self._humidity_sensor_entity_id
+            )
+            if humidity_state and humidity_state.state not in (
+                STATE_UNAVAILABLE,
+                STATE_UNKNOWN,
+            ):
+                _LOGGER.debug(
+                    "%s - humidity sensor have been retrieved: %.1f",
+                    self,
+                    float(humidity_state.state),
+                )
+                await self._async_update_humidity(humidity_state)
+            else:
+                _LOGGER.debug(
+                    "%s - humidity sensor have NOT been retrieved "
+                    "cause unknown or unavailable",
+                    self,
+                )
 
         # Then we:
         # - refresh all managers states,
@@ -927,6 +1007,11 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
         return self._cur_ext_temp
 
     @property
+    def current_humidity(self) -> float | None:
+        """Return the current humidity."""
+        return self._cur_humidity
+
+    @property
     def is_aux_heat(self) -> bool | None:
         """Return true if aux heater.
 
@@ -1247,6 +1332,7 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
         await self.async_set_preset_mode_internal(vtherm_preset_mode)  # overwrite_saved_preset=overwrite_saved_preset)
         await self.update_states(force=True)
 
+
     async def async_set_preset_mode_internal(self, preset_mode: VThermPreset):  # , overwrite_saved_preset=True):
         """Set new preset mode."""
         _LOGGER.info("%s - Set requested preset_mode: %s", self, preset_mode)
@@ -1328,6 +1414,30 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
     ##
     ## Calculation and utility functions
     ##
+    async def _start_tpi_cycle_timer(self, notify_manager=True):
+        """Start the TPI cycle timer if Auto TPI is active."""
+        if self._cycle_timer:
+            self._cycle_timer()
+            self._cycle_timer = None
+
+        if self._auto_tpi_manager and self._auto_tpi_manager.learning_active:
+            if notify_manager:
+                await self._auto_tpi_manager.on_thermostat_mode_changed(
+                    "HEAT", self.target_temperature
+                )
+
+            self._cycle_timer = async_call_later(
+                self.hass, self._cycle_min * 60, self._on_tpi_cycle_elapsed
+            )
+
+    async def _on_tpi_cycle_elapsed(self, _):
+        """Handle TPI cycle elapsed."""
+        if self._auto_tpi_manager:
+            await self._auto_tpi_manager.on_cycle_elapsed()
+
+        if self.vtherm_hvac_mode == VThermHvacMode_HEAT:
+            await self._start_tpi_cycle_timer(notify_manager=False)
+
     async def update_states(self, force=False):
         """Update the states of the thermostat considering the requested state and the current state"""
         changed = False
@@ -1358,6 +1468,19 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
                     # Remove eventual overpowering if we want to turn-off
                     if self.hvac_mode == VThermHvacMode_OFF and self.power_manager.is_overpowering_detected:
                         await self.power_manager.set_overpowering(False)
+
+                    # Hook for Auto TPI
+                    if self._auto_tpi_manager and self._auto_tpi_manager.learning_active:
+                        if self.vtherm_hvac_mode == VThermHvacMode_HEAT:
+                            await self._start_tpi_cycle_timer(notify_manager=True)
+                        else:
+                            # We left HEAT (or never were in it, but stopping timer is safe)
+                            if self._cycle_timer:
+                                self._cycle_timer()
+                                self._cycle_timer = None
+                            await self._auto_tpi_manager.on_thermostat_mode_changed(
+                                str(self.vtherm_hvac_mode), self.target_temperature
+                            )
 
                 if changed:
                     self.recalculate(force=force)
@@ -1410,6 +1533,85 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
 
             return True
 
+        # Feed the Auto TPI manager (Before starting the cycle to apply new coeffs if any)
+        if self._auto_tpi_manager:
+            await self._auto_tpi_manager.update(
+                self._cur_temp,
+                self._cur_ext_temp,
+                self.power_percent,
+                self.target_temperature,
+                self.hvac_action,
+                self.current_humidity,
+            )
+            
+            # Check if we have new parameters
+            new_params = await self._auto_tpi_manager.calculate()
+            if new_params:
+                _LOGGER.info("%s - Auto TPI: New parameters found: %s", self, new_params)
+                if self._auto_tpi_enable_update_config:
+                    self._tpi_coef_int = new_params.get(CONF_TPI_COEF_INT, self._tpi_coef_int)
+                    self._tpi_coef_ext = new_params.get(CONF_TPI_COEF_EXT, self._tpi_coef_ext)
+                    # self._cycle_min = new_params.get(CONF_CYCLE_MIN, self._cycle_min) # Not yet implemented
+
+                    if self._prop_algorithm:
+                        self._prop_algorithm.update_tpi_coef(self._tpi_coef_int, self._tpi_coef_ext)
+                        # Re-calculate to apply new coeffs to current cycle
+                        self._prop_algorithm.calculate(
+                            self.target_temperature,
+                            self._cur_temp,
+                            self._cur_ext_temp,
+                            self.last_temperature_slope,
+                            self.vtherm_hvac_mode or VThermHvacMode_OFF,
+                        )
+                        # Update last_power in AutoTpi to reflect the actual power we are going to use
+                        if self.power_percent is not None:
+                             self._auto_tpi_manager.state.last_power = self.power_percent
+                             await self._auto_tpi_manager.async_save_data()
+
+                else:
+                    _LOGGER.debug("%s - Auto TPI: New parameters found but update config is disabled", self)
+
+                # Check if we should notify
+                enable_notification = self._entry_infos.get(
+                    CONF_AUTO_TPI_ENABLE_NOTIFICATION, True
+                )
+                if (
+                    enable_notification
+                    and (
+                        self._tpi_coef_int != self._last_notified_tpi_coef_int
+                        or self._tpi_coef_ext != self._last_notified_tpi_coef_ext
+                    )
+                ):
+                    self._last_notified_tpi_coef_int = self._tpi_coef_int
+                    self._last_notified_tpi_coef_ext = self._tpi_coef_ext
+                    # Notify user
+                    await self.hass.services.async_call(
+                        "persistent_notification",
+                        "create",
+                        {
+                            "message": f"Auto TPI has updated parameters for {self.name}.\n"
+                            f"New parameters:\n"
+                            f"Kp: {self._tpi_coef_int}\n"
+                            f"Kext: {self._tpi_coef_ext}\n"
+                            f"Auto TPI continues learning.",
+                            "title": "Versatile Thermostat Auto TPI",
+                        },
+                    )
+
+                # Check if we should update config
+                enable_update_config = self._entry_infos.get(
+                    CONF_AUTO_TPI_ENABLE_UPDATE_CONFIG, False
+                )
+                if enable_update_config:
+                    entry = self.hass.config_entries.async_get_entry(self._unique_id)
+                    if entry:
+                        new_data = entry.data.copy()
+                        new_data[CONF_TPI_COEF_INT] = self._tpi_coef_int
+                        new_data[CONF_TPI_COEF_EXT] = self._tpi_coef_ext
+                        self.hass.config_entries.async_update_entry(
+                            entry, data=new_data
+                        )
+
         # Stop here if we are off
         if self.vtherm_hvac_mode == VThermHvacMode_OFF:
             _LOGGER.debug("%s - End of cycle (HVAC_MODE_OFF)", self)
@@ -1425,6 +1627,8 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
                     self._prop_algorithm.on_percent if self._prop_algorithm else None,
                     force,
                 )
+
+
 
         self.calculate_hvac_action()
         self.update_custom_attributes()
@@ -1617,6 +1821,11 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
                 "is_sleeping": self.is_sleeping,
                 "is_locked": self.lock_manager.is_locked,
                 "is_recalculate_scheduled": self.is_recalculate_scheduled,
+                "auto_tpi_state": (
+                    "on"
+                    if self._auto_tpi_manager and self._auto_tpi_manager.learning_active
+                    else "off"
+                ),
             },
             "configuration": {
                 "ac_mode": self._ac_mode,
@@ -1806,6 +2015,30 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
         except ValueError as ex:
             _LOGGER.error("Unable to update external temperature from sensor: %s", ex)
 
+    @callback
+    async def _async_humidity_changed(self, event: Event):
+        """Handle humidity of the sensor changes."""
+        new_state: State = event.data.get("new_state")
+        write_event_log(_LOGGER, self, f"Humidity changed to state {new_state.state if new_state else None}")
+
+        if new_state is None or new_state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
+            return
+
+        await self._async_update_humidity(new_state)
+
+    @callback
+    async def _async_update_humidity(self, state: State):
+        """Update thermostat with latest state from sensor."""
+        try:
+            cur_humidity = float(state.state)
+            if math.isnan(cur_humidity) or math.isinf(cur_humidity):
+                raise ValueError(f"Sensor has illegal state {state.state}")
+            self._cur_humidity = cur_humidity
+            _LOGGER.debug("%s - New humidity is %s", self, self._cur_humidity)
+
+        except ValueError as ex:
+            _LOGGER.error("Unable to update humidity from sensor: %s", ex)
+
     ##
     ## Services (actions)
     ##
@@ -1975,6 +2208,64 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
         if self.lock_manager.change_lock_state(False, code):
             self.update_custom_attributes()
             self.async_write_ha_state()
+
+    async def service_set_auto_tpi_mode(self, auto_tpi_mode: bool):
+        """Called by a service call:
+        service: versatile_thermostat.set_auto_tpi_mode
+        data:
+            auto_tpi_mode: True
+        target:
+            entity_id: climate.thermostat_1
+        """
+        write_event_log(_LOGGER, self, f"Calling SERVICE_SET_AUTO_TPI_MODE, auto_tpi_mode: {auto_tpi_mode}")
+        await self.async_set_auto_tpi_mode(auto_tpi_mode)
+
+    async def async_set_auto_tpi_mode(self, auto_tpi_mode: bool):
+        """Set the auto TPI mode"""
+        _LOGGER.debug("%s - async_set_auto_tpi_mode called with %s", self, auto_tpi_mode)
+        if not self._auto_tpi_manager:
+            _LOGGER.warning("%s - Auto TPI Manager not initialized", self)
+            return
+
+        if auto_tpi_mode:
+            await self._auto_tpi_manager.start_learning(
+                coef_int=self._tpi_coef_int,
+                coef_ext=self._tpi_coef_ext
+            )
+            # If we enable auto_tpi, we must disable central config for TPI
+            # to avoid overriding the calculated values
+            if self._entry_infos:
+                self._entry_infos[CONF_USE_TPI_CENTRAL_CONFIG] = False
+            
+            # Persist the change to the config entry
+            entry = self.hass.config_entries.async_get_entry(self._unique_id)
+            if entry and entry.data.get(CONF_USE_TPI_CENTRAL_CONFIG, True):
+                new_data = entry.data.copy()
+                new_data[CONF_USE_TPI_CENTRAL_CONFIG] = False
+                self.hass.config_entries.async_update_entry(entry, data=new_data)
+
+            # Start timer if we are in HEAT
+            if self.vtherm_hvac_mode == VThermHvacMode_HEAT:
+                await self._start_tpi_cycle_timer(notify_manager=True)
+        else:
+            await self._auto_tpi_manager.stop_learning()
+            # Stop timer
+            if self._cycle_timer:
+                self._cycle_timer()
+                self._cycle_timer = None
+        
+        # Fire event to notify potential listeners (like the switch if it existed, or UI)
+        self.hass.bus.async_fire(
+            EventType.AUTO_TPI_EVENT.value,
+            {
+                "entity_id": self.entity_id,
+                "auto_tpi_mode": self._auto_tpi_manager.learning_active,
+            },
+        )
+
+        # Force update of state attributes
+        self.update_custom_attributes()
+        self.async_write_ha_state()
 
     ##
     ## For testing purpose

@@ -26,6 +26,7 @@
           "motion": "Detekcia pohybu",
           "power": "Správa napájania",
           "presence": "Detekcia prítomnosti",
+          "auto_tpi_learning": "Auto TPI Learning",
           "advanced": "Pokročilé parametre",
           "finalize": "Všetko hotové",
           "lock": "Správa zámku",
@@ -55,6 +56,7 @@
           "temperature_sensor_entity_id": "ID entity snímača teploty",
           "last_seen_temperature_sensor_entity_id": "Dátum posledného zobrazenia izbovej teploty",
           "external_temperature_sensor_entity_id": "ID entity externého snímača teploty",
+          "humidity_sensor_entity_id": "Senzor vlhkosti",
           "cycle_min": "Trvanie cyklu (minúty)",
           "temp_min": "Minimálna povolená teplota",
           "temp_max": "Maximálna povolená teplota",
@@ -67,7 +69,8 @@
         "data_description": {
           "temperature_sensor_entity_id": "ID entity snímača izbovej teploty",
           "last_seen_temperature_sensor_entity_id": "Naposledy videný snímač izbovej teploty ID entity. Mal by to byť snímač dátumu a času",
-          "external_temperature_sensor_entity_id": "ID entity snímača vonkajšej teploty. Nepoužíva sa, ak je zvolená centrálna konfigurácia"
+          "external_temperature_sensor_entity_id": "ID entity snímača vonkajšej teploty. Nepoužíva sa, ak je zvolená centrálna konfigurácia",
+          "humidity_sensor_entity_id": "Entita senzoru vlhkosti. Používa sa na zlepšenie tepelného modelu Auto TPI."
         }
       },
       "features": {
@@ -221,6 +224,14 @@
           "presence_sensor_entity_id": "ID entity senzora prítomnosti"
         }
       },
+      "auto_tpi_learning": {
+        "title": "Učenie Auto TPI",
+        "description": "Nakonfigurujte, ako algoritmus Auto TPI interaguje s vašou konfiguráciou.",
+        "data": {
+          "auto_tpi_enable_update_config": "Aktualizovať konfiguráciu vypočítanými koeficientmi TPI",
+          "auto_tpi_enable_notification": "Odoslať upozornenie pri zmene koeficientov TPI"
+        }
+      },
       "advanced": {
         "title": "Pokročilé parametre",
         "description": "Konfigurácia pokročilých parametrov. Ak neviete, čo robíte, ponechajte predvolené hodnoty.\nTento parameter môže viesť k veľmi zlej regulácii teploty alebo výkonu.",
@@ -276,6 +287,7 @@
           "motion": "Detekcia pohybu",
           "power": "Správa napájania",
           "presence": "Detekcia prítomnosti",
+          "auto_tpi_learning": "Učenie Auto TPI",
           "advanced": "Pokročilé parametre",
           "finalize": "Všetko hotové",
           "lock": "Správa zámku",
@@ -305,6 +317,7 @@
           "temperature_sensor_entity_id": "ID entity snímača teploty",
           "last_seen_temperature_sensor_entity_id": "Dátum posledného zobrazenia izbovej teploty",
           "external_temperature_sensor_entity_id": "ID entity externého snímača teploty",
+          "humidity_sensor_entity_id": "Senzor vlhkosti",
           "cycle_min": "Trvanie cyklu (minúty)",
           "temp_min": "Minimálna povolená teplota",
           "temp_max": "Maximálna povolená teplota",
@@ -317,7 +330,8 @@
         "data_description": {
           "temperature_sensor_entity_id": "ID entity snímača izbovej teploty",
           "last_seen_temperature_sensor_entity_id": "Naposledy videný snímač izbovej teploty ID entity. Mal by to byť snímač dátumu a času",
-          "external_temperature_sensor_entity_id": "ID entity snímača vonkajšej teploty. Nepoužíva sa, ak je zvolená centrálna konfigurácia"
+          "external_temperature_sensor_entity_id": "ID entity snímača vonkajšej teploty. Nepoužíva sa, ak je zvolená centrálna konfigurácia",
+          "humidity_sensor_entity_id": "ID entity senzoru vlhkosti. Umožňuje zlepšiť tepelný model pre automatické nastavenie koeficientov TPI."
         }
       },
       "features": {
@@ -469,6 +483,14 @@
         },
         "data_description": {
           "presence_sensor_entity_id": "ID entity senzora prítomnosti"
+        }
+      },
+      "auto_tpi_learning": {
+        "title": "Učenie Auto TPI - {name}",
+        "description": "Nakonfigurujte, ako algoritmus Auto TPI interaguje s vašou konfiguráciou.",
+        "data": {
+          "auto_tpi_enable_update_config": "Aktualizovať konfiguráciu vypočítanými koeficientmi TPI",
+          "auto_tpi_enable_notification": "Odoslať upozornenie pri zmene koeficientov TPI"
         }
       },
       "advanced": {

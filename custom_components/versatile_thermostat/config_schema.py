@@ -57,6 +57,9 @@ STEP_MAIN_DATA_SCHEMA = vol.Schema(  # pylint: disable=invalid-name
         vol.Optional(CONF_LAST_SEEN_TEMP_SENSOR): selector.EntitySelector(
             selector.EntitySelectorConfig(domain=[SENSOR_DOMAIN, INPUT_DATETIME_DOMAIN, NUMBER_DOMAIN]),
         ),
+        vol.Optional(CONF_HUMIDITY_SENSOR): selector.EntitySelector(
+            selector.EntitySelectorConfig(domain=[SENSOR_DOMAIN, INPUT_NUMBER_DOMAIN]),
+        ),
         vol.Required(CONF_CYCLE_MIN, default=5): selector.NumberSelector(selector.NumberSelectorConfig(min=1, max=1000, step=1, mode=selector.NumberSelectorMode.BOX)),
         vol.Optional(CONF_DEVICE_POWER, default="1"): vol.Coerce(float),
         vol.Required(CONF_USE_MAIN_CENTRAL_CONFIG, default=True): cv.boolean,
@@ -413,5 +416,12 @@ STEP_CENTRAL_LOCK_DATA_SCHEMA = vol.Schema(  # pylint: disable=invalid-name
         vol.Optional(CONF_LOCK_CODE): cv.string,
         vol.Optional(CONF_LOCK_USERS, default=True): cv.boolean,
         vol.Optional(CONF_LOCK_AUTOMATIONS, default=True): cv.boolean,
+    }
+)
+
+STEP_AUTO_TPI_LEARNING_DATA_SCHEMA = vol.Schema(
+    {
+        vol.Optional(CONF_AUTO_TPI_ENABLE_UPDATE_CONFIG, default=False): cv.boolean,
+        vol.Optional(CONF_AUTO_TPI_ENABLE_NOTIFICATION, default=True): cv.boolean,
     }
 )

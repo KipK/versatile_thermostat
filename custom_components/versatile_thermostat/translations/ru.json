@@ -30,6 +30,7 @@
           "auto_start_stop": "Авто старт и стоп",
           "valve_regulation": "Конфигурация регулировки клапана",
           "lock": "Управление блокировкой",
+          "auto_tpi_learning": "Auto TPI Learning",
           "finalize": "Все готово",
           "configuration_not_complete": "Конфигурация не завершена"
         }
@@ -56,6 +57,7 @@
           "temperature_sensor_entity_id": "Температура в помещении",
           "last_seen_temperature_sensor_entity_id": "Время последнего измерения температуры",
           "external_temperature_sensor_entity_id": "ID датчика уличной температуры",
+          "humidity_sensor_entity_id": "Датчик влажности",
           "cycle_min": "Длительность цикла (минуты)",
           "temp_min": "Минимальная допустимая температура",
           "temp_max": "Максимальная допустимая температура",
@@ -68,7 +70,8 @@
         "data_description": {
           "temperature_sensor_entity_id": "ID датчика температуры в помещении",
           "last_seen_temperature_sensor_entity_id": "ID датчика времени последнего измерения температуры. Должен быть датчиком datetime",
-          "external_temperature_sensor_entity_id": "ID датчика уличной температуры. Не используется, если выбрана центральная конфигурация"
+          "external_temperature_sensor_entity_id": "ID датчика уличной температуры. Не используется, если выбрана центральная конфигурация",
+          "humidity_sensor_entity_id": "ID датчика влажности. Позволяет улучшить тепловую модель для автоматической настройки коэффициентов TPI."
         }
       },
       "features": {
@@ -261,6 +264,14 @@
           "proportional_function": "Алгоритм для использования (TPI пока единственный)",
           "min_opening_degrees": "Минимальное значение степени открытия для каждого управляющего устройства, через запятую. По умолчанию 0. Пример: 20, 25, 30"
         }
+      },
+      "auto_tpi_learning": {
+        "title": "Обучение Auto TPI",
+        "description": "Настройте взаимодействие алгоритма Auto TPI с вашей конфигурацией.",
+        "data": {
+          "auto_tpi_enable_update_config": "Обновлять конфигурацию рассчитанными коэффициентами TPI",
+          "auto_tpi_enable_notification": "Отправлять уведомление при изменении коэффициентов TPI"
+        }
       }
     },
     "error": {
@@ -303,6 +314,7 @@
           "auto_start_stop": "Авто старт и стоп",
           "valve_regulation": "Конфигурация регулировки клапана",
           "lock": "Управление блокировкой",
+          "auto_tpi_learning": "Обучение Auto TPI",
           "finalize": "Все готово",
           "configuration_not_complete": "Конфигурация не завершена"
         }
@@ -329,6 +341,7 @@
           "temperature_sensor_entity_id": "Температура в помещении",
           "last_seen_temperature_sensor_entity_id": "Время последнего измерения температуры",
           "external_temperature_sensor_entity_id": "ID датчика уличной температуры",
+          "humidity_sensor_entity_id": "Датчик влажности",
           "cycle_min": "Длительность цикла (минуты)",
           "temp_min": "Минимальная допустимая температура",
           "temp_max": "Максимальная допустимая температура",
@@ -341,7 +354,8 @@
         "data_description": {
           "temperature_sensor_entity_id": "ID датчика температуры в помещении",
           "last_seen_temperature_sensor_entity_id": "ID датчика времени последнего измерения температуры. Должен быть датчиком datetime",
-          "external_temperature_sensor_entity_id": "ID датчика уличной температуры. Не используется, если выбрана центральная конфигурация"
+          "external_temperature_sensor_entity_id": "ID датчика уличной температуры. Не используется, если выбрана центральная конфигурация",
+          "humidity_sensor_entity_id": "ID датчика влажности. Позволяет улучшить тепловую модель для автоматической настройки коэффициентов TPI."
         }
       },
       "features": {
@@ -536,6 +550,14 @@
           "closing_degree_entity_ids": "Список сущностей 'степени закрытия'. Установите, если ваш TRV имеет такую сущность для лучшего регулирования. Должна быть одна для каждой управляющей климатической сущности",
           "proportional_function": "Алгоритм для использования (TPI пока единственный)",
           "min_opening_degrees": "Минимальное значение степени открытия для каждого управляющего устройства, через запятую. По умолчанию 0. Пример: 20, 25, 30"
+        }
+      },
+      "auto_tpi_learning": {
+        "title": "Обучение Auto TPI - {name}",
+        "description": "Настройте взаимодействие алгоритма Auto TPI с вашей конфигурацией.",
+        "data": {
+          "auto_tpi_enable_update_config": "Обновлять конфигурацию рассчитанными коэффициентами TPI",
+          "auto_tpi_enable_notification": "Отправлять уведомление при изменении коэффициентов TPI"
         }
       }
     },
