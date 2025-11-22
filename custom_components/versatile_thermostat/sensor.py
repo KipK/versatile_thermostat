@@ -51,6 +51,8 @@ from .const import (
     CONF_USE_CENTRAL_BOILER_FEATURE,
     CONF_AUTO_REGULATION_VALVE,
     CONF_AUTO_REGULATION_MODE,
+    CONF_TPI_COEF_INT,
+    CONF_TPI_COEF_EXT,
     overrides,
 )
 
@@ -116,6 +118,12 @@ async def async_setup_entry(
             entities.append(
                 RegulatedTemperatureSensor(hass, unique_id, name, entry.data)
             )
+
+        # Add Auto TPI Sensor if Auto TPI is available (which is generally true for all types inheriting from BaseThermostat)
+        # But we might want to check if it makes sense (e.g. only if TPI is used?)
+        # For now, BaseThermostat always initializes it, so we can add it.
+        # Ideally, we should check if TPI is enabled or capable.
+        entities.append(AutoTpiSensor(hass, unique_id, name, entry.data))
 
     if entities:
         async_add_entities(entities, True)
@@ -288,6 +296,49 @@ class OnPercentSensor(VersatileThermostatBaseEntity, SensorEntity):
         """Return the suggested number of decimal digits for display."""
         return 1
 
+
+class AutoTpiSensor(VersatileThermostatBaseEntity, SensorEntity):
+    """Representation of the Auto TPI Learning state"""
+
+    def __init__(self, hass: HomeAssistant, unique_id, name, entry_infos) -> None:
+        """Initialize the Auto TPI sensor"""
+        super().__init__(hass, unique_id, entry_infos.get(CONF_NAME))
+        self._attr_name = "Auto TPI Learning State"
+        self._attr_unique_id = f"{self._device_name}_auto_tpi_learning"
+        self._attr_icon = "mdi:brain"
+
+    @callback
+    async def async_my_climate_changed(self, event: Event = None):
+        """Called when my climate have change"""
+        
+        if not hasattr(self.my_climate, "_auto_tpi_manager") or not self.my_climate._auto_tpi_manager:
+             self._attr_native_value = "disabled"
+             self.async_write_ha_state()
+             return
+
+        manager = self.my_climate._auto_tpi_manager
+        
+        # Determine state
+        if manager.learning_active:
+            self._attr_native_value = "Active"
+        else:
+            self._attr_native_value = "Off" # Or "Completed" / "Idle" depending on context, but "Off" implies not learning.
+            
+        # Update attributes
+        self._attr_extra_state_attributes = {
+            "progression": manager.progression,
+            "data_points": manager.data_points,
+            "min_data_points": manager.min_data_points,
+        }
+        
+        calculated = manager.get_calculated_params()
+        if calculated:
+            self._attr_extra_state_attributes.update({
+                "calculated_coef_int": calculated.get(CONF_TPI_COEF_INT),
+                "calculated_coef_ext": calculated.get(CONF_TPI_COEF_EXT),
+            })
+
+        self.async_write_ha_state()
 
 class ValveOpenPercentSensor(VersatileThermostatBaseEntity, SensorEntity):
     """Representation of a on percent sensor which exposes the on_percent in a cycle"""

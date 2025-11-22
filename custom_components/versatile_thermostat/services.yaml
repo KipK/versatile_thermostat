@@ -139,3 +139,21 @@ set_hvac_mode_sleep:
     target:
         entity:
             integration: versatile_thermostat
+
+set_auto_tpi_mode:
+    name: Set Auto TPI mode
+    description: Enable or disable the Auto TPI learning mode.
+    target:
+        entity:
+            integration: versatile_thermostat
+            domain:
+                - climate
+    fields:
+        auto_tpi_mode:
+            name: Auto TPI mode
+            description: Enable (true) or disable (false) the Auto TPI learning
+            required: true
+            advanced: false
+            default: true
+            selector:
+                boolean:
