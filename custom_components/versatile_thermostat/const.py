@@ -61,6 +61,7 @@ CONF_HEATER_KEEP_ALIVE = "heater_keep_alive"
 CONF_TEMP_SENSOR = "temperature_sensor_entity_id"
 CONF_LAST_SEEN_TEMP_SENSOR = "last_seen_temperature_sensor_entity_id"
 CONF_EXTERNAL_TEMP_SENSOR = "external_temperature_sensor_entity_id"
+CONF_HUMIDITY_SENSOR = "humidity_sensor_entity_id"
 CONF_POWER_SENSOR = "power_sensor_entity_id"
 CONF_MAX_POWER_SENSOR = "max_power_sensor_entity_id"
 CONF_WINDOW_SENSOR = "window_sensor_entity_id"
@@ -144,6 +145,11 @@ CONF_VALVE = "valve_entity_id"
 CONF_VALVE_2 = "valve_entity2_id"
 CONF_VALVE_3 = "valve_entity3_id"
 CONF_VALVE_4 = "valve_entity4_id"
+
+CONF_AUTO_TPI_MODE = "auto_tpi_mode"
+CONF_AUTO_TPI_ENABLE_UPDATE_CONFIG = "auto_tpi_enable_update_config"
+CONF_AUTO_TPI_ENABLE_NOTIFICATION = "auto_tpi_enable_notification"
+
 
 # Global params into configuration.yaml
 CONF_SHORT_EMA_PARAMS = "short_ema_params"
@@ -272,6 +278,7 @@ ALL_CONF = (
         CONF_HEATER_KEEP_ALIVE,
         CONF_TEMP_SENSOR,
         CONF_EXTERNAL_TEMP_SENSOR,
+        CONF_HUMIDITY_SENSOR,
         CONF_POWER_SENSOR,
         CONF_MAX_POWER_SENSOR,
         CONF_WINDOW_SENSOR,
@@ -389,6 +396,8 @@ SERVICE_SET_WINDOW_BYPASS = "set_window_bypass"
 SERVICE_SET_AUTO_REGULATION_MODE = "set_auto_regulation_mode"
 SERVICE_SET_AUTO_FAN_MODE = "set_auto_fan_mode"
 SERVICE_SET_HVAC_MODE_SLEEP = "set_hvac_mode_sleep"
+SERVICE_SET_AUTO_TPI_MODE = "set_auto_tpi_mode"
+SERVICE_RESET_AUTO_TPI_DATA = "reset_auto_tpi_data"
 
 DEFAULT_SAFETY_MIN_ON_PERCENT = 0.5
 DEFAULT_SAFETY_DEFAULT_ON_PERCENT = 0.1
@@ -509,6 +518,7 @@ class EventType(Enum):
     PRESET_EVENT = "versatile_thermostat_preset_event"
     WINDOW_AUTO_EVENT = "versatile_thermostat_window_auto_event"
     AUTO_START_STOP_EVENT = "versatile_thermostat_auto_start_stop_event"
+    AUTO_TPI_EVENT = "versatile_thermostat_auto_tpi_event"
 
 
 def send_vtherm_event(hass, event_type: EventType, entity, data: dict):

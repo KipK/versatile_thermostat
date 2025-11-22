@@ -29,6 +29,7 @@
           "advanced": "Erweiterte Einstellungen",
           "auto_start_stop": "Auto Start und Stop",
           "valve_regulation": "Konfiguration Ventilsteuerung",
+          "auto_tpi_learning": "Auto TPI Lernen",
           "finalize": "Alles erledigt",
           "configuration_not_complete": "Konfiguration unvollständig"
         }
@@ -42,6 +43,7 @@
           "temperature_sensor_entity_id": "Raumtemperatursensor",
           "last_seen_temperature_sensor_entity_id": "Letzte Sichtung des Temperatursensors",
           "external_temperature_sensor_entity_id": "Entity des Außentemperatursensors",
+          "humidity_sensor_entity_id": "Feuchtigkeitssensor",
           "cycle_min": "Zyklusdauer (Minuten)",
           "temp_min": "Zulässige Mindesttemperatur",
           "temp_max": "Zulässige Höchsttemperatur",
@@ -54,7 +56,8 @@
         "data_description": {
           "temperature_sensor_entity_id": "Entity-ID des Raumtemperatursensor",
           "last_seen_temperature_sensor_entity_id": "Entity-ID des Sensors, der das Datum und die Uhrzeit der letzten Datenübermittlung vom Temperatursensors angibt. Der Status muss im Format Datum Uhrzeit angegeben werden (z. B.: 2024-03-31T17:07:03+00:00).",
-          "external_temperature_sensor_entity_id": "Außentemperatursensor Entity-ID. Wird nicht verwendet, wenn zentrale Konfiguration gewählt wurde."
+          "external_temperature_sensor_entity_id": "Außentemperatursensor Entity-ID. Wird nicht verwendet, wenn zentrale Konfiguration gewählt wurde.",
+          "humidity_sensor_entity_id": "Feuchtigkeitssensor-Entity-ID. Ermöglicht die Verbesserung des thermischen Modells zur automatischen Einstellung der TPI-Koeffizienten."
         }
       },
       "features": {
@@ -247,6 +250,14 @@
           "proportional_function": "Zu verwendender Algorithmus (TPI ist derzeit der einzige)",
           "min_opening_degrees": "Eine kommaseparierte Liste der Mindestöffnung. Standardwert ist 0. Beispiel: 20, 25, 30"
         }
+      },
+      "auto_tpi_learning": {
+        "title": "Auto TPI Lernen",
+        "description": "Konfigurieren Sie, wie der Auto TPI-Algorithmus mit Ihrer Konfiguration interagiert.",
+        "data": {
+          "auto_tpi_enable_update_config": "Konfiguration mit berechneten TPI-Koeffizienten aktualisieren",
+          "auto_tpi_enable_notification": "Benachrichtigung senden, wenn sich die TPI-Koeffizienten ändern"
+        }
       }
     },
     "error": {
@@ -289,10 +300,11 @@
           "advanced": "Erweiterte Einstellungen",
           "auto_start_stop": "Auto Start und Stopp",
           "valve_regulation": "Konfiguration der Ventilsteuerung",
+          "auto_tpi_learning": "Auto TPI Lernen",
           "finalize": "Alles erledigt",
           "configuration_not_complete": "Konfiguration unvollständig"
         }
-     },
+      },
       "main": {
         "title": "Attribute - {name}",
         "description": "Wichtigste erforderliche Attribute&nbsp;[![?](https://img.icons8.com/color/18/help.png)](https://github.com/jmcollin78/versatile_thermostat/blob/main/documentation/de/base-attributes.md)",
@@ -302,6 +314,7 @@
           "temperature_sensor_entity_id": "Temperatursensor",
           "last_seen_temperature_sensor_entity_id": "Temperatursensor zuletzt gesehen",
           "external_temperature_sensor_entity_id": "Aussentemperatursensor",
+          "humidity_sensor_entity_id": "Feuchtigkeitssensor",
           "cycle_min": "Zyklusdauer (Minuten)",
           "temp_min": "Zulässige Mindesttemperatur",
           "temp_max": "Zulässige Höchsttemperatur",
@@ -314,7 +327,8 @@
         "data_description": {
           "temperature_sensor_entity_id": "Raumtemperatursensor Entity-ID",
           "last_seen_temperature_sensor_entity_id": "Entitäts-ID des Sensors, die das Datum und die Uhrzeit der letzten Meldung des Temperatursensors angibt. Der Status muss im Format Datum Uhrzeit angegeben werden (z. B.: 2024-03-31T17:07:03+00:00).",
-          "external_temperature_sensor_entity_id": "Entity-ID des Außentemperatursensors. Wird nicht verwendet, wenn eine zentrale Konfiguration definiert ist."
+          "external_temperature_sensor_entity_id": "Entity-ID des Außentemperatursensors. Wird nicht verwendet, wenn eine zentrale Konfiguration definiert ist.",
+          "humidity_sensor_entity_id": "Feuchtigkeitssensor-Entity-ID. Ermöglicht die Verbesserung des thermischen Modells zur automatischen Einstellung der TPI-Koeffizienten."
         }
       },
       "features": {
@@ -510,6 +524,14 @@
           "closing_degree_entity_ids": "Liste der 'Ventil schliessen'-Entities. Wenn das TRV über diese Funktion verfügen, bitte dieses für eine bessere Regelung konfigurieren. Es muss eine pro zugeordneter Klima-Entity vorhanden sein",
           "proportional_function": "Zu verwendender Algorithmus (derzeit ist nur TPI verfügbar)",
           "min_opening_degrees": "Eine kommaseparierte Liste der Mindestöffnung. Standardwert ist 0. Beispiel: 20, 25, 30"
+        }
+      },
+      "auto_tpi_learning": {
+        "title": "Auto TPI Lernen - {name}",
+        "description": "Konfigurieren Sie, wie der Auto TPI-Algorithmus mit Ihrer Konfiguration interagiert.",
+        "data": {
+          "auto_tpi_enable_update_config": "Konfiguration mit berechneten TPI-Koeffizienten aktualisieren",
+          "auto_tpi_enable_notification": "Benachrichtigung senden, wenn sich die TPI-Koeffizienten ändern"
         }
       }
     },

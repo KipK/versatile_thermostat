@@ -187,6 +187,7 @@ class VersatileThermostatBaseConfigFlow(FlowHandler):
             CONF_UNDERLYING_LIST,
             CONF_TEMP_SENSOR,
             CONF_EXTERNAL_TEMP_SENSOR,
+            CONF_HUMIDITY_SENSOR,
             CONF_WINDOW_SENSOR,
             CONF_MOTION_SENSOR,
             CONF_POWER_SENSOR,
@@ -487,6 +488,7 @@ class VersatileThermostatBaseConfigFlow(FlowHandler):
             or self.is_valve_regulation_selected(self._infos)
         ):
             menu_options.append("tpi")
+            menu_options.append("auto_tpi_learning")
 
         if self._infos.get(CONF_THERMOSTAT_TYPE) in [
             CONF_THERMOSTAT_SWITCH,
@@ -701,6 +703,22 @@ class VersatileThermostatBaseConfigFlow(FlowHandler):
         next_step = self.async_step_menu
 
         return await self.generic_step("tpi", schema, user_input, next_step)
+
+    async def async_step_auto_tpi_learning(
+        self, user_input: dict | None = None
+    ) -> FlowResult:
+        """Handle the Auto TPI Learning flow steps"""
+        _LOGGER.debug(
+            "Into ConfigFlow.async_step_auto_tpi_learning user_input=%s", user_input
+        )
+
+        schema = STEP_AUTO_TPI_LEARNING_DATA_SCHEMA
+        self._infos[COMES_FROM] = None
+        next_step = self.async_step_menu
+
+        return await self.generic_step(
+            "auto_tpi_learning", schema, user_input, next_step
+        )
 
     async def async_step_presets(self, user_input: dict | None = None) -> FlowResult:
         """Handle the presets flow steps"""
