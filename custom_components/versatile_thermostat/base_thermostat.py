@@ -191,8 +191,6 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
         # Auto start/stop is only for over_climate
         self._auto_start_stop_manager: FeatureAutoStartStopManager | None = None
 
-        # self._auto_tpi_manager = AutoTpiManager(hass, unique_id, self._cycle_min)
-
         self.register_manager(self._presence_manager)
         self.register_manager(self._power_manager)
         self.register_manager(self._motion_manager)

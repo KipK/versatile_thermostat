@@ -119,10 +119,7 @@ async def async_setup_entry(
                 RegulatedTemperatureSensor(hass, unique_id, name, entry.data)
             )
 
-        # Add Auto TPI Sensor if Auto TPI is available (which is generally true for all types inheriting from BaseThermostat)
-        # But we might want to check if it makes sense (e.g. only if TPI is used?)
-        # For now, BaseThermostat always initializes it, so we can add it.
-        # Ideally, we should check if TPI is enabled or capable.
+        # Add Auto TPI Sensor 
         entities.append(AutoTpiSensor(hass, unique_id, name, entry.data))
 
     if entities:
@@ -326,7 +323,7 @@ class AutoTpiSensor(VersatileThermostatBaseEntity, SensorEntity):
             
         # Update attributes
         self._attr_extra_state_attributes = {
-            "progression": manager.progression,
+            "progression": f"{manager.progression}%",
             "data_points": manager.data_points,
             "min_data_points": manager.min_data_points,
         }
