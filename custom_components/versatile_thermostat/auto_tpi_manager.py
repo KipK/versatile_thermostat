@@ -94,7 +94,7 @@ class AutoTpiManager:
         # Cycle detection
         self._heating_cycles = []
         self._current_cycle_start = None
-        self._last_power_state = 0.0
+        self._last_hvac_action = HVACAction.OFF
 
     @property
     def learning_active(self) -> bool:
@@ -148,7 +148,7 @@ class AutoTpiManager:
 
     async def start_learning(self):
         """Start learning."""
-        _LOGGER.info("%s - Starting Enhanced Auto TPI learning", self._unique_id)
+        _LOGGER.info("%s - Auto TPI: Starting Enhanced Auto TPI learning", self._unique_id)
         self._learning_active = True
         self._data.clear()
         self._heating_cycles.clear()
@@ -156,7 +156,7 @@ class AutoTpiManager:
 
     async def stop_learning(self):
         """Stop learning."""
-        _LOGGER.info("%s - Stopping Auto TPI learning", self._unique_id)
+        _LOGGER.info("%s - Auto TPI: Stopping Auto TPI learning", self._unique_id)
         self._learning_active = False
         await self.async_save_data()
 
@@ -174,15 +174,16 @@ class AutoTpiManager:
         return point.room_temp < lower or point.room_temp > upper
 
     def _detect_heating_cycle(self, hvac_action: str):
-        """Detect complete heating cycles."""
+        """Detect complete heating cycles based on HVAC action transitions."""
         is_heating = hvac_action == HVACAction.HEATING
         
-        # Cycle start
-        if is_heating and self._last_power_state < 10.0:
+        # Cycle start: Transition from IDLE/OFF to HEATING
+        if is_heating and self._last_hvac_action != HVACAction.HEATING:
             self._current_cycle_start = datetime.now()
+            _LOGGER.info("%s - Auto TPI: Heating cycle started", self._unique_id)
         
-        # Cycle end
-        elif not is_heating and self._last_power_state > 10.0:
+        # Cycle end: Transition from HEATING to IDLE/OFF
+        elif not is_heating and self._last_hvac_action == HVACAction.HEATING:
             if self._current_cycle_start:
                 cycle_duration = (datetime.now() - self._current_cycle_start).total_seconds()
                 if 60 < cycle_duration < 3600:  # Between 1min and 1h
@@ -190,11 +191,14 @@ class AutoTpiManager:
                         'start': self._current_cycle_start.isoformat(),
                         'duration': cycle_duration
                     })
-                    _LOGGER.debug("%s - Auto TPI: Heating cycle detected: %.1fs", 
+                    _LOGGER.info("%s - Auto TPI: Heating cycle detected: %.1fs", 
+                                self._unique_id, cycle_duration)
+                else:
+                    _LOGGER.info("%s - Auto TPI: Cycle ignored (duration %.1fs out of range)", 
                                 self._unique_id, cycle_duration)
             self._current_cycle_start = None
         
-        self._last_power_state = power_percent
+        self._last_hvac_action = hvac_action
 
     async def update(self, room_temp: float, ext_temp: float, 
                     power_percent: float, target_temp: float, hvac_action: str):
@@ -249,7 +253,7 @@ class AutoTpiManager:
         
         await self.async_save_data()
         
-        _LOGGER.debug("%s - Data point added. Total: %d, Cycles: %d", 
+        _LOGGER.info("%s - Auto TPI: Data point added. Total: %d, Cycles: %d", 
                      self._unique_id, len(self._data), len(self._heating_cycles))
 
     def _compute_derivatives(self):
@@ -280,12 +284,12 @@ class AutoTpiManager:
         
         # Pre-checks
         if len(self._data) < MIN_DATA_POINTS:
-            _LOGGER.debug("%s - Insufficient data (%d/%d)", 
+            _LOGGER.info("%s - Auto TPI: Insufficient data (%d/%d)", 
                          self._unique_id, len(self._data), MIN_DATA_POINTS)
             return None
         
         if len(self._heating_cycles) < MIN_HEATING_CYCLES:
-            _LOGGER.debug("%s - Auto TPI: Insufficient heating cycles (%d/%d)", 
+            _LOGGER.info("%s - Auto TPI: Insufficient heating cycles (%d/%d)", 
                          self._unique_id, len(self._heating_cycles), MIN_HEATING_CYCLES)
             return None
 
@@ -378,11 +382,12 @@ class AutoTpiManager:
             # Optimized TPI coefficients calculation
             # k_ext: thermal loss compensation
             # The higher alpha is, the faster the losses are
-            k_ext = np.clip(alpha / (alpha + beta), 0.01, 0.90)
+            # Improved formula: alpha / beta represents the power % needed to compensate 1°C diff
+            k_ext = np.clip(alpha / beta, 0.01, 0.90)
             
             # k_int: reactivity to internal deviations
             # Based on characteristic time and efficiency
-            desired_response_time = 1800  # 30 min target
+            desired_response_time = 1800 / 3600  # 30 min target in hours
             k_int = np.clip(1.0 / (beta * desired_response_time), 0.01, 0.40)
             
             self._calculated_params = {
