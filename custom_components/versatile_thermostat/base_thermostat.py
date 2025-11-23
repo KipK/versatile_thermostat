@@ -1420,6 +1420,7 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
                 self._cur_ext_temp,
                 self.power_percent,
                 self.target_temperature,
+                self.hvac_action,
             )
             
             # Check if we have new parameters

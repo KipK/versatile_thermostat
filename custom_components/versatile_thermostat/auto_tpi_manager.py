@@ -16,6 +16,8 @@ from .const import (
     CONF_TPI_COEF_EXT,
 )
 
+from homeassistant.components.climate.const import HVACAction
+
 _LOGGER = logging.getLogger(__name__)
 
 STORAGE_VERSION = 2
@@ -171,9 +173,9 @@ class AutoTpiManager:
         
         return point.room_temp < lower or point.room_temp > upper
 
-    def _detect_heating_cycle(self, power_percent: float):
+    def _detect_heating_cycle(self, hvac_action: str):
         """Detect complete heating cycles."""
-        is_heating = power_percent > 10.0
+        is_heating = hvac_action == HVACAction.HEATING
         
         # Cycle start
         if is_heating and self._last_power_state < 10.0:
@@ -195,7 +197,7 @@ class AutoTpiManager:
         self._last_power_state = power_percent
 
     async def update(self, room_temp: float, ext_temp: float, 
-                    power_percent: float, target_temp: float):
+                    power_percent: float, target_temp: float, hvac_action: str):
         """Add a data point with validation."""
         if not self._learning_active:
             return
@@ -216,7 +218,7 @@ class AutoTpiManager:
             return
 
         # Cycle detection
-        self._detect_heating_cycle(power_percent)
+        self._detect_heating_cycle(hvac_action)
 
         # Point creation
         point = DataPoint(
