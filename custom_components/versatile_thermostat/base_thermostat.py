@@ -497,16 +497,12 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
         # Listen to underlying entity state changes to detect HVAC action transitions
         # and notify the AutoTpiManager immediately (bypassing data-point throttling).
         for under in self._underlyings:
+            # Ask the underlying to register a state-change listener when ready.
             try:
-                if under.entity_id:
-                    self.async_on_remove(
-                        async_track_state_change_event(
-                            self.hass,
-                            [under.entity_id],
-                            self._async_underlying_state_changed,
-                        )
-                    )
-            except Exception:  # Defensive: some underlyings may not have entity_id at init
+                cancel = under.register_state_listener(self._async_underlying_state_changed)
+                if cancel:
+                    self.async_on_remove(cancel)
+            except Exception:
                 _LOGGER.debug("%s - Could not register listener for underlying %s", self, under)
 
         # init presets. Should be after underlyings init because for over_climate it uses the hvac_modes
