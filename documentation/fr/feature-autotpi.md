@@ -55,3 +55,15 @@ L'état de l'apprentissage est visible via les attributs du thermostat :
 *   `learning_quality` : insufficient, poor, fair, good, excellent.
 *   `confidence` : Pourcentage de confiance dans le modèle ($R^2 \times 100$).
 *   `time_constant` : Constante de temps thermique de la pièce (inertie).
+
+## Philosophie de l'algorithme (FAQ)
+
+**Pourquoi ne pas utiliser les coefficients actuels pour calculer les nouveaux ?**
+
+L'algorithme utilise une approche d'**Identification de Modèle Physique** et non une approche itérative (type "essai-erreur" ou "descente de gradient").
+
+1.  **Indépendance de la Physique** : Les caractéristiques thermiques de votre pièce (isolation $\alpha$, puissance $\beta$) sont des constantes physiques. Elles ne dépendent pas des réglages du thermostat. Que votre thermostat soit mal réglé (oscillations) ou bien réglé, la relation physique `Puissance -> Variation de Température` reste la même.
+2.  **Rapidité de convergence** : En identifiant directement la physique de la pièce, on peut calculer mathématiquement les coefficients "idéaux" en une seule fois (dès qu'on a assez de données). Une approche itérative qui essaierait d'ajuster petit à petit les coefficients prendrait des semaines (car chaque cycle de chauffage est lent) pour converger.
+3.  **Rôle des anciens coefficients** : Les anciens coefficients ont quand même un impact : ils déterminent la `Puissance` appliquée pendant l'apprentissage. Si les anciens coefficients sont "mauvais", ils vont provoquer des variations de température (oscillations). Paradoxalement, ces variations aident l'algorithme car elles "excitent" le système et permettent de mieux identifier ses réactions. Un système parfaitement stable est parfois plus difficile à identifier (moins de données dynamiques).
+
+L'algorithme ne cherche donc pas à "corriger" les anciens coefficients, mais à "comprendre" la pièce pour proposer directement les bons réglages.
