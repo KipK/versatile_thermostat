@@ -494,6 +494,21 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
         # Initialize all UnderlyingEntities
         self.init_underlyings()
 
+        # Listen to underlying entity state changes to detect HVAC action transitions
+        # and notify the AutoTpiManager immediately (bypassing data-point throttling).
+        for under in self._underlyings:
+            try:
+                if under.entity_id:
+                    self.async_on_remove(
+                        async_track_state_change_event(
+                            self.hass,
+                            [under.entity_id],
+                            self._async_underlying_state_changed,
+                        )
+                    )
+            except Exception:  # Defensive: some underlyings may not have entity_id at init
+                _LOGGER.debug("%s - Could not register listener for underlying %s", self, under)
+
         # init presets. Should be after underlyings init because for over_climate it uses the hvac_modes
         await self.init_presets(central_configuration)
 
@@ -1730,6 +1745,30 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
         await self.async_control_heating(force=False)
 
         return dearm_window_auto
+
+    @callback
+    async def _async_underlying_state_changed(self, event: Event):
+        """Handle underlying entity state changes to detect HVAC action transitions.
+
+        This callback looks up the corresponding UnderlyingEntity instance and
+        notifies the AutoTpiManager immediately so heating start/stop cycles
+        are captured even if data-point updates are throttled.
+        """
+        entity_id: str = event.data.get("entity_id")
+        if not entity_id:
+            return
+
+        # Find the underlying matching this entity id
+        under = next((u for u in self._underlyings if u.entity_id == entity_id), None)
+        if under is None:
+            return
+
+        # Notify AutoTpiManager (it will check learning_active itself)
+        try:
+            if self._auto_tpi_manager:
+                await self._auto_tpi_manager.hvac_action_changed(under.hvac_action)
+        except Exception:  # defensive
+            _LOGGER.exception("%s - Error notifying AutoTpiManager of HVAC action change", self)
 
     @callback
     async def _async_last_seen_temperature_changed(self, event: Event):

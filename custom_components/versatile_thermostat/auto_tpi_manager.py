@@ -208,6 +208,10 @@ class AutoTpiManager:
 
         now = datetime.now()
         
+        # Cycle detection: run before adaptive throttling so transitions are
+        # captured even when data-point updates are being rate-limited.
+        self._detect_heating_cycle(hvac_action)
+
         # Adaptive throttling
         min_interval = self._cycle_min * 60 * 0.5  # 50% of cycle
         if self._last_update and (now - self._last_update).total_seconds() < min_interval:
@@ -255,6 +259,22 @@ class AutoTpiManager:
         
         _LOGGER.info("%s - Auto TPI: Data point added. Total: %d, Cycles: %d", 
                      self._unique_id, len(self._data), len(self._heating_cycles))
+
+    async def hvac_action_changed(self, hvac_action: str):
+        """Notify manager immediately about an HVAC action change.
+
+        This lets external callers notify the manager of HVAC transitions
+        (e.g. from a state listener) so cycle detection runs immediately
+        without waiting for `update` or being subject to throttling.
+        """
+        if not self._learning_active:
+            return
+
+        # Detect cycle transitions immediately
+        self._detect_heating_cycle(hvac_action)
+
+        # Persist state so cycles are not lost
+        await self.async_save_data()
 
     def _compute_derivatives(self):
         """Calculate smoothed temperature derivatives."""
