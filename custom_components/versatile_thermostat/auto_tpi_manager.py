@@ -1,4 +1,4 @@
-"""Enhanced Auto TPI Manager with robust learning algorithm."""
+"""Auto TPI Manager with robust learning algorithm."""
 
 import logging
 import json
