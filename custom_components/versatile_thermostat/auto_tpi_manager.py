@@ -394,27 +394,25 @@ class AutoTpiManager:
             
             Y = np.array(y_list)
             X = np.column_stack([x_loss_list, x_power_list])
-            
-            # Weighted regression (recent cycles more important)
-            # Use end_time of cycles for weighting
-            timestamps = np.array([c.end_time for c in self._completed_tpi_cycles if c.data_points and (c.end_time - c.start_time) > 0])
-            if len(timestamps) != len(Y):
-                 # Should match if filtered consistently.
-                 # Re-filter to be safe or assuming consistent order
-                 timestamps = np.array([c.end_time for c in self._completed_tpi_cycles if c.data_points and (c.end_time - c.start_time) > 0])
-            
-            age = timestamps.max() - timestamps
-            weights = np.exp(-age / (14 * 86400))  # Decay over 14 days
-            weights = weights / weights.sum()
-            
-            # Weighted least squares
-            W = np.diag(weights)
-            X_weighted = np.sqrt(W) @ X
-            Y_weighted = np.sqrt(W) @ Y
-            
-            coeffs, residuals, rank, s = np.linalg.lstsq(X_weighted, Y_weighted, rcond=None)
+
+            # Split data: 80% train, 20% val
+            n = len(Y)
+            split_idx = int(0.8 * n)
+
+            # Ensure we have enough data for validation
+            if n - split_idx < 1:
+                _LOGGER.warning("%s - Auto TPI: Not enough data for validation (n=%d)", self._unique_id, n)
+                return None
+
+            X_train = X[:split_idx]
+            Y_train = Y[:split_idx]
+            X_val = X[split_idx:]
+            Y_val = Y[split_idx:]
+
+            # Regression on TRAIN only
+            coeffs, _, _, _ = np.linalg.lstsq(X_train, Y_train, rcond=None)
             alpha, beta = coeffs
-            
+
             _LOGGER.info("%s - Auto TPI: Model coefficients: alpha=%.6f, beta=%.6f",
                         self._unique_id, alpha, beta)
 
@@ -423,31 +421,40 @@ class AutoTpiManager:
                 _LOGGER.warning("%s - Auto TPI: Invalid coefficients (non-positive)", self._unique_id)
                 return None
 
-            # Quality metrics calculation
-            Y_pred = X @ coeffs
-            ss_res = np.sum((Y - Y_pred) ** 2)
-            ss_tot = np.sum((Y - np.mean(Y)) ** 2)
-            r_squared = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0
-            rmse = np.sqrt(np.mean((Y - Y_pred) ** 2))
-            
-            # Quality assessment
-            if r_squared < 0.3:
+            # Evaluation on VAL
+            Y_pred_val = X_val @ coeffs
+            ss_res_val = np.sum((Y_val - Y_pred_val)**2)
+            ss_tot_val = np.sum((Y_val - np.mean(Y_val))**2)
+
+            if ss_tot_val == 0:
+                _LOGGER.warning("%s - Auto TPI: Validation set has no variance (n_val=%d)", self._unique_id, len(Y_val))
+                return None
+
+            r_squared_val = 1 - (ss_res_val / ss_tot_val)
+            rmse_val = np.sqrt(np.mean((Y_val - Y_pred_val) ** 2))
+
+            # Quality assessment based on Validation R²
+            if r_squared_val < 0.3:
                 self._learning_quality = LearningQuality.POOR
-            elif r_squared < 0.5:
+            elif r_squared_val < 0.5:
                 self._learning_quality = LearningQuality.FAIR
-            elif r_squared < 0.7:
+            elif r_squared_val < 0.7:
                 self._learning_quality = LearningQuality.GOOD
             else:
                 self._learning_quality = LearningQuality.EXCELLENT
-            
-            _LOGGER.info("%s - Auto TPI: Model quality: R²=%.3f, RMSE=%.3f K/h, Quality=%s",
-                        self._unique_id, r_squared, rmse, self._learning_quality.value)
 
-            # Rejection if quality too low
-            if r_squared < 0.3:
-                _LOGGER.warning("%s - Auto TPI: Model quality too low (R²=%.3f)", 
-                              self._unique_id, r_squared)
+            _LOGGER.info("%s - Auto TPI: Model quality on validation: R²=%.3f, RMSE=%.3f K/h, Quality=%s",
+                        self._unique_id, r_squared_val, rmse_val, self._learning_quality.value)
+
+            # REJET si R²_val < 0.4
+            if r_squared_val < 0.4:
+                _LOGGER.warning("%s - Auto TPI: Model fails on validation set (R²_val=%.3f)",
+                                self._unique_id, r_squared_val)
                 return None
+            
+            # Use validation metrics for the model stats
+            r_squared = r_squared_val
+            rmse = rmse_val
 
             # Thermal model calculation
             time_constant = 1.0 / alpha if alpha > 0 else 3600
