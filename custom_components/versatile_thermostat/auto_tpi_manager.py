@@ -9,6 +9,11 @@ from typing import Dict, Optional, List, Tuple
 from dataclasses import dataclass, asdict
 from enum import Enum
 
+try:
+    from scipy.optimize import minimize
+except ImportError:
+    minimize = None
+
 from homeassistant.core import HomeAssistant
 
 from .const import (
@@ -452,6 +457,24 @@ class AutoTpiManager:
 
             # Regression on TRAIN only
             coeffs, _, _, _ = np.linalg.lstsq(X_train, Y_train, rcond=None)
+
+            # Optimization (Nelder-Mead)
+            if minimize is not None:
+                def objective(params):
+                    return np.sum((Y_train - (X_train @ params))**2)
+
+                try:
+                    res = minimize(objective, x0=coeffs, method='Nelder-Mead')
+                    loss_reg = objective(coeffs)
+                    loss_opt = res.fun
+
+                    if loss_opt < loss_reg * 0.95:
+                        _LOGGER.info("%s - Auto TPI: Optimization improved loss from %.4f to %.4f",
+                                     self._unique_id, loss_reg, loss_opt)
+                        coeffs = res.x
+                except Exception as e:
+                    _LOGGER.warning("%s - Auto TPI: Optimization failed: %s", self._unique_id, e)
+
             alpha, beta = coeffs
 
             _LOGGER.info("%s - Auto TPI: Model coefficients: alpha=%.6f, beta=%.6f",

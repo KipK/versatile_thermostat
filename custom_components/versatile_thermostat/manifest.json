@@ -13,7 +13,8 @@
   "issue_tracker": "https://github.com/jmcollin78/versatile_thermostat/issues",
   "quality_scale": "silver",
   "requirements": [
-    "numpy"
+    "numpy",
+    "scipy"
   ],
   "ssdp": [],
   "version": "8.1.1",
