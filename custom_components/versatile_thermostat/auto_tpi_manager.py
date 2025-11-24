@@ -403,12 +403,12 @@ class AutoTpiManager:
             # k_ext: thermal loss compensation
             # The higher alpha is, the faster the losses are
             # Improved formula: alpha / beta represents the power % needed to compensate 1°C diff
-            k_ext = np.clip(alpha / beta, 0.01, 0.90)
+            k_ext = np.clip(alpha / beta, 0.01, 0.20)
             
             # k_int: reactivity to internal deviations
             # Based on characteristic time and efficiency
             desired_response_time = 1800 / 3600  # 30 min target in hours
-            k_int = np.clip(1.0 / (beta * desired_response_time), 0.01, 0.40)
+            k_int = np.clip(1.0 / (beta * desired_response_time), 0.01, 1.0)
             
             self._calculated_params = {
                 CONF_TPI_COEF_INT: round(k_int, 3),
