@@ -397,8 +397,14 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
         )
 
         # Initialize Auto TPI Manager here because we need self._cycle_min which is initialized in post_init
-        self._auto_tpi_manager = AutoTpiManager(self._hass, self.unique_id, self._cycle_min)
-        
+        self._auto_tpi_manager = AutoTpiManager(
+            self._hass,
+            self.unique_id,
+            self._cycle_min,
+            self._tpi_threshold_low,
+            self._tpi_threshold_high,
+        )
+
     async def async_added_to_hass(self):
         """Run when entity about to be added."""
         _LOGGER.debug("Calling async_added_to_hass")

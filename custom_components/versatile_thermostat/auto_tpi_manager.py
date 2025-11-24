@@ -43,6 +43,7 @@ class DataPoint:
     target_temp: float
     is_heating: bool
     temp_derivative: Optional[float] = None
+    is_gated_off: bool = False
     
     def to_dict(self) -> dict:
         return asdict(self)
@@ -117,10 +118,13 @@ class ThermalModel:
 class AutoTpiManager:
     """Auto TPI Manager with robust learning algorithm."""
     
-    def __init__(self, hass: HomeAssistant, unique_id: str, cycle_min: int):
+    def __init__(self, hass: HomeAssistant, unique_id: str, cycle_min: int,
+                 tpi_threshold_low: float = 0.0, tpi_threshold_high: float = 0.0):
         self._hass = hass
         self._unique_id = unique_id
         self._cycle_min = cycle_min
+        self._tpi_threshold_low = tpi_threshold_low
+        self._tpi_threshold_high = tpi_threshold_high
         self._data: List[DataPoint] = []
         self._learning_active = False
         self._last_update = None
@@ -265,6 +269,7 @@ class AutoTpiManager:
         
         # Derivative calculation
         self._compute_derivatives()
+        self._compute_hysteresis()
         
         await self.async_save_data()
         
@@ -348,6 +353,30 @@ class AutoTpiManager:
                     dT = temps[-1] - temps[0]
                     self._data[i].temp_derivative = (dT / dt) * 3600  # K/h
 
+    def _compute_hysteresis(self):
+        """Compute is_gated_off state based on hysteresis."""
+        if not self._data:
+            return
+
+        # If thresholds are not set (0.0), feature is disabled
+        if self._tpi_threshold_low == 0.0 or self._tpi_threshold_high == 0.0:
+            return
+
+        # Initialize with first point
+        # We assume start is not gated off unless already over threshold
+        current_gated_off = False
+        
+        for point in self._data:
+            overshoot = point.room_temp - point.target_temp
+            
+            # Hysteresis logic
+            if overshoot > self._tpi_threshold_high:
+                current_gated_off = True
+            elif overshoot < self._tpi_threshold_low:
+                current_gated_off = False
+            
+            point.is_gated_off = current_gated_off
+
     async def calculate(self) -> Optional[dict]:
         """Calculate TPI parameters with robust validation."""
         
@@ -371,19 +400,31 @@ class AutoTpiManager:
             for cycle in self._completed_tpi_cycles:
                 if not cycle.data_points:
                     continue
+
+                # Filter out gated off points
+                valid_points = [p for p in cycle.data_points if not p.is_gated_off]
+                
+                # If too few points remain, skip cycle
+                if len(valid_points) < 2:
+                    continue
+                
+                # Re-calculate cycle metrics based on valid points
+                start_time = valid_points[0].timestamp
+                end_time = valid_points[-1].timestamp
                 
                 # Duration in hours
-                duration_h = (cycle.end_time - cycle.start_time) / 3600.0
-                if duration_h <= 0:
+                duration_h = (end_time - start_time) / 3600.0
+                if duration_h <= 0.01: # Avoid division by zero
                     continue
                 
                 # Y: Temperature evolution rate (K/h)
-                d_temp_dt = cycle.temp_evolution / duration_h
+                temp_evolution = valid_points[-1].room_temp - valid_points[0].room_temp
+                d_temp_dt = temp_evolution / duration_h
                 
-                # X variables (averages over the cycle)
-                avg_room_temp = np.mean([p.room_temp for p in cycle.data_points])
-                avg_ext_temp = np.mean([p.ext_temp for p in cycle.data_points])
-                avg_power = cycle.average_power / 100.0  # Normalize to 0-1
+                # X variables (averages over the valid points)
+                avg_room_temp = np.mean([p.room_temp for p in valid_points])
+                avg_ext_temp = np.mean([p.ext_temp for p in valid_points])
+                avg_power = sum(p.power_percent for p in valid_points) / len(valid_points) / 100.0  # Normalize to 0-1
                 
                 y_list.append(d_temp_dt)
                 x_loss_list.append(-(avg_room_temp - avg_ext_temp))
