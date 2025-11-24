@@ -25,6 +25,7 @@ from homeassistant.helpers.device_registry import DeviceInfo, DeviceEntryType
 
 from homeassistant.helpers.event import (
     async_track_state_change_event,
+    async_call_later,
 )
 
 
@@ -111,6 +112,7 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
         self._name = name
         self._prop_algorithm = None
         self._async_cancel_cycle = None
+        self._cycle_timer = None
 
         self._state_manager = StateManager()
         # self._hvac_mode = None
@@ -493,17 +495,6 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
 
         # Initialize all UnderlyingEntities
         self.init_underlyings()
-
-        # Listen to underlying entity state changes to detect HVAC action transitions
-        # and notify the AutoTpiManager immediately (bypassing data-point throttling).
-        for under in self._underlyings:
-            # Ask the underlying to register a state-change listener when ready.
-            try:
-                cancel = under.register_state_listener(self._async_underlying_state_changed)
-                if cancel:
-                    self.async_on_remove(cancel)
-            except Exception:
-                _LOGGER.debug("%s - Could not register listener for underlying %s", self, under)
 
         # init presets. Should be after underlyings init because for over_climate it uses the hvac_modes
         await self.init_presets(central_configuration)
@@ -1326,6 +1317,30 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
     ##
     ## Calculation and utility functions
     ##
+    async def _start_tpi_cycle_timer(self, notify_manager=True):
+        """Start the TPI cycle timer if Auto TPI is active."""
+        if self._cycle_timer:
+            self._cycle_timer()
+            self._cycle_timer = None
+
+        if self._auto_tpi_manager and self._auto_tpi_manager.learning_active:
+            if notify_manager:
+                await self._auto_tpi_manager.on_thermostat_mode_changed(
+                    "HEAT", self.target_temperature
+                )
+
+            self._cycle_timer = async_call_later(
+                self.hass, self._cycle_min * 60, self._on_tpi_cycle_elapsed
+            )
+
+    async def _on_tpi_cycle_elapsed(self, _):
+        """Handle TPI cycle elapsed."""
+        if self._auto_tpi_manager:
+            await self._auto_tpi_manager.on_cycle_elapsed()
+
+        if self.vtherm_hvac_mode == VThermHvacMode_HEAT:
+            await self._start_tpi_cycle_timer(notify_manager=False)
+
     async def update_states(self, force=False):
         """Update the states of the thermostat considering the requested state and the current state"""
         changed = False
@@ -1356,6 +1371,19 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
                     # Remove eventual overpowering if we want to turn-off
                     if self.hvac_mode == VThermHvacMode_OFF and self.power_manager.is_overpowering_detected:
                         await self.power_manager.set_overpowering(False)
+
+                    # Hook for Auto TPI
+                    if self._auto_tpi_manager and self._auto_tpi_manager.learning_active:
+                        if self.vtherm_hvac_mode == VThermHvacMode_HEAT:
+                            await self._start_tpi_cycle_timer(notify_manager=True)
+                        else:
+                            # We left HEAT (or never were in it, but stopping timer is safe)
+                            if self._cycle_timer:
+                                self._cycle_timer()
+                                self._cycle_timer = None
+                            await self._auto_tpi_manager.on_thermostat_mode_changed(
+                                str(self.vtherm_hvac_mode), self.target_temperature
+                            )
 
                 if changed:
                     self.recalculate(force=force)
@@ -1743,30 +1771,6 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
         return dearm_window_auto
 
     @callback
-    async def _async_underlying_state_changed(self, event: Event):
-        """Handle underlying entity state changes to detect HVAC action transitions.
-
-        This callback looks up the corresponding UnderlyingEntity instance and
-        notifies the AutoTpiManager immediately so heating start/stop cycles
-        are captured even if data-point updates are throttled.
-        """
-        entity_id: str = event.data.get("entity_id")
-        if not entity_id:
-            return
-
-        # Find the underlying matching this entity id
-        under = next((u for u in self._underlyings if u.entity_id == entity_id), None)
-        if under is None:
-            return
-
-        # Notify AutoTpiManager (it will check learning_active itself)
-        try:
-            if self._auto_tpi_manager:
-                await self._auto_tpi_manager.hvac_action_changed(under.hvac_action)
-        except Exception:  # defensive
-            _LOGGER.exception("%s - Error notifying AutoTpiManager of HVAC action change", self)
-
-    @callback
     async def _async_last_seen_temperature_changed(self, event: Event):
         """Handle last seen temperature sensor changes."""
         new_state: State = event.data.get("new_state")
@@ -1982,8 +1986,16 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
                 new_data = entry.data.copy()
                 new_data[CONF_USE_TPI_CENTRAL_CONFIG] = False
                 self.hass.config_entries.async_update_entry(entry, data=new_data)
+
+            # Start timer if we are in HEAT
+            if self.vtherm_hvac_mode == VThermHvacMode_HEAT:
+                await self._start_tpi_cycle_timer(notify_manager=True)
         else:
             await self._auto_tpi_manager.stop_learning()
+            # Stop timer
+            if self._cycle_timer:
+                self._cycle_timer()
+                self._cycle_timer = None
         
         # Fire event to notify potential listeners (like the switch if it existed, or UI)
         self.hass.bus.async_fire(

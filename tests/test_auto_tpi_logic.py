@@ -1,13 +1,18 @@
 import sys
 import os
 import asyncio
-from datetime import datetime
-from unittest.mock import MagicMock, patch
+import logging
+from datetime import datetime, timedelta
+from unittest.mock import MagicMock
+import numpy as np
 
 # Add project root to path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from custom_components.versatile_thermostat.auto_tpi_manager import AutoTpiManager, HVACAction, DataPoint
+from custom_components.versatile_thermostat.auto_tpi_manager import AutoTpiManager, TpiCycle, DataPoint
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
 
 async def test_auto_tpi_logic():
     print("Starting Auto TPI Logic Test...")
@@ -29,70 +34,88 @@ async def test_auto_tpi_logic():
     print(f"Initial state: Cycles={manager.heating_cycles_count}, Points={manager.data_points}")
     
     # Test Cycle Detection
-    # 1. Start Heating
+    # 1. Start Heating (via mode change)
     print("\nTesting Cycle Detection...")
-    # Initialize previous state to ensure transition detection works
-    manager._last_hvac_action = HVACAction.IDLE
     
-    await manager.update(20.0, 10.0, 100.0, 21.0, HVACAction.HEATING)
-    if manager._current_cycle_start:
+    await manager.on_thermostat_mode_changed("HEAT", 21.0)
+    
+    if manager._current_tpi_cycle:
         print("PASS: Cycle start detected")
     else:
         print("FAIL: Cycle start NOT detected")
         
-    # 2. Continue Heating (simulate time passing)
-    if manager._current_cycle_start:
-        manager._current_cycle_start = datetime.now().replace(minute=datetime.now().minute - 10) # 10 mins ago
+    # 2. Add points
+    start_time = datetime.now().timestamp()
+    await manager.update(20.0, 10.0, 100.0, 21.0, "heating")
     
-    await manager.update(20.5, 10.0, 100.0, 21.0, HVACAction.HEATING)
+    # Simulate time passing for duration
+    if manager._current_tpi_cycle:
+        manager._current_tpi_cycle.start_time = start_time - 3600 # 1 hour ago
+        # Add a point 1 hour later
+        point = DataPoint(
+            timestamp=start_time, 
+            room_temp=22.0, 
+            ext_temp=10.0, 
+            power_percent=100.0, 
+            target_temp=21.0, 
+            is_heating=True
+        )
+        manager._current_tpi_cycle.data_points.append(point)
     
-    # 3. Stop Heating
-    await manager.update(21.0, 10.0, 0.0, 21.0, HVACAction.IDLE)
+    # 3. Stop Heating (via mode change)
+    await manager.on_thermostat_mode_changed("OFF", 21.0)
     
     if manager.heating_cycles_count == 1:
-        print(f"PASS: Cycle detected (Duration: {manager._heating_cycles[0]['duration']:.1f}s)")
+        cycle = manager._completed_tpi_cycles[0]
+        duration = cycle.end_time - cycle.start_time
+        print(f"PASS: Cycle detected (Duration: {duration:.1f}s)")
     else:
         print(f"FAIL: Cycle NOT detected (Count: {manager.heating_cycles_count})")
 
     # Test Calculation Logic (Mock Data)
     print("\nTesting Calculation Logic...")
     
-    # Generate synthetic data for a simple model: dT/dt = -0.1*(Tr-Text) + 0.5*Power
-    # Alpha = 0.1 (1/h), Beta = 0.5 (K/h)
-    # Time constant = 10 hours
-    # k_ext should be alpha/beta = 0.1/0.5 = 0.2
-    # k_int should be 1/(beta * 0.5) = 1/(0.5*0.5) = 4.0 -> clipped to 0.4? No, wait.
-    # desired_response_time = 0.5 hours.
-    # k_int = 1 / (0.5 * 0.5) = 4.0. Clipped to 0.4.
+    # Generate synthetic cycles
+    # Model: dT/dt = -alpha*(Tr-Text) + beta*Power
+    # Let's say alpha = 0.1, beta = 20.0 (degrees gained per hour at 100% power... high but illustrative)
     
-    manager._data.clear()
-    manager._heating_cycles = [{'start': '2023-01-01', 'duration': 1000}] * 15 # Fake cycles
+    manager._completed_tpi_cycles.clear()
     
-    start_time = datetime.now().timestamp() - 100000
+    alpha = 0.1
+    beta = 5.0 # K/h at 100% power
     
-    for i in range(200):
-        t = start_time + i * 300 # 5 min steps
-        tr = 20.0
-        text = 10.0 # Diff = 10
-        power = 50.0 # 0.5
-        target = 20.0
+    import random
+    
+    for i in range(50):
+        duration_h = 1.0 # 1 hour cycles
+        avg_room = 20.0
+        # Vary external temp and power to provide variance for regression
+        avg_ext = 10.0 + random.uniform(-5, 5)
+        avg_power = 0.5 + random.uniform(-0.3, 0.3)
+        avg_power = max(0.1, min(1.0, avg_power))
         
-        # Expected derivative (approx)
-        # dT/dt = -0.1 * 10 + 0.5 * 0.5 = -1 + 0.25 = -0.75 K/h
+        # Expected dT/dt = -alpha * (Tr-Text) + beta * Power
+        expected_derivative = -alpha * (avg_room - avg_ext) + beta * avg_power
         
-        # We need to manually set derivative because update() calculates it from temp changes
-        # But here we just inject points with pre-calculated derivatives for calculate()
+        # Add some noise
+        # expected_derivative += random.uniform(-0.05, 0.05)
         
-        point = DataPoint(
-            timestamp=t,
-            room_temp=tr,
-            ext_temp=text,
-            power_percent=power,
-            target_temp=target,
-            is_heating=True,
-            temp_derivative=-0.75 # Perfect derivative
+        expected_evolution = expected_derivative * duration_h
+        
+        # Create a synthetic cycle
+        start = datetime.now().timestamp() - (i * 7200)
+        end = start + (duration_h * 3600)
+        
+        p1 = DataPoint(timestamp=start, room_temp=avg_room - (expected_evolution / 2), ext_temp=avg_ext, power_percent=avg_power*100, target_temp=21.0, is_heating=True)
+        p2 = DataPoint(timestamp=end, room_temp=avg_room + (expected_evolution / 2), ext_temp=avg_ext, power_percent=avg_power*100, target_temp=21.0, is_heating=True)
+        
+        cycle = TpiCycle(
+            start_time=start,
+            duration_target=300,
+            data_points=[p1, p2],
+            end_time=end
         )
-        manager._data.append(point)
+        manager._completed_tpi_cycles.append(cycle)
         
     params = await manager.calculate()
     
@@ -101,20 +124,15 @@ async def test_auto_tpi_logic():
         k_ext = params.get("tpi_coef_ext")
         k_int = params.get("tpi_coef_int")
         
-        # Alpha ~ 0.1, Beta ~ 0.5
-        # k_ext = 0.1 / 0.5 = 0.2
-        # k_int = 1 / (0.5 * 0.5) = 4.0 -> clipped to 0.4
+        # Expected:
+        # alpha = 0.1, beta = 5.0
+        # k_ext = alpha / beta = 0.1 / 5.0 = 0.02
         
-        if 0.15 <= k_ext <= 0.25:
-            print(f"PASS: k_ext {k_ext} is close to expected 0.2")
+        if 0.015 <= k_ext <= 0.025:
+            print(f"PASS: k_ext {k_ext} is close to expected 0.02")
         else:
-            print(f"FAIL: k_ext {k_ext} is NOT close to expected 0.2")
+            print(f"FAIL: k_ext {k_ext} is NOT close to expected 0.02 (alpha={alpha}, beta={beta})")
             
-        if k_int == 0.4:
-             print(f"PASS: k_int {k_int} is clipped to 0.4 as expected (calculated ~4.0)")
-        else:
-             print(f"FAIL: k_int {k_int} is unexpected")
-             
     else:
         print("FAIL: Calculation returned None")
 

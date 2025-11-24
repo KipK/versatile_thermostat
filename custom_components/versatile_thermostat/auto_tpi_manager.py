@@ -16,14 +16,12 @@ from .const import (
     CONF_TPI_COEF_EXT,
 )
 
-from homeassistant.components.climate.const import HVACAction
-
 _LOGGER = logging.getLogger(__name__)
 
-STORAGE_VERSION = 2
+STORAGE_VERSION = 3
 MIN_DATA_POINTS = 100  # More data for more robustness
 MAX_DATA_POINTS = 5000
-MIN_HEATING_CYCLES = 10  # Complete heating cycles needed
+MIN_TPI_CYCLES = 5  # Complete TPI cycles needed
 
 
 class LearningQuality(Enum):
@@ -52,6 +50,48 @@ class DataPoint:
     @classmethod
     def from_dict(cls, d: dict):
         return cls(**d)
+
+
+@dataclass
+class TpiCycle:
+    """Represents a complete TPI cycle."""
+    start_time: float
+    duration_target: float  # cycle_min in seconds
+    data_points: List[DataPoint]  # Points collected during the cycle
+    end_time: Optional[float] = None
+    
+    @property
+    def average_power(self) -> float:
+        """Average power over the cycle."""
+        if not self.data_points:
+            return 0.0
+        return sum(p.power_percent for p in self.data_points) / len(self.data_points)
+        
+    @property
+    def temp_evolution(self) -> float:
+        """ΔT between start and end of cycle."""
+        if not self.data_points:
+            return 0.0
+        return self.data_points[-1].room_temp - self.data_points[0].room_temp
+        
+    @property
+    def is_complete(self) -> bool:
+        """Is the cycle finished (duration >= target)."""
+        if self.end_time is not None:
+            return True
+        if not self.data_points:
+            return False
+        return (self.data_points[-1].timestamp - self.start_time) >= self.duration_target
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, d: dict):
+        data = d.copy()
+        if "data_points" in data:
+            data["data_points"] = [DataPoint.from_dict(dp) for dp in data["data_points"]]
+        return cls(**data)
 
 
 @dataclass
@@ -91,10 +131,10 @@ class AutoTpiManager:
         self._calculated_params = {}
         self._learning_quality = LearningQuality.INSUFFICIENT
         
-        # Cycle detection
-        self._heating_cycles = []
-        self._current_cycle_start = None
-        self._last_hvac_action = HVACAction.OFF
+        # New TPI Cycle tracking
+        self._current_tpi_cycle: Optional[TpiCycle] = None
+        self._completed_tpi_cycles: List[TpiCycle] = []
+        self._thermostat_mode: str = "unknown"
 
     @property
     def learning_active(self) -> bool:
@@ -107,7 +147,7 @@ class AutoTpiManager:
     @property
     def heating_cycles_count(self) -> int:
         """Count of heating cycles."""
-        return len(self._heating_cycles)
+        return len(self._completed_tpi_cycles)
 
     @property
     def min_data_points(self) -> int:
@@ -117,7 +157,7 @@ class AutoTpiManager:
     @property
     def progression(self) -> int:
         """Progression based on heating cycles."""
-        cycle_progress = min(100, (len(self._heating_cycles) / MIN_HEATING_CYCLES) * 100)
+        cycle_progress = min(100, (len(self._completed_tpi_cycles) / MIN_TPI_CYCLES) * 100)
         data_progress = min(100, (len(self._data) / MIN_DATA_POINTS) * 100)
         return int(min(cycle_progress, data_progress))
 
@@ -151,7 +191,8 @@ class AutoTpiManager:
         _LOGGER.info("%s - Auto TPI: Starting Enhanced Auto TPI learning", self._unique_id)
         self._learning_active = True
         self._data.clear()
-        self._heating_cycles.clear()
+        self._completed_tpi_cycles.clear()
+        self._current_tpi_cycle = None
         await self.async_save_data()
 
     async def stop_learning(self):
@@ -173,34 +214,7 @@ class AutoTpiManager:
         
         return point.room_temp < lower or point.room_temp > upper
 
-    def _detect_heating_cycle(self, hvac_action: str):
-        """Detect complete heating cycles based on HVAC action transitions."""
-        is_heating = hvac_action == HVACAction.HEATING
-        
-        # Cycle start: Transition from IDLE/OFF to HEATING
-        if is_heating and self._last_hvac_action != HVACAction.HEATING:
-            self._current_cycle_start = datetime.now()
-            _LOGGER.info("%s - Auto TPI: Heating cycle started", self._unique_id)
-        
-        # Cycle end: Transition from HEATING to IDLE/OFF
-        elif not is_heating and self._last_hvac_action == HVACAction.HEATING:
-            if self._current_cycle_start:
-                cycle_duration = (datetime.now() - self._current_cycle_start).total_seconds()
-                if 60 < cycle_duration < 3600:  # Between 1min and 1h
-                    self._heating_cycles.append({
-                        'start': self._current_cycle_start.isoformat(),
-                        'duration': cycle_duration
-                    })
-                    _LOGGER.info("%s - Auto TPI: Heating cycle detected: %.1fs", 
-                                self._unique_id, cycle_duration)
-                else:
-                    _LOGGER.info("%s - Auto TPI: Cycle ignored (duration %.1fs out of range)", 
-                                self._unique_id, cycle_duration)
-            self._current_cycle_start = None
-        
-        self._last_hvac_action = hvac_action
-
-    async def update(self, room_temp: float, ext_temp: float, 
+    async def update(self, room_temp: float, ext_temp: float,
                     power_percent: float, target_temp: float, hvac_action: str):
         """Add a data point with validation."""
         if not self._learning_active:
@@ -208,10 +222,6 @@ class AutoTpiManager:
 
         now = datetime.now()
         
-        # Cycle detection: run before adaptive throttling so transitions are
-        # captured even when data-point updates are being rate-limited.
-        self._detect_heating_cycle(hvac_action)
-
         # Adaptive throttling
         min_interval = self._cycle_min * 60 * 0.5  # 50% of cycle
         if self._last_update and (now - self._last_update).total_seconds() < min_interval:
@@ -224,9 +234,6 @@ class AutoTpiManager:
         if not (-20 <= ext_temp <= 40 and 5 <= room_temp <= 35):
             _LOGGER.warning("%s - Auto TPI: Temperature out of reasonable range", self._unique_id)
             return
-
-        # Cycle detection
-        self._detect_heating_cycle(hvac_action)
 
         # Point creation
         point = DataPoint(
@@ -245,6 +252,10 @@ class AutoTpiManager:
             return
 
         self._data.append(point)
+        
+        # Add to current cycle if active
+        if self._current_tpi_cycle:
+            self._current_tpi_cycle.data_points.append(point)
 
         # Memory limitation
         if len(self._data) > MAX_DATA_POINTS:
@@ -257,24 +268,62 @@ class AutoTpiManager:
         
         await self.async_save_data()
         
-        _LOGGER.info("%s - Auto TPI: Data point added. Total: %d, Cycles: %d", 
-                     self._unique_id, len(self._data), len(self._heating_cycles))
+        _LOGGER.info("%s - Auto TPI: Data point added. Total: %d, Cycles: %d",
+                     self._unique_id, len(self._data), len(self._completed_tpi_cycles))
 
-    async def hvac_action_changed(self, hvac_action: str):
-        """Notify manager immediately about an HVAC action change.
+    async def on_thermostat_mode_changed(self, new_mode: str, target_temp: float):
+        """Handle thermostat mode changes."""
+        _LOGGER.info("%s - Auto TPI: Mode changed: %s -> %s", self._unique_id, self._thermostat_mode, new_mode)
+        self._thermostat_mode = new_mode
 
-        This lets external callers notify the manager of HVAC transitions
-        (e.g. from a state listener) so cycle detection runs immediately
-        without waiting for `update` or being subject to throttling.
-        """
-        if not self._learning_active:
+        # If switching to HEAT, start a new cycle
+        if new_mode == "HEAT":
+            if self._current_tpi_cycle:
+                self._terminate_current_cycle()
+            self._start_new_cycle()
+        
+        # If switching OFF (or anything else) from HEAT, terminate current cycle
+        elif self._current_tpi_cycle:
+             self._terminate_current_cycle()
+
+    async def on_cycle_elapsed(self):
+        """Handle end of TPI cycle (timer based)."""
+        _LOGGER.info("%s - Auto TPI: Cycle elapsed", self._unique_id)
+        
+        if self._current_tpi_cycle:
+             self._terminate_current_cycle()
+             
+        # If still in HEAT mode, start a new cycle immediately
+        if self._thermostat_mode == "HEAT":
+            self._start_new_cycle()
+
+    def _start_new_cycle(self):
+        """Start a new TPI cycle."""
+        self._current_tpi_cycle = TpiCycle(
+            start_time=datetime.now().timestamp(),
+            duration_target=self._cycle_min * 60,
+            data_points=[]
+        )
+        _LOGGER.info("%s - Auto TPI: New cycle started", self._unique_id)
+
+    def _terminate_current_cycle(self):
+        """Terminate the current TPI cycle."""
+        if not self._current_tpi_cycle:
             return
 
-        # Detect cycle transitions immediately
-        self._detect_heating_cycle(hvac_action)
-
-        # Persist state so cycles are not lost
-        await self.async_save_data()
+        self._current_tpi_cycle.end_time = datetime.now().timestamp()
+        
+        # Validate cycle (e.g. check duration)
+        duration = self._current_tpi_cycle.end_time - self._current_tpi_cycle.start_time
+        if duration > 10:  # Minimum 10 seconds to be considered valid
+             self._completed_tpi_cycles.append(self._current_tpi_cycle)
+             _LOGGER.info("%s - Auto TPI: Cycle completed. Duration: %.1fs, Points: %d",
+                          self._unique_id, duration, len(self._current_tpi_cycle.data_points))
+        else:
+             _LOGGER.info("%s - Auto TPI: Cycle discarded (too short). Duration: %.1fs",
+                          self._unique_id, duration)
+        
+        self._current_tpi_cycle = None
 
     def _compute_derivatives(self):
         """Calculate smoothed temperature derivatives."""
@@ -303,46 +352,59 @@ class AutoTpiManager:
         """Calculate TPI parameters with robust validation."""
         
         # Pre-checks
-        if len(self._data) < MIN_DATA_POINTS:
-            _LOGGER.info("%s - Auto TPI: Insufficient data (%d/%d)", 
-                         self._unique_id, len(self._data), MIN_DATA_POINTS)
-            return None
-        
-        if len(self._heating_cycles) < MIN_HEATING_CYCLES:
-            _LOGGER.info("%s - Auto TPI: Insufficient heating cycles (%d/%d)", 
-                         self._unique_id, len(self._heating_cycles), MIN_HEATING_CYCLES)
+        if len(self._completed_tpi_cycles) < MIN_TPI_CYCLES:
+            _LOGGER.info("%s - Auto TPI: Insufficient TPI cycles (%d/%d)",
+                         self._unique_id, len(self._completed_tpi_cycles), MIN_TPI_CYCLES)
             return None
 
         try:
-            # Filtering: only points with valid derivative
-            valid_points = [p for p in self._data if p.temp_derivative is not None]
+            # Gather data from cycles
+            y_list = []
+            x_loss_list = []
+            x_power_list = []
             
-            if len(valid_points) < MIN_DATA_POINTS:
-                return None
+            # We want to fit: DeltaTemp/dt = -alpha * (Room - Ext) + beta * Power
+            # So Y = DeltaTemp/dt
+            # X1 = -(Room - Ext)
+            # X2 = Power (0-1)
 
-            # Model: dT/dt = -alpha*(T_room - T_ext) + beta*Power - gamma*(T_room - T_target)
-            # Simplified: dT/dt = -k_loss*dT_ext + k_heat*Power
+            for cycle in self._completed_tpi_cycles:
+                if not cycle.data_points:
+                    continue
+                
+                # Duration in hours
+                duration_h = (cycle.end_time - cycle.start_time) / 3600.0
+                if duration_h <= 0:
+                    continue
+                
+                # Y: Temperature evolution rate (K/h)
+                d_temp_dt = cycle.temp_evolution / duration_h
+                
+                # X variables (averages over the cycle)
+                avg_room_temp = np.mean([p.room_temp for p in cycle.data_points])
+                avg_ext_temp = np.mean([p.ext_temp for p in cycle.data_points])
+                avg_power = cycle.average_power / 100.0  # Normalize to 0-1
+                
+                y_list.append(d_temp_dt)
+                x_loss_list.append(-(avg_room_temp - avg_ext_temp))
+                x_power_list.append(avg_power)
+                
+            if len(y_list) < MIN_TPI_CYCLES:
+                return None
             
-            Y = np.array([p.temp_derivative for p in valid_points])
+            Y = np.array(y_list)
+            X = np.column_stack([x_loss_list, x_power_list])
             
-            # Explanatory variables
-            temp_diff = np.array([p.room_temp - p.ext_temp for p in valid_points])
-            power = np.array([p.power_percent / 100.0 for p in valid_points])
-            target_diff = np.array([p.room_temp - p.target_temp for p in valid_points])
+            # Weighted regression (recent cycles more important)
+            # Use end_time of cycles for weighting
+            timestamps = np.array([c.end_time for c in self._completed_tpi_cycles if c.data_points and (c.end_time - c.start_time) > 0])
+            if len(timestamps) != len(Y):
+                 # Should match if filtered consistently.
+                 # Re-filter to be safe or assuming consistent order
+                 timestamps = np.array([c.end_time for c in self._completed_tpi_cycles if c.data_points and (c.end_time - c.start_time) > 0])
             
-            # Design matrix with inertia term
-            # X columns: -(Tr - Text), Power, -(Tr - Ttarget)
-            
-            X = np.column_stack([
-                -temp_diff,  # Thermal losses
-                power,        # Heat input
-                -target_diff  # Correction towards target (inertia/control loop effect)
-            ])
-            
-            # Weighted regression (recent data more important)
-            timestamps = np.array([p.timestamp for p in valid_points])
-            age = timestamps[-1] - timestamps
-            weights = np.exp(-age / (7 * 86400))  # Decay over 7 days
+            age = timestamps.max() - timestamps
+            weights = np.exp(-age / (14 * 86400))  # Decay over 14 days
             weights = weights / weights.sum()
             
             # Weighted least squares
@@ -351,10 +413,10 @@ class AutoTpiManager:
             Y_weighted = np.sqrt(W) @ Y
             
             coeffs, residuals, rank, s = np.linalg.lstsq(X_weighted, Y_weighted, rcond=None)
-            alpha, beta, gamma = coeffs
+            alpha, beta = coeffs
             
-            _LOGGER.info("%s - Auto TPI: Model coefficients: alpha=%.6f, beta=%.6f, gamma=%.6f", 
-                        self._unique_id, alpha, beta, gamma)
+            _LOGGER.info("%s - Auto TPI: Model coefficients: alpha=%.6f, beta=%.6f",
+                        self._unique_id, alpha, beta)
 
             # Physical validation
             if beta <= 0 or alpha <= 0:
@@ -396,7 +458,7 @@ class AutoTpiManager:
                 time_constant=time_constant,
                 r_squared=r_squared,
                 rmse=rmse,
-                n_points=len(valid_points)
+                n_points=len(self._completed_tpi_cycles)
             )
 
             # Optimized TPI coefficients calculation
@@ -440,7 +502,7 @@ class AutoTpiManager:
                 "version": STORAGE_VERSION,
                 "learning_active": self._learning_active,
                 "data": [p.to_dict() for p in self._data[-1000:]],  # Keep last 1000
-                "heating_cycles": self._heating_cycles[-50:],
+                "completed_tpi_cycles": [c.to_dict() for c in self._completed_tpi_cycles[-50:]],
                 "thermal_model": self._thermal_model.to_dict() if self._thermal_model else None,
                 "calculated_params": self._calculated_params,
                 "learning_quality": self._learning_quality.value
@@ -465,10 +527,12 @@ class AutoTpiManager:
                 data = json.load(f)
                 
                 # Check storage version or migration
-                if data.get("version") == STORAGE_VERSION:
+                version = data.get("version", 0)
+                if version >= 3:
                     self._learning_active = data.get("learning_active", False)
                     self._data = [DataPoint.from_dict(d) for d in data.get("data", [])]
-                    self._heating_cycles = data.get("heating_cycles", [])
+                    if cycles_data := data.get("completed_tpi_cycles"):
+                        self._completed_tpi_cycles = [TpiCycle.from_dict(c) for c in cycles_data]
                     
                     if model_data := data.get("thermal_model"):
                         self._thermal_model = ThermalModel(**model_data)
@@ -478,13 +542,20 @@ class AutoTpiManager:
                     quality_str = data.get("learning_quality", "insufficient")
                     self._learning_quality = LearningQuality(quality_str)
                     
-                    _LOGGER.info("%s - Auto TPI: Data loaded: %d points, %d cycles, quality=%s",
-                               self._unique_id, len(self._data), 
-                               len(self._heating_cycles), self._learning_quality.value)
+                    _LOGGER.info("%s - Auto TPI: Data loaded: %d points, %d tpi_cycles, quality=%s",
+                               self._unique_id, len(self._data),
+                               len(self._completed_tpi_cycles),
+                               self._learning_quality.value)
                 else:
-                    _LOGGER.info("%s - Auto TPI: Old storage version, starting fresh", self._unique_id)
-                    # If version mismatch, we just start fresh or could implement migration
-                    # For now, safe default is starting fresh to avoid data corruption
+                    _LOGGER.info("%s - Auto TPI: Storage version %d < 3. Discarding old data.",
+                                 self._unique_id, version)
+                    # Force clean start for version < 3
+                    self._data = []
+                    self._completed_tpi_cycles = []
+                    self._current_tpi_cycle = None
+                    self._calculated_params = {}
+                    self._learning_quality = LearningQuality.INSUFFICIENT
+                    # We do NOT return here, we just initialized empty state
                     
         except Exception as e:
             _LOGGER.error("%s - Auto TPI: Load error %s", self._unique_id, e)
