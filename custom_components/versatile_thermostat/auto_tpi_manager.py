@@ -232,7 +232,7 @@ class AutoTpiManager:
         now = datetime.now()
         
         # Adaptive throttling
-        min_interval = self._cycle_min * 60 * 0.5  # 50% of cycle
+        min_interval = self._cycle_min * 60 * 0.1  # 10% of cycle
         if self._last_update and (now - self._last_update).total_seconds() < min_interval:
             return
 
