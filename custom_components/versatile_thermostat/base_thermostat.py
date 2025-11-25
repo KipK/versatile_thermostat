@@ -405,6 +405,7 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
         self._auto_tpi_manager = AutoTpiManager(
             self._hass,
             self.unique_id,
+            self.name,
             self._cycle_min,
             self._tpi_threshold_low,
             self._tpi_threshold_high,

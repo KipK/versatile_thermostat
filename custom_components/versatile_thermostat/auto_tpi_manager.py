@@ -30,8 +30,9 @@ _LOGGER = logging.getLogger(__name__)
 
 STORAGE_VERSION = 3
 MIN_DATA_POINTS = 100  # More data for more robustness
-MAX_DATA_POINTS = 5000
+MAX_DATA_POINTS = 10000
 MIN_TPI_CYCLES = 5  # Complete TPI cycles needed
+MAX_STORED_CYCLES = 2500  # Approx 30 days history
 
 
 class LearningQuality(Enum):
@@ -130,10 +131,11 @@ class ThermalModel:
 class AutoTpiManager:
     """Auto TPI Manager with robust learning algorithm."""
     
-    def __init__(self, hass: HomeAssistant, unique_id: str, cycle_min: int,
+    def __init__(self, hass: HomeAssistant, unique_id: str, name: str, cycle_min: int,
                  tpi_threshold_low: float = 0.0, tpi_threshold_high: float = 0.0):
         self._hass = hass
         self._unique_id = unique_id
+        self._name = name
         self._cycle_min = cycle_min
         self._tpi_threshold_low = tpi_threshold_low
         self._tpi_threshold_high = tpi_threshold_high
@@ -205,7 +207,7 @@ class AutoTpiManager:
 
     async def start_learning(self):
         """Start learning."""
-        _LOGGER.info("%s - Auto TPI: Starting Enhanced Auto TPI learning", self._unique_id)
+        _LOGGER.info("%s - Auto TPI: Starting Enhanced Auto TPI learning", self._name)
         self._learning_active = True
         self._data.clear()
         self._completed_tpi_cycles.clear()
@@ -214,7 +216,7 @@ class AutoTpiManager:
 
     async def stop_learning(self):
         """Stop learning."""
-        _LOGGER.info("%s - Auto TPI: Stopping Auto TPI learning", self._unique_id)
+        _LOGGER.info("%s - Auto TPI: Stopping Auto TPI learning", self._name)
         self._learning_active = False
         await self.async_save_data()
 
@@ -249,9 +251,10 @@ class AutoTpiManager:
         delta_norm = abs(mu_recent - mu_older) / sigma_pooled
 
         if delta_norm > 2.0:
-            _LOGGER.warning("%s - Auto TPI: Concept drift detected (delta_norm=%.2f). Stopping learning.",
-                            self._unique_id, delta_norm)
-            return True
+            _LOGGER.warning("%s - Auto TPI: Concept drift detected (delta_norm=%.2f). Old data may be less relevant.",
+                            self._name, delta_norm)
+            # We do NOT stop learning, we rely on the sliding window (MAX_STORED_CYCLES) to adapt.
+            return False
 
         return False
 
@@ -272,7 +275,7 @@ class AutoTpiManager:
         
         reduction = len(self._data) - len(compressed_data)
         if reduction > 0:
-             _LOGGER.info("%s - Auto TPI: Data compressed. Removed %d points.", self._unique_id, reduction)
+             _LOGGER.info("%s - Auto TPI: Data compressed. Removed %d points.", self._name, reduction)
 
         return compressed_data
 
@@ -284,6 +287,12 @@ class AutoTpiManager:
         temps = [p.room_temp for p in window]
         q1, q3 = np.percentile(temps, [25, 75])
         iqr = q3 - q1
+        
+        # Enforce a minimum IQR to avoid rejecting data when temperature is stable
+        # 0.5°C allows for normal sensor noise/fluctuation without triggering outlier detection
+        if iqr < 0.2:
+            iqr = 0.2
+            
         lower = q1 - 3 * iqr
         upper = q3 + 3 * iqr
         
@@ -308,7 +317,7 @@ class AutoTpiManager:
             return
         
         if not (-20 <= ext_temp <= 40 and 5 <= room_temp <= 35):
-            _LOGGER.warning("%s - Auto TPI: Temperature out of reasonable range", self._unique_id)
+            _LOGGER.warning("%s - Auto TPI: Temperature out of reasonable range", self._name)
             return
 
         # Point creation
@@ -325,7 +334,7 @@ class AutoTpiManager:
         # Outlier filtering (on sliding window)
         recent_window = self._data[-50:] if len(self._data) >= 50 else self._data
         if self._is_outlier(point, recent_window):
-            _LOGGER.warning("%s - Auto TPI: Outlier detected, skipping data point", self._unique_id)
+            _LOGGER.warning("%s - Auto TPI: Outlier detected, skipping data point", self._name)
             return
 
         self._data.append(point)
@@ -349,11 +358,11 @@ class AutoTpiManager:
         await self.async_save_data()
         
         _LOGGER.info("%s - Auto TPI: Data point added. Total: %d, Cycles: %d",
-                     self._unique_id, len(self._data), len(self._completed_tpi_cycles))
+                     self._name, len(self._data), len(self._completed_tpi_cycles))
 
     async def on_thermostat_mode_changed(self, new_mode: str, target_temp: float):
         """Handle thermostat mode changes."""
-        _LOGGER.info("%s - Auto TPI: Mode changed: %s -> %s", self._unique_id, self._thermostat_mode, new_mode)
+        _LOGGER.info("%s - Auto TPI: Mode changed: %s -> %s", self._name, self._thermostat_mode, new_mode)
         self._thermostat_mode = new_mode
 
         # If switching to HEAT, start a new cycle
@@ -368,7 +377,7 @@ class AutoTpiManager:
 
     async def on_cycle_elapsed(self):
         """Handle end of TPI cycle (timer based)."""
-        _LOGGER.info("%s - Auto TPI: Cycle elapsed", self._unique_id)
+        _LOGGER.info("%s - Auto TPI: Cycle elapsed", self._name)
         
         if self._current_tpi_cycle:
              self._terminate_current_cycle()
@@ -384,7 +393,7 @@ class AutoTpiManager:
             duration_target=self._cycle_min * 60,
             data_points=[]
         )
-        _LOGGER.info("%s - Auto TPI: New cycle started", self._unique_id)
+        _LOGGER.info("%s - Auto TPI: New cycle started", self._name)
 
     def _terminate_current_cycle(self):
         """Terminate the current TPI cycle."""
@@ -397,11 +406,16 @@ class AutoTpiManager:
         duration = self._current_tpi_cycle.end_time - self._current_tpi_cycle.start_time
         if duration > 10:  # Minimum 10 seconds to be considered valid
              self._completed_tpi_cycles.append(self._current_tpi_cycle)
-             _LOGGER.info("%s - Auto TPI: Cycle completed. Duration: %.1fs, Points: %d",
-                          self._unique_id, duration, len(self._current_tpi_cycle.data_points))
+             
+             # Prune old cycles to keep within MAX_STORED_CYCLES
+             if len(self._completed_tpi_cycles) > MAX_STORED_CYCLES:
+                 self._completed_tpi_cycles = self._completed_tpi_cycles[-MAX_STORED_CYCLES:]
+                 
+             _LOGGER.info("%s - Auto TPI: Cycle completed. Duration: %.1fs, Points: %d. Total cycles: %d",
+                          self._name, duration, len(self._current_tpi_cycle.data_points), len(self._completed_tpi_cycles))
         else:
              _LOGGER.info("%s - Auto TPI: Cycle discarded (too short). Duration: %.1fs",
-                          self._unique_id, duration)
+                          self._name, duration)
         
         self._current_tpi_cycle = None
 
@@ -441,9 +455,9 @@ class AutoTpiManager:
             for i in range(len(self._data)):
                 self._data[i].temp_derivative = derivs_h[i]
                 
-            _LOGGER.debug("%s - Auto TPI: Derivatives updated using Savitzky-Golay", self._unique_id)
+            _LOGGER.debug("%s - Auto TPI: Derivatives updated using Savitzky-Golay", self._name)
         except Exception as e:
-            _LOGGER.warning("%s - Auto TPI: Savitzky-Golay failed: %s. Fallback to simple.", self._unique_id, e)
+            _LOGGER.warning("%s - Auto TPI: Savitzky-Golay failed: %s. Fallback to simple.", self._name, e)
             self._compute_derivatives_simple()
 
     def _compute_derivatives_simple(self):
@@ -469,7 +483,7 @@ class AutoTpiManager:
                     dT = temps[-1] - temps[0]
                     self._data[i].temp_derivative = (dT / dt) * 3600  # K/h
         
-        _LOGGER.debug("%s - Auto TPI: Derivatives updated using simple method", self._unique_id)
+        _LOGGER.debug("%s - Auto TPI: Derivatives updated using simple method", self._name)
 
     def _compute_hysteresis_incremental(self):
         """Compute is_gated_off state based on hysteresis (incremental)."""
@@ -517,7 +531,7 @@ class AutoTpiManager:
         # Pre-checks
         if len(self._completed_tpi_cycles) < MIN_TPI_CYCLES:
             _LOGGER.info("%s - Auto TPI: Insufficient TPI cycles (%d/%d)",
-                         self._unique_id, len(self._completed_tpi_cycles), MIN_TPI_CYCLES)
+                         self._name, len(self._completed_tpi_cycles), MIN_TPI_CYCLES)
             return None
 
         try:
@@ -597,7 +611,7 @@ class AutoTpiManager:
 
             # Ensure we have enough data for validation
             if n - split_idx < 1:
-                _LOGGER.warning("%s - Auto TPI: Not enough data for validation (n=%d)", self._unique_id, n)
+                _LOGGER.warning("%s - Auto TPI: Not enough data for validation (n=%d)", self._name, n)
                 return None
 
             X_train = X[:split_idx]
@@ -620,10 +634,10 @@ class AutoTpiManager:
 
                     if loss_opt < loss_reg * 0.95:
                         _LOGGER.info("%s - Auto TPI: Optimization improved loss from %.4f to %.4f",
-                                     self._unique_id, loss_reg, loss_opt)
+                                     self._name, loss_reg, loss_opt)
                         coeffs = res.x
                 except Exception as e:
-                    _LOGGER.warning("%s - Auto TPI: Optimization failed: %s", self._unique_id, e)
+                    _LOGGER.warning("%s - Auto TPI: Optimization failed: %s", self._name, e)
 
             gamma = None
             if use_humidity:
@@ -632,7 +646,7 @@ class AutoTpiManager:
                 # Validate gamma
                 if abs(gamma) > 0.5:
                     _LOGGER.warning("%s - Auto TPI: Invalid humidity coefficient (gamma=%.4f). Fallback to 2-var regression.",
-                                    self._unique_id, gamma)
+                                    self._name, gamma)
                     # Fallback to 2 variables
                     X = np.column_stack([x_loss_list, x_power_list])
                     X_train = X[:split_idx]
@@ -657,15 +671,15 @@ class AutoTpiManager:
                     # to indicate it wasn't kept.
                 else:
                     _LOGGER.info("%s - Auto TPI: Model coefficients: alpha=%.6f, beta=%.6f, gamma=%.6f",
-                                self._unique_id, alpha, beta, gamma)
+                                self._name, alpha, beta, gamma)
             else:
                 alpha, beta = coeffs
                 _LOGGER.info("%s - Auto TPI: Model coefficients: alpha=%.6f, beta=%.6f",
-                            self._unique_id, alpha, beta)
+                            self._name, alpha, beta)
 
             # Physical validation
             if beta <= 0 or alpha <= 0:
-                _LOGGER.warning("%s - Auto TPI: Invalid coefficients (non-positive)", self._unique_id)
+                _LOGGER.warning("%s - Auto TPI: Invalid coefficients (non-positive)", self._name)
                 return None
 
             # Evaluation on VAL
@@ -674,7 +688,7 @@ class AutoTpiManager:
             ss_tot_val = np.sum((Y_val - np.mean(Y_val))**2)
 
             if ss_tot_val == 0:
-                _LOGGER.warning("%s - Auto TPI: Validation set has no variance (n_val=%d)", self._unique_id, len(Y_val))
+                _LOGGER.warning("%s - Auto TPI: Validation set has no variance (n_val=%d)", self._name, len(Y_val))
                 return None
 
             r_squared_val = 1 - (ss_res_val / ss_tot_val)
@@ -691,12 +705,12 @@ class AutoTpiManager:
                 self._learning_quality = LearningQuality.EXCELLENT
 
             _LOGGER.info("%s - Auto TPI: Model quality on validation: R²=%.3f, RMSE=%.3f K/h, Quality=%s",
-                        self._unique_id, r_squared_val, rmse_val, self._learning_quality.value)
+                        self._name, r_squared_val, rmse_val, self._learning_quality.value)
 
             # REJET si R²_val < 0.4
             if r_squared_val < 0.4:
                 _LOGGER.warning("%s - Auto TPI: Model fails on validation set (R²_val=%.3f)",
-                                self._unique_id, r_squared_val)
+                                self._name, r_squared_val)
                 return None
             
             # Use validation metrics for the model stats
@@ -753,12 +767,12 @@ class AutoTpiManager:
             await self.async_save_data()
             
             _LOGGER.info("%s - Auto TPI: TPI params calculated: k_int=%.3f, k_ext=%.3f (tau=%.1fh, resp=%.1fh, conf=%.1f%%)",
-                        self._unique_id, k_int, k_ext, tau_hours, desired_response_hours, r_squared * 100)
+                        self._name, k_int, k_ext, tau_hours, desired_response_hours, r_squared * 100)
             
             return self._calculated_params
 
         except Exception as e:
-            _LOGGER.error("%s - Auto TPI: Calculation error: %s", self._unique_id, e, exc_info=True)
+            _LOGGER.error("%s - Auto TPI: Calculation error: %s", self._name, e, exc_info=True)
             return None
 
     async def async_save_data(self):
@@ -780,7 +794,7 @@ class AutoTpiManager:
                 "version": STORAGE_VERSION,
                 "learning_active": self._learning_active,
                 "data": [p.to_dict() for p in points_to_save],
-                "completed_tpi_cycles": [c.to_dict() for c in self._completed_tpi_cycles[-50:]],
+                "completed_tpi_cycles": [c.to_dict() for c in self._completed_tpi_cycles[-MAX_STORED_CYCLES:]],
                 "thermal_model": self._thermal_model.to_dict() if self._thermal_model else None,
                 "calculated_params": self._calculated_params,
                 "learning_quality": self._learning_quality.value,
@@ -790,7 +804,7 @@ class AutoTpiManager:
             with open(self._storage_path, 'w') as f:
                 json.dump(data, f, indent=2)
         except Exception as e:
-            _LOGGER.error("%s - Auto TPI: Save error: %s", self._unique_id, e)
+            _LOGGER.error("%s - Auto TPI: Save error: %s", self._name, e)
 
     async def async_load_data(self):
         """Load data."""
