@@ -40,6 +40,7 @@
           "temperature_sensor_entity_id": "ID entity snímača teploty",
           "last_seen_temperature_sensor_entity_id": "Dátum posledného zobrazenia izbovej teploty",
           "external_temperature_sensor_entity_id": "ID entity externého snímača teploty",
+          "humidity_sensor_entity_id": "Senzor vlhkosti",
           "cycle_min": "Trvanie cyklu (minúty)",
           "temp_min": "Minimálna povolená teplota",
           "temp_max": "Maximálna povolená teplota",
@@ -52,7 +53,8 @@
         "data_description": {
           "temperature_sensor_entity_id": "ID entity snímača izbovej teploty",
           "last_seen_temperature_sensor_entity_id": "Naposledy videný snímač izbovej teploty ID entity. Mal by to byť snímač dátumu a času",
-          "external_temperature_sensor_entity_id": "ID entity snímača vonkajšej teploty. Nepoužíva sa, ak je zvolená centrálna konfigurácia"
+          "external_temperature_sensor_entity_id": "ID entity snímača vonkajšej teploty. Nepoužíva sa, ak je zvolená centrálna konfigurácia",
+          "humidity_sensor_entity_id": "Entita senzoru vlhkosti. Používa sa na zlepšenie tepelného modelu Auto TPI."
         }
       },
       "features": {
@@ -275,6 +277,7 @@
           "temperature_sensor_entity_id": "ID entity snímača teploty",
           "last_seen_temperature_sensor_entity_id": "Dátum posledného zobrazenia izbovej teploty",
           "external_temperature_sensor_entity_id": "ID entity externého snímača teploty",
+          "humidity_sensor_entity_id": "Senzor vlhkosti",
           "cycle_min": "Trvanie cyklu (minúty)",
           "temp_min": "Minimálna povolená teplota",
           "temp_max": "Maximálna povolená teplota",
@@ -287,7 +290,8 @@
         "data_description": {
           "temperature_sensor_entity_id": "ID entity snímača izbovej teploty",
           "last_seen_temperature_sensor_entity_id": "Naposledy videný snímač izbovej teploty ID entity. Mal by to byť snímač dátumu a času",
-          "external_temperature_sensor_entity_id": "ID entity snímača vonkajšej teploty. Nepoužíva sa, ak je zvolená centrálna konfigurácia"
+          "external_temperature_sensor_entity_id": "ID entity snímača vonkajšej teploty. Nepoužíva sa, ak je zvolená centrálna konfigurácia",
+          "humidity_sensor_entity_id": "ID entity senzoru vlhkosti. Umožňuje zlepšiť tepelný model pre automatické nastavenie koeficientov TPI."
         }
       },
       "features": {

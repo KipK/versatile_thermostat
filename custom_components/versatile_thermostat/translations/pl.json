@@ -42,6 +42,7 @@
           "temperature_sensor_entity_id": "Temperatura pomieszczenia",
           "last_seen_temperature_sensor_entity_id": "Czas ostatniego odczytu temperatury pomieszczenia",
           "external_temperature_sensor_entity_id": "Identyfikator encji sensora temperatury zewnętrznej",
+          "humidity_sensor_entity_id": "Czujnik wilgotności",
           "cycle_min": "Czas trwania cyklu (w min.)",
           "temp_min": "Minimalna temperatura dopuszczalna",
           "temp_max": "Maksymalna temperatura dopuszczalna",
@@ -54,7 +55,8 @@
         "data_description": {
           "temperature_sensor_entity_id": "Identyfikator encji sensora temperatury pomieszczenia",
           "last_seen_temperature_sensor_entity_id": "Czas ostatniego odczytu temperatury pomieszczenia. Powinien być sensorem typu 'data/czas'",
-          "external_temperature_sensor_entity_id": "Identyfikator encji sensora temperatury zewnętrznej. Nie będzie używany, gdy wybrano konfigurację centralną"
+          "external_temperature_sensor_entity_id": "Identyfikator encji sensora temperatury zewnętrznej. Nie będzie używany, gdy wybrano konfigurację centralną",
+          "humidity_sensor_entity_id": "Identyfikator jednostki czujnika wilgotności. Umożliwia poprawę modelu termicznego dla automatycznego ustawiania współczynników TPI."
         }
       },
       "features": {
@@ -305,6 +307,7 @@
           "temperature_sensor_entity_id": "Temperatura pomieszczenia",
           "last_seen_temperature_sensor_entity_id": "Czas ostatniego odczytu temperatury pomieszczenia",
           "external_temperature_sensor_entity_id": "Identyfikator encji sensora temperatury zewnętrznej",
+          "humidity_sensor_entity_id": "Czujnik wilgotności",
 
           "cycle_min": "Czas trwania cyklu (w min.)",
           "temp_min": "Minimalna dopuszczalna temperatura",
@@ -318,7 +321,8 @@
         "data_description": {
           "temperature_sensor_entity_id": "Identyfikator encji sensora temperatury pomieszczenia",
           "last_seen_temperature_sensor_entity_id": "Czas ostatniego odczytu temperatury pomieszczenia. Powinien być sensorem typu 'data/czas'",
-          "external_temperature_sensor_entity_id": "Identyfikator encji sensora temperatury zewnętrznej. Nie będzie używany, gdy wybrano konfigurację centalną"
+          "external_temperature_sensor_entity_id": "Identyfikator encji sensora temperatury zewnętrznej. Nie będzie używany, gdy wybrano konfigurację centalną",
+          "humidity_sensor_entity_id": "Identyfikator jednostki czujnika wilgotności. Umożliwia poprawę modelu termicznego dla automatycznego ustawiania współczynników TPI."
         }
       },
       "features": {

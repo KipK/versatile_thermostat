@@ -42,6 +42,7 @@
           "temperature_sensor_entity_id": "Температура в помещении",
           "last_seen_temperature_sensor_entity_id": "Время последнего измерения температуры",
           "external_temperature_sensor_entity_id": "ID датчика уличной температуры",
+          "humidity_sensor_entity_id": "Датчик влажности",
           "cycle_min": "Длительность цикла (минуты)",
           "temp_min": "Минимальная допустимая температура",
           "temp_max": "Максимальная допустимая температура",
@@ -54,7 +55,8 @@
         "data_description": {
           "temperature_sensor_entity_id": "ID датчика температуры в помещении",
           "last_seen_temperature_sensor_entity_id": "ID датчика времени последнего измерения температуры. Должен быть датчиком datetime",
-          "external_temperature_sensor_entity_id": "ID датчика уличной температуры. Не используется, если выбрана центральная конфигурация"
+          "external_temperature_sensor_entity_id": "ID датчика уличной температуры. Не используется, если выбрана центральная конфигурация",
+          "humidity_sensor_entity_id": "ID датчика влажности. Позволяет улучшить тепловую модель для автоматической настройки коэффициентов TPI."
         }
       },
       "features": {
@@ -301,6 +303,7 @@
           "temperature_sensor_entity_id": "Температура в помещении",
           "last_seen_temperature_sensor_entity_id": "Время последнего измерения температуры",
           "external_temperature_sensor_entity_id": "ID датчика уличной температуры",
+          "humidity_sensor_entity_id": "Датчик влажности",
           "cycle_min": "Длительность цикла (минуты)",
           "temp_min": "Минимальная допустимая температура",
           "temp_max": "Максимальная допустимая температура",
@@ -313,7 +316,8 @@
         "data_description": {
           "temperature_sensor_entity_id": "ID датчика температуры в помещении",
           "last_seen_temperature_sensor_entity_id": "ID датчика времени последнего измерения температуры. Должен быть датчиком datetime",
-          "external_temperature_sensor_entity_id": "ID датчика уличной температуры. Не используется, если выбрана центральная конфигурация"
+          "external_temperature_sensor_entity_id": "ID датчика уличной температуры. Не используется, если выбрана центральная конфигурация",
+          "humidity_sensor_entity_id": "ID датчика влажности. Позволяет улучшить тепловую модель для автоматической настройки коэффициентов TPI."
         }
       },
       "features": {
