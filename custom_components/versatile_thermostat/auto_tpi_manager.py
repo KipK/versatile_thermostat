@@ -14,6 +14,11 @@ try:
 except ImportError:
     minimize = None
 
+try:
+    from scipy.signal import savgol_filter
+except ImportError:
+    savgol_filter = None
+
 from homeassistant.core import HomeAssistant
 
 from .const import (
@@ -339,7 +344,48 @@ class AutoTpiManager:
         self._current_tpi_cycle = None
 
     def _compute_derivatives(self):
-        """Calculate smoothed temperature derivatives."""
+        """Calculate temperature derivatives dispatching to best available method."""
+        if savgol_filter is not None and len(self._data) >= 11:
+            self._compute_smooth_derivatives()
+        else:
+            self._compute_derivatives_simple()
+
+    def _compute_smooth_derivatives(self):
+        """Calculate derivatives using Savitzky-Golay filter."""
+        window_length = 11
+        polyorder = 2
+        
+        if len(self._data) < window_length:
+             return
+
+        # Extract temperature and time
+        temps = np.array([p.room_temp for p in self._data])
+        times = np.array([p.timestamp for p in self._data])
+        
+        # Calculate derivation step (average dt)
+        dt_avg = np.mean(np.diff(times))
+        if dt_avg <= 0:
+            return
+
+        # Savitzky-Golay derivative (deriv=1)
+        # delta=dt_avg scales the derivative to unit/second
+        try:
+            derivs = savgol_filter(temps, window_length=window_length, polyorder=polyorder, deriv=1, delta=dt_avg)
+            
+            # Convert to K/h
+            derivs_h = derivs * 3600.0
+            
+            # Update data points
+            for i in range(len(self._data)):
+                self._data[i].temp_derivative = derivs_h[i]
+                
+            _LOGGER.debug("%s - Auto TPI: Derivatives updated using Savitzky-Golay", self._unique_id)
+        except Exception as e:
+            _LOGGER.warning("%s - Auto TPI: Savitzky-Golay failed: %s. Fallback to simple.", self._unique_id, e)
+            self._compute_derivatives_simple()
+
+    def _compute_derivatives_simple(self):
+        """Calculate derivatives using simple local regression."""
         if len(self._data) < 3:
             return
         
@@ -360,6 +406,8 @@ class AutoTpiManager:
                 if dt > 0:
                     dT = temps[-1] - temps[0]
                     self._data[i].temp_derivative = (dT / dt) * 3600  # K/h
+        
+        _LOGGER.debug("%s - Auto TPI: Derivatives updated using simple method", self._unique_id)
 
     def _compute_hysteresis_incremental(self):
         """Compute is_gated_off state based on hysteresis (incremental)."""
@@ -536,7 +584,9 @@ class AutoTpiManager:
             rmse = rmse_val
 
             # Thermal model calculation
-            time_constant = 1.0 / alpha if alpha > 0 else 3600
+            # alpha is in 1/h (since Y is K/h), so 1/alpha is hours.
+            # We convert to seconds for the ThermalModel storage and consistency
+            time_constant = (1.0 / alpha) * 3600 if alpha > 0 else 3600
             
             self._thermal_model = ThermalModel(
                 heat_loss_coef=alpha,
@@ -553,23 +603,36 @@ class AutoTpiManager:
             # Improved formula: alpha / beta represents the power % needed to compensate 1°C diff
             k_ext = np.clip(alpha / beta, 0.01, 0.20)
             
-            # k_int: reactivity to internal deviations
-            # Based on characteristic time and efficiency
-            desired_response_time = 1800 / 3600  # 30 min target in hours
-            k_int = np.clip(1.0 / (beta * desired_response_time), 0.01, 1.0)
+            # Adaptive TPI Coefficients Logic
+            tau_hours = time_constant / 3600.0
+            
+            # Desired response time (adaptive)
+            # Rule: max(0.5, tau * 0.1)
+            desired_response_hours = max(0.5, tau_hours * 0.1)
+            
+            # k_int calculation
+            # k_int = 1.0 / (beta * desired_response_hours)
+            val_k_int = 1.0 / (beta * desired_response_hours)
+            
+            # Fast building boost (tau < 2h)
+            if tau_hours < 2.0:
+                val_k_int *= 1.2
+                
+            k_int = np.clip(val_k_int, 0.01, 1.0)
             
             self._calculated_params = {
                 CONF_TPI_COEF_INT: round(k_int, 3),
                 CONF_TPI_COEF_EXT: round(k_ext, 3),
                 "confidence": round(r_squared, 3),
                 "quality": self._learning_quality.value,
-                "time_constant_hours": round(time_constant / 3600, 2)
+                "time_constant_hours": round(tau_hours, 2),
+                "desired_response_hours": round(desired_response_hours, 2)
             }
             
             await self.async_save_data()
             
-            _LOGGER.info("%s - Auto TPI: TPI params calculated: k_int=%.3f, k_ext=%.3f (confidence=%.1f%%)",
-                        self._unique_id, k_int, k_ext, r_squared * 100)
+            _LOGGER.info("%s - Auto TPI: TPI params calculated: k_int=%.3f, k_ext=%.3f (tau=%.1fh, resp=%.1fh, conf=%.1f%%)",
+                        self._unique_id, k_int, k_ext, tau_hours, desired_response_hours, r_squared * 100)
             
             return self._calculated_params
 
