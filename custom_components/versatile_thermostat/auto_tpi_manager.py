@@ -522,16 +522,19 @@ class AutoTpiManager:
         self._last_hysteresis_idx = len(self._data) - 1
 
     async def calculate(self) -> Optional[dict]:
-        """Calculate TPI parameters with robust validation."""
+        """Calculate TPI parameters with robust validation using Constrained Optimization."""
         
-        # Check for concept drift
-        if self._detect_concept_drift():
-            return None
+        # Check for concept drift (now only warns)
+        self._detect_concept_drift()
 
         # Pre-checks
         if len(self._completed_tpi_cycles) < MIN_TPI_CYCLES:
             _LOGGER.info("%s - Auto TPI: Insufficient TPI cycles (%d/%d)",
                          self._name, len(self._completed_tpi_cycles), MIN_TPI_CYCLES)
+            return None
+        
+        if minimize is None:
+            _LOGGER.warning("%s - Auto TPI: Scipy minimize not available. Cannot perform calculation.", self._name)
             return None
 
         try:
@@ -619,71 +622,82 @@ class AutoTpiManager:
             X_val = X[split_idx:]
             Y_val = Y[split_idx:]
 
-            # Regression on TRAIN only
-            coeffs, _, _, _ = np.linalg.lstsq(X_train, Y_train, rcond=None)
-
-            # Optimization (Nelder-Mead)
-            if minimize is not None:
+            # --- Constrained Optimization Strategy ---
+            
+            # Helper: Train model with bounds
+            # bounds: list of (min, max) tuples
+            def train_constrained(X_in, Y_in, initial_guess, bounds):
                 def objective(params):
-                    return np.sum((Y_train - (X_train @ params))**2)
-
-                try:
-                    res = minimize(objective, x0=coeffs, method='Nelder-Mead')
-                    loss_reg = objective(coeffs)
-                    loss_opt = res.fun
-
-                    if loss_opt < loss_reg * 0.95:
-                        _LOGGER.info("%s - Auto TPI: Optimization improved loss from %.4f to %.4f",
-                                     self._name, loss_reg, loss_opt)
-                        coeffs = res.x
-                except Exception as e:
-                    _LOGGER.warning("%s - Auto TPI: Optimization failed: %s", self._name, e)
-
-            gamma = None
-            if use_humidity:
-                alpha, beta, gamma = coeffs
+                    return np.sum((Y_in - (X_in @ params))**2)
                 
-                # Validate gamma
-                if abs(gamma) > 0.5:
-                    _LOGGER.warning("%s - Auto TPI: Invalid humidity coefficient (gamma=%.4f). Fallback to 2-var regression.",
-                                    self._name, gamma)
-                    # Fallback to 2 variables
-                    X = np.column_stack([x_loss_list, x_power_list])
-                    X_train = X[:split_idx]
-                    X_val = X[split_idx:]
-                    
-                    coeffs, _, _, _ = np.linalg.lstsq(X_train, Y_train, rcond=None)
-                    
-                    if minimize is not None:
-                        # Re-optimize for 2 vars
-                        def objective_2var(params):
-                            return np.sum((Y_train - (X_train @ params))**2)
-                            
-                        try:
-                            res = minimize(objective_2var, x0=coeffs, method='Nelder-Mead')
-                            coeffs = res.x
-                        except Exception:
-                            pass
-                            
-                    alpha, beta = coeffs
-                    gamma = None
-                    # use_humidity remains True in local scope but we set gamma to None
-                    # to indicate it wasn't kept.
-                else:
-                    _LOGGER.info("%s - Auto TPI: Model coefficients: alpha=%.6f, beta=%.6f, gamma=%.6f",
-                                self._name, alpha, beta, gamma)
-            else:
-                alpha, beta = coeffs
-                _LOGGER.info("%s - Auto TPI: Model coefficients: alpha=%.6f, beta=%.6f",
-                            self._name, alpha, beta)
+                try:
+                    res = minimize(
+                        objective,
+                        x0=initial_guess,
+                        method='L-BFGS-B',
+                        bounds=bounds
+                    )
+                    return res.x, res.fun, res.success
+                except Exception as ex:
+                    _LOGGER.warning("Auto TPI: Optimization exception: %s", ex)
+                    return initial_guess, float('inf'), False
 
-            # Physical validation
-            if beta <= 0 or alpha <= 0:
-                _LOGGER.warning("%s - Auto TPI: Invalid coefficients (non-positive)", self._name)
-                return None
+            # Initial guesses (physically reasonable values)
+            # alpha ~ 0.5 (2 hours time constant), beta ~ 10 (10K/h max heating), gamma ~ 0
+            
+            final_coeffs = None
+            gamma = None
+
+            if use_humidity:
+                # 3 variables: alpha, beta, gamma
+                # Bounds:
+                # Alpha: 0.001 to 10 (Time constant: 1000h down to 6 min)
+                # Beta:  0.001 to 50 (Efficiency: minimal to super powerful)
+                # Gamma: -0.5 to 0.5 (Humidity effect: limited range)
+                bounds_3var = [(0.001, 10.0), (0.001, 50.0), (-0.5, 0.5)]
+                guess_3var = [0.5, 10.0, 0.0]
+                
+                coeffs, _, success = train_constrained(X_train, Y_train, guess_3var, bounds_3var)
+                
+                if success:
+                    alpha, beta, gamma = coeffs
+                    _LOGGER.info("%s - Auto TPI: 3-var optimization success: a=%.4f, b=%.4f, g=%.4f",
+                                 self._name, alpha, beta, gamma)
+                    final_coeffs = coeffs
+                else:
+                    _LOGGER.info("%s - Auto TPI: 3-var optimization failed. Retrying with 2 vars.", self._name)
+                    use_humidity = False
+
+            if not use_humidity:
+                # 2 variables: alpha, beta
+                bounds_2var = [(0.001, 10.0), (0.001, 50.0)]
+                guess_2var = [0.5, 10.0]
+                
+                coeffs, _, success = train_constrained(X_train, Y_train, guess_2var, bounds_2var)
+                
+                alpha, beta = coeffs
+                gamma = None
+                
+                if success:
+                    _LOGGER.info("%s - Auto TPI: 2-var optimization success: a=%.4f, b=%.4f",
+                                 self._name, alpha, beta)
+                else:
+                     _LOGGER.warning("%s - Auto TPI: 2-var optimization failed to converge. Using best effort.", self._name)
+
+                final_coeffs = coeffs
+
+            # Re-verify we have valid coeffs (just in case)
+            if final_coeffs is None:
+                 return None
+
+            alpha = final_coeffs[0]
+            beta = final_coeffs[1]
+            if alpha <= 0 or beta <= 0:
+                 _LOGGER.warning("%s - Auto TPI: Constrained optimization returned non-positive values?! a=%.4f, b=%.4f", self._name, alpha, beta)
+                 return None
 
             # Evaluation on VAL
-            Y_pred_val = X_val @ coeffs
+            Y_pred_val = X_val @ final_coeffs
             ss_res_val = np.sum((Y_val - Y_pred_val)**2)
             ss_tot_val = np.sum((Y_val - np.mean(Y_val))**2)
 
@@ -707,9 +721,9 @@ class AutoTpiManager:
             _LOGGER.info("%s - Auto TPI: Model quality on validation: R²=%.3f, RMSE=%.3f K/h, Quality=%s",
                         self._name, r_squared_val, rmse_val, self._learning_quality.value)
 
-            # REJET si R²_val < 0.4
-            if r_squared_val < 0.4:
-                _LOGGER.warning("%s - Auto TPI: Model fails on validation set (R²_val=%.3f)",
+            # REJET si R²_val < 0.1 (relaxed from 0.4 to allow continuous learning with noisy data)
+            if r_squared_val < 0.1:
+                _LOGGER.warning("%s - Auto TPI: Model signal too weak on validation set (R²_val=%.3f)",
                                 self._name, r_squared_val)
                 return None
             
