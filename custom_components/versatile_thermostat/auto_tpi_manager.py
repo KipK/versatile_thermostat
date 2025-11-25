@@ -144,6 +144,7 @@ class AutoTpiManager:
         self._current_tpi_cycle: Optional[TpiCycle] = None
         self._completed_tpi_cycles: List[TpiCycle] = []
         self._thermostat_mode: str = "unknown"
+        self._last_hysteresis_idx: int = -1
 
     @property
     def learning_active(self) -> bool:
@@ -268,13 +269,15 @@ class AutoTpiManager:
 
         # Memory limitation
         if len(self._data) > MAX_DATA_POINTS:
+            removed = len(self._data) - MAX_DATA_POINTS
             self._data = self._data[-MAX_DATA_POINTS:]
+            self._last_hysteresis_idx = max(-1, self._last_hysteresis_idx - removed)
 
         self._last_update = now
         
         # Derivative calculation
         self._compute_derivatives()
-        self._compute_hysteresis()
+        self._compute_hysteresis_incremental()
         
         await self.async_save_data()
         
@@ -358,8 +361,8 @@ class AutoTpiManager:
                     dT = temps[-1] - temps[0]
                     self._data[i].temp_derivative = (dT / dt) * 3600  # K/h
 
-    def _compute_hysteresis(self):
-        """Compute is_gated_off state based on hysteresis."""
+    def _compute_hysteresis_incremental(self):
+        """Compute is_gated_off state based on hysteresis (incremental)."""
         if not self._data:
             return
 
@@ -367,11 +370,20 @@ class AutoTpiManager:
         if self._tpi_threshold_low == 0.0 or self._tpi_threshold_high == 0.0:
             return
 
-        # Initialize with first point
-        # We assume start is not gated off unless already over threshold
+        # Determine start index
+        start_idx = self._last_hysteresis_idx + 1
+
+        # If no new points, nothing to do
+        if start_idx >= len(self._data):
+            return
+
+        # Initialize state
         current_gated_off = False
-        
-        for point in self._data:
+        if self._last_hysteresis_idx >= 0:
+            current_gated_off = self._data[self._last_hysteresis_idx].is_gated_off
+
+        for i in range(start_idx, len(self._data)):
+            point = self._data[i]
             overshoot = point.room_temp - point.target_temp
             
             # Hysteresis logic
@@ -381,6 +393,9 @@ class AutoTpiManager:
                 current_gated_off = False
             
             point.is_gated_off = current_gated_off
+
+        # Update last index
+        self._last_hysteresis_idx = len(self._data) - 1
 
     async def calculate(self) -> Optional[dict]:
         """Calculate TPI parameters with robust validation."""
@@ -569,14 +584,20 @@ class AutoTpiManager:
     def _save_data_sync(self):
         """Sync save."""
         try:
+            # Calculate adjusted hysteresis index for the saved slice
+            points_to_save = self._data[-1000:]
+            offset = len(self._data) - len(points_to_save)
+            saved_hysteresis_idx = max(-1, self._last_hysteresis_idx - offset)
+
             data = {
                 "version": STORAGE_VERSION,
                 "learning_active": self._learning_active,
-                "data": [p.to_dict() for p in self._data[-1000:]],  # Keep last 1000
+                "data": [p.to_dict() for p in points_to_save],  # Keep last 1000
                 "completed_tpi_cycles": [c.to_dict() for c in self._completed_tpi_cycles[-50:]],
                 "thermal_model": self._thermal_model.to_dict() if self._thermal_model else None,
                 "calculated_params": self._calculated_params,
-                "learning_quality": self._learning_quality.value
+                "learning_quality": self._learning_quality.value,
+                "last_hysteresis_idx": saved_hysteresis_idx
             }
             os.makedirs(os.path.dirname(self._storage_path), exist_ok=True)
             with open(self._storage_path, 'w') as f:
@@ -612,6 +633,11 @@ class AutoTpiManager:
                     
                     quality_str = data.get("learning_quality", "insufficient")
                     self._learning_quality = LearningQuality(quality_str)
+
+                    # Restore hysteresis index
+                    self._last_hysteresis_idx = data.get("last_hysteresis_idx", -1)
+                    if self._last_hysteresis_idx >= len(self._data):
+                        self._last_hysteresis_idx = len(self._data) - 1
                     
                     _LOGGER.info("%s - Auto TPI: Data loaded: %d points, %d tpi_cycles, quality=%s",
                                self._unique_id, len(self._data),
@@ -626,6 +652,7 @@ class AutoTpiManager:
                     self._current_tpi_cycle = None
                     self._calculated_params = {}
                     self._learning_quality = LearningQuality.INSUFFICIENT
+                    self._last_hysteresis_idx = -1
                     # We do NOT return here, we just initialized empty state
                     
         except Exception as e:
