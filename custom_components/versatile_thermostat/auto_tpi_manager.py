@@ -216,6 +216,64 @@ class AutoTpiManager:
         self._learning_active = False
         await self.async_save_data()
 
+    def _detect_concept_drift(self) -> bool:
+        """Detect concept drift by comparing recent vs older cycles."""
+        cycles = self._completed_tpi_cycles
+        if len(cycles) < 40:
+            return False
+
+        recent = cycles[-20:]
+        older = cycles[-40:-20]
+
+        # Extract metric: temp_evolution
+        recent_vals = [c.temp_evolution for c in recent]
+        older_vals = [c.temp_evolution for c in older]
+
+        mu_recent = np.mean(recent_vals)
+        sigma_recent = np.std(recent_vals)
+        
+        mu_older = np.mean(older_vals)
+        sigma_older = np.std(older_vals)
+
+        # Avoid division by zero if both std devs are 0
+        if sigma_recent == 0 and sigma_older == 0:
+            return False
+            
+        sigma_pooled = np.sqrt((sigma_recent**2 + sigma_older**2) / 2)
+        
+        if sigma_pooled == 0:
+            return False
+
+        delta_norm = abs(mu_recent - mu_older) / sigma_pooled
+
+        if delta_norm > 2.0:
+            _LOGGER.warning("%s - Auto TPI: Concept drift detected (delta_norm=%.2f). Stopping learning.",
+                            self._unique_id, delta_norm)
+            return True
+
+        return False
+
+    def _compress_historical_data(self) -> List[DataPoint]:
+        """Compress historical data by downsampling older points."""
+        if len(self._data) <= 500:
+            return self._data
+
+        # Split data
+        recent_data = self._data[-500:]
+        older_data = self._data[:-500]
+
+        # Downsample older data (1 out of 5)
+        compressed_older = older_data[::5]
+
+        # Combine
+        compressed_data = compressed_older + recent_data
+        
+        reduction = len(self._data) - len(compressed_data)
+        if reduction > 0:
+             _LOGGER.info("%s - Auto TPI: Data compressed. Removed %d points.", self._unique_id, reduction)
+
+        return compressed_data
+
     def _is_outlier(self, point: DataPoint, window: List[DataPoint]) -> bool:
         """Detect outliers with IQR method."""
         if len(window) < 10:
@@ -448,6 +506,10 @@ class AutoTpiManager:
     async def calculate(self) -> Optional[dict]:
         """Calculate TPI parameters with robust validation."""
         
+        # Check for concept drift
+        if self._detect_concept_drift():
+            return None
+
         # Pre-checks
         if len(self._completed_tpi_cycles) < MIN_TPI_CYCLES:
             _LOGGER.info("%s - Auto TPI: Insufficient TPI cycles (%d/%d)",
@@ -647,15 +709,18 @@ class AutoTpiManager:
     def _save_data_sync(self):
         """Sync save."""
         try:
-            # Calculate adjusted hysteresis index for the saved slice
-            points_to_save = self._data[-1000:]
-            offset = len(self._data) - len(points_to_save)
-            saved_hysteresis_idx = max(-1, self._last_hysteresis_idx - offset)
+            # Compress data before saving
+            points_to_save = self._compress_historical_data()
+            
+            # Since we assume all points in memory have been processed for hysteresis,
+            # and points_to_save preserves the 'is_gated_off' attribute,
+            # we can set the saved index to the last point of the saved data.
+            saved_hysteresis_idx = len(points_to_save) - 1
 
             data = {
                 "version": STORAGE_VERSION,
                 "learning_active": self._learning_active,
-                "data": [p.to_dict() for p in points_to_save],  # Keep last 1000
+                "data": [p.to_dict() for p in points_to_save],
                 "completed_tpi_cycles": [c.to_dict() for c in self._completed_tpi_cycles[-50:]],
                 "thermal_model": self._thermal_model.to_dict() if self._thermal_model else None,
                 "calculated_params": self._calculated_params,
