@@ -135,6 +135,9 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
         self._last_temperature_measure = None
         self._cur_ext_temp = None
 
+        self._humidity_sensor_entity_id = None
+        self._cur_humidity = None
+
         self._should_relaunch_control_heating = None
 
         self._attr_translation_key = "versatile_thermostat"
@@ -300,6 +303,7 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
             CONF_LAST_SEEN_TEMP_SENSOR
         )
         self._ext_temp_sensor_entity_id = entry_infos.get(CONF_EXTERNAL_TEMP_SENSOR)
+        self._humidity_sensor_entity_id = entry_infos.get(CONF_HUMIDITY_SENSOR)
 
         self._tpi_coef_int = entry_infos.get(CONF_TPI_COEF_INT)
         self._tpi_coef_ext = entry_infos.get(CONF_TPI_COEF_EXT)
@@ -328,6 +332,7 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
         self._swing_mode = None
         self._cur_temp = None
         self._cur_ext_temp = None
+        self._cur_humidity = None
 
         # Fix parameters for TPI
         if (
@@ -450,6 +455,15 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
                 )
             )
 
+        if self._humidity_sensor_entity_id:
+            self.async_on_remove(
+                async_track_state_change_event(
+                    self.hass,
+                    [self._humidity_sensor_entity_id],
+                    self._async_humidity_changed,
+                )
+            )
+
         self.async_on_remove(self.remove_thermostat)
 
         # issue 428. Link to others entities will start at link
@@ -543,6 +557,27 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
                 "cause no external sensor",
                 self,
             )
+
+        if self._humidity_sensor_entity_id:
+            humidity_state = self.hass.states.get(
+                self._humidity_sensor_entity_id
+            )
+            if humidity_state and humidity_state.state not in (
+                STATE_UNAVAILABLE,
+                STATE_UNKNOWN,
+            ):
+                _LOGGER.debug(
+                    "%s - humidity sensor have been retrieved: %.1f",
+                    self,
+                    float(humidity_state.state),
+                )
+                await self._async_update_humidity(humidity_state)
+            else:
+                _LOGGER.debug(
+                    "%s - humidity sensor have NOT been retrieved "
+                    "cause unknown or unavailable",
+                    self,
+                )
 
         # Then we:
         # - refresh all managers states,
@@ -933,6 +968,11 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
     def current_outdoor_temperature(self) -> float | None:
         """Return the outdoor sensor temperature."""
         return self._cur_ext_temp
+
+    @property
+    def current_humidity(self) -> float | None:
+        """Return the current humidity."""
+        return self._cur_humidity
 
     @property
     def is_aux_heat(self) -> bool | None:
@@ -1466,6 +1506,7 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
                 self.power_percent,
                 self.target_temperature,
                 self.hvac_action,
+                self.current_humidity,
             )
             
             # Check if we have new parameters
@@ -1889,6 +1930,30 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
             #     await self._safety_manager.refresh_state()
         except ValueError as ex:
             _LOGGER.error("Unable to update external temperature from sensor: %s", ex)
+
+    @callback
+    async def _async_humidity_changed(self, event: Event):
+        """Handle humidity of the sensor changes."""
+        new_state: State = event.data.get("new_state")
+        write_event_log(_LOGGER, self, f"Humidity changed to state {new_state.state if new_state else None}")
+
+        if new_state is None or new_state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
+            return
+
+        await self._async_update_humidity(new_state)
+
+    @callback
+    async def _async_update_humidity(self, state: State):
+        """Update thermostat with latest state from sensor."""
+        try:
+            cur_humidity = float(state.state)
+            if math.isnan(cur_humidity) or math.isinf(cur_humidity):
+                raise ValueError(f"Sensor has illegal state {state.state}")
+            self._cur_humidity = cur_humidity
+            _LOGGER.debug("%s - New humidity is %s", self, self._cur_humidity)
+
+        except ValueError as ex:
+            _LOGGER.error("Unable to update humidity from sensor: %s", ex)
 
     ##
     ## Services (actions)

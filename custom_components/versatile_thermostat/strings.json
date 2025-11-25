@@ -42,6 +42,7 @@
           "temperature_sensor_entity_id": "Room temperature",
           "last_seen_temperature_sensor_entity_id": "Last seen room temperature datetime",
           "external_temperature_sensor_entity_id": "Outdoor temperature sensor entity id",
+          "humidity_sensor_entity_id": "Humidity sensor entity id",
           "cycle_min": "Cycle duration (minutes)",
           "temp_min": "Minimum temperature allowed",
           "temp_max": "Maximum temperature allowed",
@@ -54,7 +55,8 @@
         "data_description": {
           "temperature_sensor_entity_id": "Room temperature sensor entity id",
           "last_seen_temperature_sensor_entity_id": "Last seen room temperature sensor entity id. Should be datetime sensor",
-          "external_temperature_sensor_entity_id": "Outdoor temperature sensor entity id. Not used if central configuration is selected"
+          "external_temperature_sensor_entity_id": "Outdoor temperature sensor entity id. Not used if central configuration is selected",
+          "humidity_sensor_entity_id": "Humidity sensor entity id. Used for better auto regulation"
         }
       },
       "features": {

@@ -43,6 +43,7 @@
           "temperature_sensor_entity_id": "Teplota místnosti",
           "last_seen_temperature_sensor_entity_id": "Čas posledního měření teploty místnosti",
           "external_temperature_sensor_entity_id": "ID entity senzoru venkovní teploty",
+          "humidity_sensor_entity_id": "Senzor vlhkosti",
           "cycle_min": "Délka cyklu (minuty)",
           "temp_min": "Minimální povolená teplota",
           "temp_max": "Maximální povolená teplota",
@@ -55,7 +56,8 @@
         "data_description": {
           "temperature_sensor_entity_id": "ID entity senzoru teploty místnosti",
           "last_seen_temperature_sensor_entity_id": "ID entity posledního času měření teploty místnosti. Měl by být datetime senzor",
-          "external_temperature_sensor_entity_id": "ID entity senzoru venkovní teploty. Nepoužívá se, pokud je zvolena centrální konfigurace"
+          "external_temperature_sensor_entity_id": "ID entity senzoru venkovní teploty. Nepoužívá se, pokud je zvolena centrální konfigurace",
+          "humidity_sensor_entity_id": "ID entity senzoru vlhkosti. Umožňuje zlepšení tepelného modelu pro automatické nastavení koeficientů TPI."
         }
       },
       "features": {
@@ -299,6 +301,7 @@
           "temperature_sensor_entity_id": "Teplota místnosti",
           "last_seen_temperature_sensor_entity_id": "Čas posledního měření teploty místnosti",
           "external_temperature_sensor_entity_id": "ID entity senzoru venkovní teploty",
+          "humidity_sensor_entity_id": "Senzor vlhkosti",
           "cycle_min": "Délka cyklu (minuty)",
           "temp_min": "Minimální povolená teplota",
           "temp_max": "Maximální povolená teplota",
@@ -311,7 +314,8 @@
         "data_description": {
           "temperature_sensor_entity_id": "ID entity senzoru teploty místnosti",
           "last_seen_temperature_sensor_entity_id": "ID entity posledního času měření teploty místnosti. Měl by být datetime senzor",
-          "external_temperature_sensor_entity_id": "ID entity senzoru venkovní teploty. Nepoužívá se, pokud je zvolena centrální konfigurace"
+          "external_temperature_sensor_entity_id": "ID entity senzoru venkovní teploty. Nepoužívá se, pokud je zvolena centrální konfigurace",
+          "humidity_sensor_entity_id": "ID entity senzoru vlhkosti. Umožňuje zlepšení tepelného modelu pro automatické nastavení koeficientů TPI."
         }
       },
       "features": {

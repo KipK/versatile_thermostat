@@ -43,6 +43,7 @@
           "temperature_sensor_entity_id": "Temperatura ambiente",
           "last_seen_temperature_sensor_entity_id": "Ultima visualizzazione data e ora temperatura ambiente",
           "external_temperature_sensor_entity_id": "entity id del sensore di temperatura esterna",
+          "humidity_sensor_entity_id": "Sensore di umidità",
           "cycle_min": "Durata ciclo (minuti)",
           "temp_min": "Temperatura minima permessa",
           "temp_max": "Temperatura massima permessa",
@@ -55,7 +56,8 @@
         "data_description": {
           "temperature_sensor_entity_id": "Entity id del sensore di temperatura ambiente",
           "last_seen_temperature_sensor_entity_id": "Ultima visualizzazione entity id del sensore di temperatura ambiente. Dovrebbe essere il sensore data e ora",
-          "external_temperature_sensor_entity_id": "Entity id del sensore di temperatura esterna. Non utilizzato se è selezionata la configurazione centralizzata"
+          "external_temperature_sensor_entity_id": "Entity id del sensore di temperatura esterna. Non utilizzato se è selezionata la configurazione centralizzata",
+          "humidity_sensor_entity_id": "ID entità del sensore di umidità. Consente di migliorare il modello termico per l'impostazione automatica dei coefficienti TPI."
         }
       },
       "features": {
@@ -303,6 +305,7 @@
           "temperature_sensor_entity_id": "Temperatura ambiente",
           "last_seen_temperature_sensor_entity_id": "Ultima visualizzazione data e ora temperatura ambiente",
           "external_temperature_sensor_entity_id": "Entity id del sensore di temperatura esterna",
+          "humidity_sensor_entity_id": "Sensore di umidità",
           "cycle_min": "Durata ciclo (minuti)",
           "temp_min": "Temperatura minima permessa",
           "temp_max": "Temperatura massima permessa",
@@ -315,7 +318,8 @@
         "data_description": {
           "temperature_sensor_entity_id": "Entity id del sensore di temperatura ambiente",
           "last_seen_temperature_sensor_entity_id": "Ultima visualizzazione entity id del sensore di temperatura ambiente. Dovrebbe essere il sensore data e ora",
-          "external_temperature_sensor_entity_id": "Entity id del sensore di temperatura esterna. Non utilizzato se è selezionata la configurazione centralizzata"
+          "external_temperature_sensor_entity_id": "Entity id del sensore di temperatura esterna. Non utilizzato se è selezionata la configurazione centralizzata",
+          "humidity_sensor_entity_id": "ID entità del sensore di umidità. Consente di migliorare il modello termico per l'impostazione automatica dei coefficienti TPI."
         }
       },
       "features": {

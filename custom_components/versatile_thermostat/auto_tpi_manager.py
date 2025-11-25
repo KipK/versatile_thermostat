@@ -54,6 +54,7 @@ class DataPoint:
     is_heating: bool
     temp_derivative: Optional[float] = None
     is_gated_off: bool = False
+    humidity: Optional[float] = None
     
     def to_dict(self) -> dict:
         return asdict(self)
@@ -120,6 +121,7 @@ class ThermalModel:
     rmse: float
     # Number of points used
     n_points: int
+    humidity_coef: Optional[float] = None
     
     def to_dict(self) -> dict:
         return asdict(self)
@@ -288,7 +290,8 @@ class AutoTpiManager:
         return point.room_temp < lower or point.room_temp > upper
 
     async def update(self, room_temp: float, ext_temp: float,
-                    power_percent: float, target_temp: float, hvac_action: str):
+                    power_percent: float, target_temp: float, hvac_action: str,
+                    humidity: Optional[float] = None):
         """Add a data point with validation."""
         if not self._learning_active:
             return
@@ -315,7 +318,8 @@ class AutoTpiManager:
             ext_temp=ext_temp,
             power_percent=power_percent,
             target_temp=target_temp,
-            is_heating=power_percent > 10.0
+            is_heating=power_percent > 10.0,
+            humidity=humidity
         )
 
         # Outlier filtering (on sliding window)
@@ -521,11 +525,13 @@ class AutoTpiManager:
             y_list = []
             x_loss_list = []
             x_power_list = []
+            x_humidity_list = []
             
-            # We want to fit: DeltaTemp/dt = -alpha * (Room - Ext) + beta * Power
+            # We want to fit: DeltaTemp/dt = -alpha * (Room - Ext) + beta * Power (+ gamma * (Humidity - 50))
             # So Y = DeltaTemp/dt
             # X1 = -(Room - Ext)
             # X2 = Power (0-1)
+            # X3 = Humidity - 50
 
             for cycle in self._completed_tpi_cycles:
                 if not cycle.data_points:
@@ -556,15 +562,34 @@ class AutoTpiManager:
                 avg_ext_temp = np.mean([p.ext_temp for p in valid_points])
                 avg_power = sum(p.power_percent for p in valid_points) / len(valid_points) / 100.0  # Normalize to 0-1
                 
+                # Humidity handling
+                humidities = [p.humidity for p in valid_points if p.humidity is not None]
+                if humidities:
+                    avg_humidity = np.mean(humidities) - 50.0  # Centered
+                else:
+                    avg_humidity = None
+
                 y_list.append(d_temp_dt)
                 x_loss_list.append(-(avg_room_temp - avg_ext_temp))
                 x_power_list.append(avg_power)
+                x_humidity_list.append(avg_humidity)
                 
             if len(y_list) < MIN_TPI_CYCLES:
                 return None
             
+            # Determine if we use humidity
+            # We check the percentage of cycles that had valid humidity data (avg_humidity is not None)
+            valid_humidity_cycles = sum(1 for h in x_humidity_list if h is not None)
+            use_humidity = (valid_humidity_cycles / len(y_list)) >= 0.70
+            
             Y = np.array(y_list)
-            X = np.column_stack([x_loss_list, x_power_list])
+            
+            if use_humidity:
+                # Replace None with 0 (mean of centered data if data is missing)
+                x_humidity_filled = [h if h is not None else 0.0 for h in x_humidity_list]
+                X = np.column_stack([x_loss_list, x_power_list, x_humidity_filled])
+            else:
+                X = np.column_stack([x_loss_list, x_power_list])
 
             # Split data: 80% train, 20% val
             n = len(Y)
@@ -600,10 +625,43 @@ class AutoTpiManager:
                 except Exception as e:
                     _LOGGER.warning("%s - Auto TPI: Optimization failed: %s", self._unique_id, e)
 
-            alpha, beta = coeffs
-
-            _LOGGER.info("%s - Auto TPI: Model coefficients: alpha=%.6f, beta=%.6f",
-                        self._unique_id, alpha, beta)
+            gamma = None
+            if use_humidity:
+                alpha, beta, gamma = coeffs
+                
+                # Validate gamma
+                if abs(gamma) > 0.5:
+                    _LOGGER.warning("%s - Auto TPI: Invalid humidity coefficient (gamma=%.4f). Fallback to 2-var regression.",
+                                    self._unique_id, gamma)
+                    # Fallback to 2 variables
+                    X = np.column_stack([x_loss_list, x_power_list])
+                    X_train = X[:split_idx]
+                    X_val = X[split_idx:]
+                    
+                    coeffs, _, _, _ = np.linalg.lstsq(X_train, Y_train, rcond=None)
+                    
+                    if minimize is not None:
+                        # Re-optimize for 2 vars
+                        def objective_2var(params):
+                            return np.sum((Y_train - (X_train @ params))**2)
+                            
+                        try:
+                            res = minimize(objective_2var, x0=coeffs, method='Nelder-Mead')
+                            coeffs = res.x
+                        except Exception:
+                            pass
+                            
+                    alpha, beta = coeffs
+                    gamma = None
+                    # use_humidity remains True in local scope but we set gamma to None
+                    # to indicate it wasn't kept.
+                else:
+                    _LOGGER.info("%s - Auto TPI: Model coefficients: alpha=%.6f, beta=%.6f, gamma=%.6f",
+                                self._unique_id, alpha, beta, gamma)
+            else:
+                alpha, beta = coeffs
+                _LOGGER.info("%s - Auto TPI: Model coefficients: alpha=%.6f, beta=%.6f",
+                            self._unique_id, alpha, beta)
 
             # Physical validation
             if beta <= 0 or alpha <= 0:
@@ -656,7 +714,8 @@ class AutoTpiManager:
                 time_constant=time_constant,
                 r_squared=r_squared,
                 rmse=rmse,
-                n_points=len(self._completed_tpi_cycles)
+                n_points=len(self._completed_tpi_cycles),
+                humidity_coef=gamma
             )
 
             # Optimized TPI coefficients calculation

@@ -43,6 +43,7 @@
           "temperature_sensor_entity_id": "Capteur de température",
           "last_seen_temperature_sensor_entity_id": "Dernière vue capteur de température",
           "external_temperature_sensor_entity_id": "Capteur de température exterieure",
+          "humidity_sensor_entity_id": "Capteur d'humidité",
           "cycle_min": "Durée du cycle (minutes)",
           "temp_min": "Température minimale permise",
           "temp_max": "Température maximale permise",
@@ -55,7 +56,8 @@
         "data_description": {
           "temperature_sensor_entity_id": "Id d'entité du capteur de température",
           "last_seen_temperature_sensor_entity_id": "Id d'entité du capteur donnant la date et heure de dernière vue capteur de température. L'état doit être au format date heure (ex: 2024-03-31T17:07:03+00:00)",
-          "external_temperature_sensor_entity_id": "Entity id du capteur de température extérieure. Non utilisé si une configuration centrale est définie"
+          "external_temperature_sensor_entity_id": "Entity id du capteur de température extérieure. Non utilisé si une configuration centrale est définie",
+          "humidity_sensor_entity_id": "Entity id du capteur d'humidité. Permet d'améliorer le modèle thermique pour le paramètrage auto des coefficients TPI"
         }
       },
       "features": {
@@ -307,6 +309,7 @@
           "temperature_sensor_entity_id": "Capteur de température",
           "last_seen_temperature_sensor_entity_id": "Dernière vue capteur de température",
           "external_temperature_sensor_entity_id": "Capteur de température exterieure",
+          "humidity_sensor_entity_id": "Capteur d'humidité",
           "cycle_min": "Durée du cycle (minutes)",
           "temp_min": "Température minimale permise",
           "temp_max": "Température maximale permise",
@@ -319,7 +322,8 @@
         "data_description": {
           "temperature_sensor_entity_id": "Id d'entité du capteur de température",
           "last_seen_temperature_sensor_entity_id": "Id d'entité du capteur donnant la date et heure de dernière vue capteur de température. L'état doit être au format date heure (ex: 2024-03-31T17:07:03+00:00)",
-          "external_temperature_sensor_entity_id": "Entity id du capteur de température extérieure. Non utilisé si une configuration centrale est définie"
+          "external_temperature_sensor_entity_id": "Entity id du capteur de température extérieure. Non utilisé si une configuration centrale est définie",
+          "humidity_sensor_entity_id": "Entity id du capteur d'humidité. Permet d'améliorer le modèle thermique pour le paramètrage auto des coefficients TPI"
         }
       },
       "features": {
