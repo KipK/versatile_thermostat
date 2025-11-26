@@ -25,7 +25,7 @@ async def test_humidity_integration():
         return func(*args, **kwargs)
     hass.async_add_executor_job.side_effect = mock_async_add_executor_job
 
-    manager = AutoTpiManager(hass, "test_humidity", cycle_min=5)
+    manager = AutoTpiManager(hass, "test_humidity", "Test Humidity", cycle_min=5)
     
     # ---------------------------------------------------------
     # Test 1: Backward Compatibility (DataPoint without humidity)

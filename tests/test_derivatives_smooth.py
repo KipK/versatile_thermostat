@@ -24,7 +24,7 @@ async def test_derivatives_smooth():
     print("Starting Derivatives Smooth Test...")
     
     hass = MagicMock()
-    manager = AutoTpiManager(hass, "test_derivs", cycle_min=5)
+    manager = AutoTpiManager(hass, "test_derivs", "Test Derivs", cycle_min=5)
     
     # Generate synthetic data with noise
     # Signal: Sine wave + Noise

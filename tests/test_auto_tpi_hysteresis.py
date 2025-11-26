@@ -35,7 +35,7 @@ async def test_hysteresis_continuity():
     
     # Initialize Manager with hysteresis thresholds
     # High = 1.0, Low = -1.0
-    manager = AutoTpiManager(hass, "test_hysteresis", cycle_min=5, 
+    manager = AutoTpiManager(hass, "test_hysteresis", "Test Hysteresis", cycle_min=5,
                              tpi_threshold_high=1.0, tpi_threshold_low=-1.0)
     await manager.start_learning()
     
@@ -122,7 +122,7 @@ async def test_hysteresis_continuity():
         return
 
     # Create new manager and load
-    manager2 = AutoTpiManager(hass, "test_hysteresis", cycle_min=5, 
+    manager2 = AutoTpiManager(hass, "test_hysteresis", "Test Hysteresis", cycle_min=5,
                              tpi_threshold_high=1.0, tpi_threshold_low=-1.0)
     
     # Manually trigger load since it's usually called by init or setup

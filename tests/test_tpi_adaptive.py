@@ -25,7 +25,7 @@ async def test_adaptive_tpi_coefficients():
         return func(*args, **kwargs)
     hass.async_add_executor_job.side_effect = mock_async_add_executor_job
 
-    manager = AutoTpiManager(hass, "test_adaptive", cycle_min=5)
+    manager = AutoTpiManager(hass, "test_adaptive", "Test Adaptive", cycle_min=5)
     
     num_cycles = 20
     # beta in K/s for 100% power (0-1 range for power in formula?)

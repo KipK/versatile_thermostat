@@ -484,6 +484,10 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
 
         self.stop_recalculate_later()
 
+        if self._cycle_timer:
+            self._cycle_timer()
+            self._cycle_timer = None
+
         # stop listening for all managers
         for manager in self._managers:
             manager.stop_listening()

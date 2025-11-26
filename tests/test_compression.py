@@ -11,7 +11,7 @@ class TestCompression(unittest.TestCase):
         self.hass.config.path.return_value = "dummy_path.json"
         self.hass.async_add_executor_job = MagicMock()
         
-        self.manager = AutoTpiManager(self.hass, "test_compression", cycle_min=5)
+        self.manager = AutoTpiManager(self.hass, "test_compression", "Test Compression", cycle_min=5)
 
     def _create_points(self, count: int, start_idx: int = 0):
         """Helper to create a list of data points."""
