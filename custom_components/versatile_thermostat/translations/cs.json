@@ -30,6 +30,7 @@
           "advanced": "Pokročilé parametry",
           "auto_start_stop": "Automatické spuštění a zastavení",
           "valve_regulation": "Konfigurace regulace ventilu",
+          "auto_tpi_learning": "Auto TPI učení",
           "finalize": "Vše hotovo",
           "configuration_not_complete": "Konfigurace není kompletní"
         }
@@ -246,6 +247,14 @@
           "proportional_function": "Algoritmus k použití (TPI je momentálně jediný)",
           "min_opening_degrees": "Minimální hodnota stupně otevření pro každé podřízené zařízení, oddělené čárkami. Výchozí je 0. Příklad: 20, 25, 30"
         }
+      },
+      "auto_tpi_learning": {
+        "title": "Auto TPI učení",
+        "description": "Nastavení interakce algoritmu Auto TPI s konfigurací.",
+        "data": {
+          "auto_tpi_enable_update_config": "Aktualizovat konfiguraci vypočtenými koeficienty TPI",
+          "auto_tpi_enable_notification": "Odeslat upozornění při změně koeficientů TPI"
+        }
       }
     },
     "error": {
@@ -288,6 +297,7 @@
           "advanced": "Pokročilé parametry",
           "auto_start_stop": "Automatické spuštění a zastavení",
           "valve_regulation": "Konfigurace regulace ventilu",
+          "auto_tpi_learning": "Auto TPI učení",
           "finalize": "Vše hotovo",
           "configuration_not_complete": "Konfigurace není kompletní"
         }
@@ -502,6 +512,14 @@
           "closing_degree_entity_ids": "Seznam entit 'stupně zavření'. Nastavte, pokud má váš TRV entitu pro lepší regulaci. Měla by být jedna na každou podřízenou klimatizační entitu",
           "proportional_function": "Algoritmus k použití (TPI je momentálně jediný)",
           "min_opening_degrees": "Minimální hodnota stupně otevření pro každé podřízené zařízení, oddělené čárkami. Výchozí je 0. Příklad: 20, 25, 30"
+        }
+      },
+      "auto_tpi_learning": {
+        "title": "Auto TPI učení - {name}",
+        "description": "Nastavení interakce algoritmu Auto TPI s konfigurací.",
+        "data": {
+          "auto_tpi_enable_update_config": "Aktualizovat konfiguraci vypočtenými koeficienty TPI",
+          "auto_tpi_enable_notification": "Odeslat upozornění při změně koeficientů TPI"
         }
       }
     },

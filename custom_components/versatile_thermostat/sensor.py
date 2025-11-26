@@ -323,7 +323,6 @@ class AutoTpiSensor(VersatileThermostatBaseEntity, SensorEntity):
             
         # Update attributes
         self._attr_extra_state_attributes = {
-            "progression": f"{manager.progression}%",
             "data_points": manager.data_points,
             "min_data_points": manager.min_data_points,
             "heating_cycles_count": manager.heating_cycles_count,

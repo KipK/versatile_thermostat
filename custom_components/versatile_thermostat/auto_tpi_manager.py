@@ -188,13 +188,6 @@ class AutoTpiManager:
         return MIN_DATA_POINTS
 
     @property
-    def progression(self) -> int:
-        """Progression based on heating cycles."""
-        cycle_progress = min(100, (len(self._completed_tpi_cycles) / MIN_TPI_CYCLES) * 100)
-        data_progress = min(100, (len(self._data) / MIN_DATA_POINTS) * 100)
-        return int(min(cycle_progress, data_progress))
-
-    @property
     def learning_quality(self) -> str:
         return self._learning_quality.value
         

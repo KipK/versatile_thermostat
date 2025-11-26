@@ -404,3 +404,10 @@ STEP_ADVANCED_DATA_SCHEMA = vol.Schema(  # pylint: disable=invalid-name
         vol.Required(CONF_USE_ADVANCED_CENTRAL_CONFIG, default=True): cv.boolean,
     }
 )
+
+STEP_AUTO_TPI_LEARNING_DATA_SCHEMA = vol.Schema(
+    {
+        vol.Optional(CONF_AUTO_TPI_ENABLE_UPDATE_CONFIG, default=False): cv.boolean,
+        vol.Optional(CONF_AUTO_TPI_ENABLE_NOTIFICATION, default=True): cv.boolean,
+    }
+)

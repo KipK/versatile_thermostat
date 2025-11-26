@@ -29,6 +29,7 @@
           "advanced": "Erweiterte Einstellungen",
           "auto_start_stop": "Auto Start und Stop",
           "valve_regulation": "Konfiguration Ventilsteuerung",
+          "auto_tpi_learning": "Auto TPI Lernen",
           "finalize": "Alles erledigt",
           "configuration_not_complete": "Konfiguration unvollständig"
         }
@@ -249,6 +250,14 @@
           "proportional_function": "Zu verwendender Algorithmus (TPI ist derzeit der einzige)",
           "min_opening_degrees": "Eine kommaseparierte Liste der Mindestöffnung. Standardwert ist 0. Beispiel: 20, 25, 30"
         }
+      },
+      "auto_tpi_learning": {
+        "title": "Auto TPI Lernen",
+        "description": "Konfigurieren Sie, wie der Auto TPI-Algorithmus mit Ihrer Konfiguration interagiert.",
+        "data": {
+          "auto_tpi_enable_update_config": "Konfiguration mit berechneten TPI-Koeffizienten aktualisieren",
+          "auto_tpi_enable_notification": "Benachrichtigung senden, wenn sich die TPI-Koeffizienten ändern"
+        }
       }
     },
     "error": {
@@ -291,6 +300,7 @@
           "advanced": "Erweiterte Einstellungen",
           "auto_start_stop": "Auto Start und Stopp",
           "valve_regulation": "Konfiguration der Ventilsteuerung",
+          "auto_tpi_learning": "Auto TPI Lernen",
           "finalize": "Alles erledigt",
           "configuration_not_complete": "Konfiguration unvollständig"
         }
@@ -514,6 +524,14 @@
           "closing_degree_entity_ids": "Liste der 'Ventil schliessen'-Entities. Wenn das TRV über diese Funktion verfügen, bitte dieses für eine bessere Regelung konfigurieren. Es muss eine pro zugeordneter Klima-Entity vorhanden sein",
           "proportional_function": "Zu verwendender Algorithmus (derzeit ist nur TPI verfügbar)",
           "min_opening_degrees": "Eine kommaseparierte Liste der Mindestöffnung. Standardwert ist 0. Beispiel: 20, 25, 30"
+        }
+      },
+      "auto_tpi_learning": {
+        "title": "Auto TPI Lernen - {name}",
+        "description": "Konfigurieren Sie, wie der Auto TPI-Algorithmus mit Ihrer Konfiguration interagiert.",
+        "data": {
+          "auto_tpi_enable_update_config": "Konfiguration mit berechneten TPI-Koeffizienten aktualisieren",
+          "auto_tpi_enable_notification": "Benachrichtigung senden, wenn sich die TPI-Koeffizienten ändern"
         }
       }
     },

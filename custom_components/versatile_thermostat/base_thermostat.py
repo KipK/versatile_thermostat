@@ -314,6 +314,9 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
             self._tpi_threshold_low = 0.0
             self._tpi_threshold_high = 0.0
 
+        self._last_notified_tpi_coef_int = self._tpi_coef_int
+        self._last_notified_tpi_coef_ext = self._tpi_coef_ext
+
         self.set_hvac_list()
 
         self._unit = self._hass.config.units.temperature_unit
@@ -1521,23 +1524,50 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
                 self._tpi_coef_int = new_params.get(CONF_TPI_COEF_INT, self._tpi_coef_int)
                 self._tpi_coef_ext = new_params.get(CONF_TPI_COEF_EXT, self._tpi_coef_ext)
                 # self._cycle_min = new_params.get(CONF_CYCLE_MIN, self._cycle_min) # Not yet implemented
-                
-                # Notify user
-                await self.hass.services.async_call(
-                    "persistent_notification",
-                    "create",
-                    {
-                        "message": f"Auto TPI has updated parameters for {self.name}.\n"
-                                   f"New parameters:\n"
-                                   f"Kp: {self._tpi_coef_int}\n"
-                                   f"Kext: {self._tpi_coef_ext}\n"
-                                   f"Auto TPI continues learning.",
-                        "title": "Versatile Thermostat Auto TPI",
-                    }
-                )
-                
+
                 if self._prop_algorithm:
                     self._prop_algorithm.update_tpi_coef(self._tpi_coef_int, self._tpi_coef_ext)
+
+                # Check if we should notify
+                enable_notification = self._entry_infos.get(
+                    CONF_AUTO_TPI_ENABLE_NOTIFICATION, True
+                )
+                if (
+                    enable_notification
+                    and (
+                        self._tpi_coef_int != self._last_notified_tpi_coef_int
+                        or self._tpi_coef_ext != self._last_notified_tpi_coef_ext
+                    )
+                ):
+                    self._last_notified_tpi_coef_int = self._tpi_coef_int
+                    self._last_notified_tpi_coef_ext = self._tpi_coef_ext
+                    # Notify user
+                    await self.hass.services.async_call(
+                        "persistent_notification",
+                        "create",
+                        {
+                            "message": f"Auto TPI has updated parameters for {self.name}.\n"
+                            f"New parameters:\n"
+                            f"Kp: {self._tpi_coef_int}\n"
+                            f"Kext: {self._tpi_coef_ext}\n"
+                            f"Auto TPI continues learning.",
+                            "title": "Versatile Thermostat Auto TPI",
+                        },
+                    )
+
+                # Check if we should update config
+                enable_update_config = self._entry_infos.get(
+                    CONF_AUTO_TPI_ENABLE_UPDATE_CONFIG, False
+                )
+                if enable_update_config:
+                    entry = self.hass.config_entries.async_get_entry(self._unique_id)
+                    if entry:
+                        new_data = entry.data.copy()
+                        new_data[CONF_TPI_COEF_INT] = self._tpi_coef_int
+                        new_data[CONF_TPI_COEF_EXT] = self._tpi_coef_ext
+                        self.hass.config_entries.async_update_entry(
+                            entry, data=new_data
+                        )
 
         self.calculate_hvac_action()
         self.update_custom_attributes()
@@ -1733,21 +1763,6 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
                     "on"
                     if self._auto_tpi_manager and self._auto_tpi_manager.learning_active
                     else "off"
-                ),
-                "auto_tpi_learning_quality": (
-                    self._auto_tpi_manager.learning_quality
-                    if self._auto_tpi_manager
-                    else None
-                ),
-                "auto_tpi_time_constant_hours": (
-                    self._auto_tpi_manager.time_constant
-                    if self._auto_tpi_manager
-                    else None
-                ),
-                "auto_tpi_confidence": (
-                    self._auto_tpi_manager.confidence
-                    if self._auto_tpi_manager
-                    else None
                 ),
             },
             "configuration": {

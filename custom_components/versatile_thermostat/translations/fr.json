@@ -30,6 +30,7 @@
           "advanced": "Paramètres avancés",
           "auto_start_stop": "Allumage/extinction automatique",
           "valve_regulation": "Configuration de la regulation par vanne",
+          "auto_tpi_learning": "Apprentissage Auto TPI",
           "finalize": "Finaliser la création",
           "configuration_not_complete": "Configuration incomplète"
         }
@@ -254,6 +255,14 @@
           "min_opening_degrees": "Ouverture minimale pour chaque vanne considérée comme chauffante, séparée par des virgules. Par défaut à 0. Exemple : 20, 25, 30",
           "max_closing_degree": "Fermeture maximale. La vanne ne sera jamais fermée au-delà de cette valeur. Mettez à 100 pour fermer complètement la vanne"
         }
+      },
+      "auto_tpi_learning": {
+        "title": "Apprentissage Auto TPI",
+        "description": "Configurer comment l'algorithme Auto TPI interagit avec votre configuration.",
+        "data": {
+          "auto_tpi_enable_update_config": "Mettre à jour la config avec les coefficients calculés",
+          "auto_tpi_enable_notification": "Envoyer une notification lors du changement de coefficients"
+        }
       }
     },
     "error": {
@@ -296,6 +305,7 @@
           "advanced": "Paramètres avancés",
           "auto_start_stop": "Allumage/extinction automatique",
           "valve_regulation": "Configuration de la regulation par vanne",
+          "auto_tpi_learning": "Apprentissage Auto TPI",
           "finalize": "Finaliser les modifications",
           "configuration_not_complete": "Configuration incomplète"
         }
@@ -523,6 +533,14 @@
           "opening_threshold_degree": "Seuil d'ouverture la vanne en dessous de laquelle la vanne est considérée comme devant être fermée (et alors 'max_closing_degree' s'appliquera)",
           "min_opening_degrees": "Ouverture minimale pour chaque vanne considérée comme chauffante, séparée par des virgules. Par défaut à 0. Exemple : 20, 25, 30",
           "max_closing_degree": "Fermeture maximale. La vanne ne sera jamais fermée au-delà de cette valeur. Mettez à 100 pour fermer complètement la vanne"
+        }
+      },
+      "auto_tpi_learning": {
+        "title": "Apprentissage Auto TPI - {name}",
+        "description": "Configurer comment l'algorithme Auto TPI interagit avec votre configuration.",
+        "data": {
+          "auto_tpi_enable_update_config": "Mettre à jour la config avec les coefficients calculés",
+          "auto_tpi_enable_notification": "Envoyer une notification lors du changement de coefficients"
         }
       }
     },

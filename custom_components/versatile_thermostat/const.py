@@ -147,6 +147,8 @@ CONF_VALVE_3 = "valve_entity3_id"
 CONF_VALVE_4 = "valve_entity4_id"
 
 CONF_AUTO_TPI_MODE = "auto_tpi_mode"
+CONF_AUTO_TPI_ENABLE_UPDATE_CONFIG = "auto_tpi_enable_update_config"
+CONF_AUTO_TPI_ENABLE_NOTIFICATION = "auto_tpi_enable_notification"
 
 
 # Global params into configuration.yaml

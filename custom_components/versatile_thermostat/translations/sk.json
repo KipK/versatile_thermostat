@@ -26,6 +26,7 @@
           "motion": "Detekcia pohybu",
           "power": "Správa napájania",
           "presence": "Detekcia prítomnosti",
+          "auto_tpi_learning": "Auto TPI Learning",
           "advanced": "Pokročilé parametre",
           "finalize": "Všetko hotové",
           "configuration_not_complete": "Konfigurácia nie je dokončená"
@@ -208,6 +209,14 @@
           "presence_sensor_entity_id": "ID entity senzora prítomnosti"
         }
       },
+      "auto_tpi_learning": {
+        "title": "Auto TPI Learning",
+        "description": "Configure how the Auto TPI algorithm interacts with your configuration.",
+        "data": {
+          "auto_tpi_enable_update_config": "Update configuration with calculated TPI coefficients",
+          "auto_tpi_enable_notification": "Send notification when TPI coefficients change"
+        }
+      },
       "advanced": {
         "title": "Pokročilé parametre",
         "description": "Konfigurácia pokročilých parametrov. Ak neviete, čo robíte, ponechajte predvolené hodnoty.\nTento parameter môže viesť k veľmi zlej regulácii teploty alebo výkonu.",
@@ -263,6 +272,7 @@
           "motion": "Detekcia pohybu",
           "power": "Správa napájania",
           "presence": "Detekcia prítomnosti",
+          "auto_tpi_learning": "Auto TPI Learning",
           "advanced": "Pokročilé parametre",
           "finalize": "Všetko hotové",
           "configuration_not_complete": "Konfigurácia nie je dokončená"
@@ -443,6 +453,14 @@
         },
         "data_description": {
           "presence_sensor_entity_id": "ID entity senzora prítomnosti"
+        }
+      },
+      "auto_tpi_learning": {
+        "title": "Auto TPI Learning - {name}",
+        "description": "Configure how the Auto TPI algorithm interacts with your configuration.",
+        "data": {
+          "auto_tpi_enable_update_config": "Update configuration with calculated TPI coefficients",
+          "auto_tpi_enable_notification": "Send notification when TPI coefficients change"
         }
       },
       "advanced": {

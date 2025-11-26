@@ -29,6 +29,7 @@
           "advanced": "Расширенные параметры",
           "auto_start_stop": "Авто старт и стоп",
           "valve_regulation": "Конфигурация регулировки клапана",
+          "auto_tpi_learning": "Auto TPI Learning",
           "finalize": "Все готово",
           "configuration_not_complete": "Конфигурация не завершена"
         }
@@ -249,6 +250,14 @@
           "proportional_function": "Алгоритм для использования (TPI пока единственный)",
           "min_opening_degrees": "Минимальное значение степени открытия для каждого управляющего устройства, через запятую. По умолчанию 0. Пример: 20, 25, 30"
         }
+      },
+      "auto_tpi_learning": {
+        "title": "Auto TPI Learning",
+        "description": "Configure how the Auto TPI algorithm interacts with your configuration.",
+        "data": {
+          "auto_tpi_enable_update_config": "Update configuration with calculated TPI coefficients",
+          "auto_tpi_enable_notification": "Send notification when TPI coefficients change"
+        }
       }
     },
     "error": {
@@ -290,6 +299,7 @@
           "advanced": "Расширенные параметры",
           "auto_start_stop": "Авто старт и стоп",
           "valve_regulation": "Конфигурация регулировки клапана",
+          "auto_tpi_learning": "Auto TPI Learning",
           "finalize": "Все готово",
           "configuration_not_complete": "Конфигурация не завершена"
         }
@@ -512,6 +522,14 @@
           "closing_degree_entity_ids": "Список сущностей 'степени закрытия'. Установите, если ваш TRV имеет такую сущность для лучшего регулирования. Должна быть одна для каждой управляющей климатической сущности",
           "proportional_function": "Алгоритм для использования (TPI пока единственный)",
           "min_opening_degrees": "Минимальное значение степени открытия для каждого управляющего устройства, через запятую. По умолчанию 0. Пример: 20, 25, 30"
+        }
+      },
+      "auto_tpi_learning": {
+        "title": "Auto TPI Learning - {name}",
+        "description": "Configure how the Auto TPI algorithm interacts with your configuration.",
+        "data": {
+          "auto_tpi_enable_update_config": "Update configuration with calculated TPI coefficients",
+          "auto_tpi_enable_notification": "Send notification when TPI coefficients change"
         }
       }
     },

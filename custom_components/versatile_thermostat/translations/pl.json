@@ -29,6 +29,7 @@
           "advanced": "Parametry zaawansowane",
           "auto_start_stop": "AutoSTART i autoSTOP",
           "valve_regulation": "Konfiguracja regulacji zaworu",
+          "auto_tpi_learning": "Auto TPI Learning",
           "finalize": "Wszystko zrobione",
           "configuration_not_complete": "Konfiguracja niekompletna"
         }
@@ -253,6 +254,22 @@
           "min_opening_degrees": "Minimalne wartości stopnia otwarcia zaworu dla każdego urządzenia, oddzielone przecinkiem. Domyślnie: 0. Przykład: 20, 25, 30",
           "max_closing_degree": "Maksymalna wartość stopnia zamknięcia zaworu. Powyżej tej wartości zawór nigdy nie zostanie zamknięty. Ustaw wartość tego parametru na `100`, aby całkowicie zamknąć zawór, jeśli ogrzewanie jest już niepotrzebne"
         }
+      },
+      "auto_tpi_learning": {
+        "title": "Auto TPI Learning",
+        "description": "Configure how the Auto TPI algorithm interacts with your configuration.",
+        "data": {
+          "auto_tpi_enable_update_config": "Update configuration with calculated TPI coefficients",
+          "auto_tpi_enable_notification": "Send notification when TPI coefficients change"
+        }
+      },
+      "auto_tpi_learning": {
+        "title": "Auto TPI Learning - {name}",
+        "description": "Configure how the Auto TPI algorithm interacts with your configuration.",
+        "data": {
+          "auto_tpi_enable_update_config": "Update configuration with calculated TPI coefficients",
+          "auto_tpi_enable_notification": "Send notification when TPI coefficients change"
+        }
       }
     },
     "error": {
@@ -294,6 +311,7 @@
           "advanced": "Parametry zaawansowane",
           "auto_start_stop": "AutoSTART i autoSTOP",
           "valve_regulation": "Konfiguracja regulacji zaworu",
+          "auto_tpi_learning": "Auto TPI Learning",
           "finalize": "Wszystko zrobione",
           "configuration_not_complete": "Konfiguracja niekompletna"
         }
@@ -518,6 +536,14 @@
           "opening_threshold_degree": "Próg otwarcia zaworu, poniżej którego zawór powinien być uważany za zamknięty (wówczas będzie obowiązywał parametr maksymalnego stopnia zamknięcia)",
           "min_opening_degrees": "Minimalne wartości stopnia otwarcia zaworu dla każdego urządzenia, oddzielone przecinkiem. Domyślnie: 0. Przykład: 20, 25, 30",
           "max_closing_degree": "Maksymalna wartość stopnia zamknięcia zaworu. Powyżej tej wartości zawór nigdy nie zostanie zamknięty. Ustaw wartość tego parametru na `100`, aby całkowicie zamknąć zawór, jeśli ogrzewanie jest już niepotrzebne"
+        }
+      },
+      "auto_tpi_learning": {
+        "title": "Auto TPI Learning - {name}",
+        "description": "Configure how the Auto TPI algorithm interacts with your configuration.",
+        "data": {
+          "auto_tpi_enable_update_config": "Update configuration with calculated TPI coefficients",
+          "auto_tpi_enable_notification": "Send notification when TPI coefficients change"
         }
       }
     },
