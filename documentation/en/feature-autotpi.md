@@ -56,12 +56,16 @@ Where:
 Once $\alpha$ and $\beta$ are determined, the TPI coefficients are calculated as follows:
 
 *   **External Coefficient ($K_{ext}$)**:
+
     $$ K_{ext} = \frac{\alpha}{\beta} $$
+
     It represents the power required (in %) to compensate for a 1°C difference with the outside.
     Value bounded between 0.01 and 0.20.
 
 *   **Internal Coefficient ($K_{int}$)**:
+
     $$ K_{int} = \frac{1}{\beta \times \tau_{target}} $$
+    
     Where $\tau_{target}$ is the desired response time (fixed at 30 minutes). It represents the reactivity needed to correct an indoor temperature deviation.
     Value bounded between 0.01 and 1.0.
 
