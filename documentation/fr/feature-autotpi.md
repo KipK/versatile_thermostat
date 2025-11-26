@@ -57,14 +57,14 @@ Une fois $\alpha$ et $\beta$ déterminés, les coefficients TPI sont calculés a
 
 *   **Coefficient Extérieur ($K_{ext}$)** :
 
-    $ K_{ext} = \frac{\alpha}{\beta} $
+    $$K_{ext} = \frac{\alpha}{\beta}$$
 
     Il représente la puissance nécessaire (en %) pour compenser 1°C de différence avec l'extérieur.
     Valeur bornée entre 0.01 et 0.20.
 
 *   **Coefficient Intérieur ($K_{int}$)** :
 
-    $ K_{int} = \frac{1}{\beta \times \tau_{target}} $
+    $$K_{int} = \frac{1}{\beta \times \tau_{target}}$$
 
     Où $\tau_{target}$ est le temps de réponse souhaité (fixé à 30 minutes). Il représente la réactivité nécessaire pour corriger un écart de température intérieure.
     Valeur bornée entre 0.01 et 1.0.
