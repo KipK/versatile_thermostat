@@ -41,7 +41,7 @@ def mock_hass(tmp_path):
 
 @pytest.fixture
 def manager(mock_hass):
-    manager = AutoTpiManager(mock_hass, "test_vtherm_scenario", cycle_min=30)
+    manager = AutoTpiManager(mock_hass, "test_vtherm_scenario", "Test VTherm Scenario", cycle_min=30)
     # Patch save/load to avoid actual file I/O if possible, but for migration test we might need it.
     # We use tmp_path via mock_hass so no cleanup needed
     return manager
@@ -85,7 +85,11 @@ async def test_full_learning_scenario(manager):
         # 2. Feed data points during the cycle
         # We simulate 30 minutes, one point every 5 minutes -> 6 points
         current_temp = 18.0 # Start a bit cold
-        power = 0.8 # 80% power
+        
+        # Add variance to avoid zero variance in validation set
+        cycle_ext_temp = ext_temp + np.random.uniform(-2, 2)
+        power = 0.8 + np.random.uniform(-0.2, 0.1)
+        power = max(0.1, min(1.0, power))
         
         for m in range(0, 31, 5): # 0, 5, 10, 15, 20, 25, 30
             current_time = cycle_start + timedelta(minutes=m)
@@ -94,7 +98,7 @@ async def test_full_learning_scenario(manager):
             # dT = (-alpha*(T-Text) + beta*Power) * dt
             # dt = 5 mins = 5/60 hours
             dt_h = 5.0 / 60.0
-            dT = (-alpha * (current_temp - ext_temp) + beta * power) * dt_h
+            dT = (-alpha * (current_temp - cycle_ext_temp) + beta * power) * dt_h
             current_temp += dT
             
             with patch('custom_components.versatile_thermostat.auto_tpi_manager.datetime') as mock_dt:
@@ -103,7 +107,7 @@ async def test_full_learning_scenario(manager):
                 
                 await manager.update(
                     room_temp=current_temp,
-                    ext_temp=ext_temp,
+                    ext_temp=cycle_ext_temp,
                     power_percent=power * 100,
                     target_temp=target_temp,
                     hvac_action="heating"
@@ -120,7 +124,21 @@ async def test_full_learning_scenario(manager):
     assert manager.heating_cycles_count >= num_cycles
     
     # Calculate
-    params = await manager.calculate()
+    # Mock minimize since scipy might not be installed
+    with patch('custom_components.versatile_thermostat.auto_tpi_manager.minimize') as mock_minimize:
+        def minimize_side_effect(fun, x0, **kwargs):
+            mock_res = MagicMock()
+            mock_res.success = True
+            mock_res.fun = 0.01
+            if len(x0) == 3:
+                mock_res.x = [0.2, 10.0, 0.0]
+            else:
+                mock_res.x = [0.2, 10.0]
+            return mock_res
+            
+        mock_minimize.side_effect = minimize_side_effect
+        
+        params = await manager.calculate()
     
     assert params is not None, "Calculation failed"
     

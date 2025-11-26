@@ -28,7 +28,7 @@ async def test_auto_tpi_logic():
     hass.async_add_executor_job.side_effect = mock_async_add_executor_job
     
     # Initialize Manager
-    manager = AutoTpiManager(hass, "test_vtherm", cycle_min=5)
+    manager = AutoTpiManager(hass, "test_vtherm", "Test VTherm", cycle_min=5)
     await manager.start_learning()
     
     print(f"Initial state: Cycles={manager.heating_cycles_count}, Points={manager.data_points}")

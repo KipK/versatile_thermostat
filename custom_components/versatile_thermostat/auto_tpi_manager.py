@@ -128,6 +128,20 @@ class ThermalModel:
         return asdict(self)
 
 
+class NumpyEncoder(json.JSONEncoder):
+    """Custom encoder for numpy data types."""
+    def default(self, obj):
+        if isinstance(obj, np.integer):
+            return int(obj)
+        if isinstance(obj, np.floating):
+            return float(obj)
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        if isinstance(obj, np.bool_):
+            return bool(obj)
+        return super().default(obj)
+
+
 class AutoTpiManager:
     """Auto TPI Manager with robust learning algorithm."""
     
@@ -709,27 +723,27 @@ class AutoTpiManager:
             rmse_val = np.sqrt(np.mean((Y_val - Y_pred_val) ** 2))
 
             # Quality assessment based on Validation R²
+            quality = LearningQuality.INSUFFICIENT
             if r_squared_val < 0.3:
-                self._learning_quality = LearningQuality.POOR
+                quality = LearningQuality.POOR
             elif r_squared_val < 0.5:
-                self._learning_quality = LearningQuality.FAIR
+                quality = LearningQuality.FAIR
             elif r_squared_val < 0.7:
-                self._learning_quality = LearningQuality.GOOD
+                quality = LearningQuality.GOOD
             else:
-                self._learning_quality = LearningQuality.EXCELLENT
+                quality = LearningQuality.EXCELLENT
 
             _LOGGER.info("%s - Auto TPI: Model quality on validation: R²=%.3f, RMSE=%.3f K/h, Quality=%s",
-                        self._name, r_squared_val, rmse_val, self._learning_quality.value)
+                        self._name, r_squared_val, rmse_val, quality.value)
 
             # REJET si R²_val < 0.1 (relaxed from 0.4 to allow continuous learning with noisy data)
             if r_squared_val < 0.1:
                 _LOGGER.warning("%s - Auto TPI: Model signal too weak on validation set (R²_val=%.3f)",
                                 self._name, r_squared_val)
+                self._learning_quality = LearningQuality.INSUFFICIENT
                 return None
             
-            # Use validation metrics for the model stats
-            r_squared = r_squared_val
-            rmse = rmse_val
+            self._learning_quality = quality
 
             # Thermal model calculation
             # alpha is in 1/h (since Y is K/h), so 1/alpha is hours.
@@ -740,8 +754,8 @@ class AutoTpiManager:
                 heat_loss_coef=alpha,
                 heating_efficiency=beta,
                 time_constant=time_constant,
-                r_squared=r_squared,
-                rmse=rmse,
+                r_squared=r_squared_val,
+                rmse=rmse_val,
                 n_points=len(self._completed_tpi_cycles),
                 humidity_coef=gamma
             )
@@ -772,7 +786,7 @@ class AutoTpiManager:
             self._calculated_params = {
                 CONF_TPI_COEF_INT: round(k_int, 3),
                 CONF_TPI_COEF_EXT: round(k_ext, 3),
-                "confidence": round(r_squared, 3),
+                "confidence": round(r_squared_val, 3),
                 "quality": self._learning_quality.value,
                 "time_constant_hours": round(tau_hours, 2),
                 "desired_response_hours": round(desired_response_hours, 2)
@@ -781,7 +795,7 @@ class AutoTpiManager:
             await self.async_save_data()
             
             _LOGGER.info("%s - Auto TPI: TPI params calculated: k_int=%.3f, k_ext=%.3f (tau=%.1fh, resp=%.1fh, conf=%.1f%%)",
-                        self._name, k_int, k_ext, tau_hours, desired_response_hours, r_squared * 100)
+                        self._name, k_int, k_ext, tau_hours, desired_response_hours, r_squared_val * 100)
             
             return self._calculated_params
 
@@ -816,7 +830,7 @@ class AutoTpiManager:
             }
             os.makedirs(os.path.dirname(self._storage_path), exist_ok=True)
             with open(self._storage_path, 'w') as f:
-                json.dump(data, f, indent=2)
+                json.dump(data, f, indent=2, cls=NumpyEncoder)
         except Exception as e:
             _LOGGER.error("%s - Auto TPI: Save error: %s", self._name, e)
 
@@ -870,5 +884,30 @@ class AutoTpiManager:
                     self._last_hysteresis_idx = -1
                     # We do NOT return here, we just initialized empty state
                     
+        except json.JSONDecodeError as e:
+            _LOGGER.error("%s - Auto TPI: Corrupted storage file detected at line %d, column %d. " 
+                         "Deleting and starting fresh.", self._unique_id, e.lineno, e.colno)
+            try:
+                os.remove(self._storage_path)
+                _LOGGER.info("%s - Auto TPI: Corrupted storage file deleted successfully.", self._unique_id)
+            except Exception as delete_error:
+                _LOGGER.error("%s - Auto TPI: Failed to delete corrupted file: %s", self._unique_id, delete_error)
+            
+            # Initialize clean state
+            self._data = []
+            self._completed_tpi_cycles = []
+            self._current_tpi_cycle = None
+            self._calculated_params = {}
+            self._learning_quality = LearningQuality.INSUFFICIENT
+            self._last_hysteresis_idx = -1
+            
         except Exception as e:
-            _LOGGER.error("%s - Auto TPI: Load error %s", self._unique_id, e)
+            _LOGGER.error("%s - Auto TPI: Unexpected load error: %s", self._unique_id, e, exc_info=True)
+            # Initialize clean state on any other error
+            self._data = []
+            self._completed_tpi_cycles = []
+            self._current_tpi_cycle = None
+            self._calculated_params = {}
+            self._learning_quality = LearningQuality.INSUFFICIENT
+            self._last_hysteresis_idx = -1
+

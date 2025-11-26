@@ -1519,17 +1519,19 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
                 # self._cycle_min = new_params.get(CONF_CYCLE_MIN, self._cycle_min) # Not yet implemented
                 
                 # Notify user
-                self.hass.components.persistent_notification.async_create(
-                    f"Auto TPI has finished learning for {self.name}.\n"
-                    f"New parameters:\n"
-                    f"Kp: {self._tpi_coef_int}\n"
-                    f"Kext: {self._tpi_coef_ext}\n"
-                    f"Auto TPI is now disabled.",
-                    title="Versatile Thermostat Auto TPI",
+                await self.hass.services.async_call(
+                    "persistent_notification",
+                    "create",
+                    {
+                        "message": f"Auto TPI has updated parameters for {self.name}.\n"
+                                   f"New parameters:\n"
+                                   f"Kp: {self._tpi_coef_int}\n"
+                                   f"Kext: {self._tpi_coef_ext}\n"
+                                   f"Auto TPI continues learning.",
+                        "title": "Versatile Thermostat Auto TPI",
+                    }
                 )
                 
-                # Disable Auto TPI
-                await self._auto_tpi_manager.stop_learning()
                 if self._prop_algorithm:
                     self._prop_algorithm.update_tpi_coef(self._tpi_coef_int, self._tpi_coef_ext)
 
