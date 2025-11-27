@@ -31,7 +31,7 @@ _LOGGER = logging.getLogger(__name__)
 STORAGE_VERSION = 3
 MIN_DATA_POINTS = 100  # More data for more robustness
 MAX_DATA_POINTS = 10000
-MIN_TPI_CYCLES = 5  # Complete TPI cycles needed
+MIN_TPI_CYCLES = 20  # Complete TPI cycles needed (16 train + 4 val with 80/20 split)
 MAX_STORED_CYCLES = 2500  # Approx 30 days history
 
 
@@ -213,21 +213,26 @@ class AutoTpiManager:
         return self._thermal_model.to_dict() if self._thermal_model else None
 
     async def start_learning(self):
-        """Start learning."""
-        _LOGGER.info("%s - Auto TPI: Starting Enhanced Auto TPI learning", self._name)
+        """Start learning (preserves existing data)."""
+        _LOGGER.info("%s - Auto TPI: Starting Auto TPI learning (data preserved)", self._name)
         self._learning_active = True
+        await self.async_save_data()
+
+    async def stop_learning(self):
+        """Stop learning without clearing data."""
+        _LOGGER.info("%s - Auto TPI: Stopping Auto TPI learning (data preserved)", self._name)
+        self._learning_active = False
+        await self.async_save_data()
+
+    async def reset_learning_data(self):
+        """Reset all learning data."""
+        _LOGGER.info("%s - Auto TPI: Resetting all learning data", self._name)
         self._data.clear()
         self._completed_tpi_cycles.clear()
         self._current_tpi_cycle = None
         self._calculated_params = {}
         self._thermal_model = None
         self._learning_quality = LearningQuality.INSUFFICIENT
-        await self.async_save_data()
-
-    async def stop_learning(self):
-        """Stop learning."""
-        _LOGGER.info("%s - Auto TPI: Stopping Auto TPI learning", self._name)
-        self._learning_active = False
         await self.async_save_data()
 
     def _detect_concept_drift(self) -> bool:

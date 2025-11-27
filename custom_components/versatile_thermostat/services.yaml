@@ -157,3 +157,12 @@ set_auto_tpi_mode:
             default: true
             selector:
                 boolean:
+
+reset_auto_tpi_data:
+    name: Reset Auto TPI Data
+    description: Reset all collected Auto TPI learning data.
+    target:
+        entity:
+            integration: versatile_thermostat
+            domain:
+                - climate

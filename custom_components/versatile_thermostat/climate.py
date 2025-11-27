@@ -142,3 +142,9 @@ async def async_setup_entry(
         },
         "service_set_auto_tpi_mode",
     )
+
+    platform.async_register_entity_service(
+        SERVICE_RESET_AUTO_TPI_DATA,
+        {},
+        "service_reset_auto_tpi_data",
+    )
