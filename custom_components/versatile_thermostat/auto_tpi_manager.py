@@ -219,6 +219,9 @@ class AutoTpiManager:
         self._data.clear()
         self._completed_tpi_cycles.clear()
         self._current_tpi_cycle = None
+        self._calculated_params = {}
+        self._thermal_model = None
+        self._learning_quality = LearningQuality.INSUFFICIENT
         await self.async_save_data()
 
     async def stop_learning(self):
