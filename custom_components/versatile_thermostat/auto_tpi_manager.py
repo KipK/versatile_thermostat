@@ -679,7 +679,7 @@ class AutoTpiManager:
                 
                 if success:
                     alpha, beta, gamma = coeffs
-                    _LOGGER.info("%s - Auto TPI: 3-var optimization success: a=%.4f, b=%.4f, g=%.4f",
+                    _LOGGER.info("%s - Auto TPI: 3-var optimization success: a=%.4f (1/h), b=%.4f (K/h @ 100%%), g=%.4f",
                                  self._name, alpha, beta, gamma)
                     final_coeffs = coeffs
                 else:
@@ -697,7 +697,7 @@ class AutoTpiManager:
                 gamma = None
                 
                 if success:
-                    _LOGGER.info("%s - Auto TPI: 2-var optimization success: a=%.4f, b=%.4f",
+                    _LOGGER.info("%s - Auto TPI: 2-var optimization success: a=%.4f (1/h), b=%.4f (K/h @ 100%%)",
                                  self._name, alpha, beta)
                 else:
                      _LOGGER.warning("%s - Auto TPI: 2-var optimization failed to converge. Using best effort.", self._name)
@@ -772,6 +772,8 @@ class AutoTpiManager:
             
             # Adaptive TPI Coefficients Logic
             tau_hours = time_constant / 3600.0
+            _LOGGER.info("%s - Auto TPI: Time constant τ = %.1f hours (means building loses/gains 63%% in this time)",
+                         self._name, tau_hours)
             
             # Desired response time (adaptive)
             # Rule: max(0.5, tau * 0.1)
