@@ -686,6 +686,10 @@
           "description": "Activer (vrai) ou désactiver (faux) l'apprentissage Auto TPI"
         }
       }
+    },
+    "reset_auto_tpi_data": {
+      "name": "Réinitialiser les données Auto TPI",
+      "description": "Réinitialise toutes les données d'apprentissage Auto TPI collectées"
     }
   }
 }

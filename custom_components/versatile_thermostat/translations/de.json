@@ -304,7 +304,7 @@
           "finalize": "Alles erledigt",
           "configuration_not_complete": "Konfiguration unvollständig"
         }
-     },
+      },
       "main": {
         "title": "Attribute - {name}",
         "description": "Wichtigste erforderliche Attribute&nbsp;[![?](https://img.icons8.com/color/18/help.png)](https://github.com/jmcollin78/versatile_thermostat/blob/main/documentation/de/base-attributes.md)",

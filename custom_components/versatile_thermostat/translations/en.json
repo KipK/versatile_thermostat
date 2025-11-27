@@ -682,6 +682,10 @@
           "description": "Enable (true) or disable (false) the Auto TPI learning"
         }
       }
+    },
+    "reset_auto_tpi_data": {
+      "name": "Reset Auto TPI Data",
+      "description": "Reset all collected Auto TPI learning data"
     }
   }
 }

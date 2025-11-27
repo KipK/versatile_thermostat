@@ -210,11 +210,11 @@
         }
       },
       "auto_tpi_learning": {
-        "title": "Auto TPI Learning",
-        "description": "Configure how the Auto TPI algorithm interacts with your configuration.",
+        "title": "Učenie Auto TPI",
+        "description": "Nakonfigurujte, ako algoritmus Auto TPI interaguje s vašou konfiguráciou.",
         "data": {
-          "auto_tpi_enable_update_config": "Update configuration with calculated TPI coefficients",
-          "auto_tpi_enable_notification": "Send notification when TPI coefficients change"
+          "auto_tpi_enable_update_config": "Aktualizovať konfiguráciu vypočítanými koeficientmi TPI",
+          "auto_tpi_enable_notification": "Odoslať upozornenie pri zmene koeficientov TPI"
         }
       },
       "advanced": {
@@ -272,7 +272,7 @@
           "motion": "Detekcia pohybu",
           "power": "Správa napájania",
           "presence": "Detekcia prítomnosti",
-          "auto_tpi_learning": "Auto TPI Learning",
+          "auto_tpi_learning": "Učenie Auto TPI",
           "advanced": "Pokročilé parametre",
           "finalize": "Všetko hotové",
           "configuration_not_complete": "Konfigurácia nie je dokončená"
@@ -456,11 +456,11 @@
         }
       },
       "auto_tpi_learning": {
-        "title": "Auto TPI Learning - {name}",
-        "description": "Configure how the Auto TPI algorithm interacts with your configuration.",
+        "title": "Učenie Auto TPI - {name}",
+        "description": "Nakonfigurujte, ako algoritmus Auto TPI interaguje s vašou konfiguráciou.",
         "data": {
-          "auto_tpi_enable_update_config": "Update configuration with calculated TPI coefficients",
-          "auto_tpi_enable_notification": "Send notification when TPI coefficients change"
+          "auto_tpi_enable_update_config": "Aktualizovať konfiguráciu vypočítanými koeficientmi TPI",
+          "auto_tpi_enable_notification": "Odoslať upozornenie pri zmene koeficientov TPI"
         }
       },
       "advanced": {

@@ -253,11 +253,11 @@
         }
       },
       "auto_tpi_learning": {
-        "title": "Auto TPI Learning",
-        "description": "Configure how the Auto TPI algorithm interacts with your configuration.",
+        "title": "Apprendimento Auto TPI",
+        "description": "Configura come l'algoritmo Auto TPI interagisce con la tua configurazione.",
         "data": {
-          "auto_tpi_enable_update_config": "Update configuration with calculated TPI coefficients",
-          "auto_tpi_enable_notification": "Send notification when TPI coefficients change"
+          "auto_tpi_enable_update_config": "Aggiorna la configurazione con i coefficienti TPI calcolati",
+          "auto_tpi_enable_notification": "Invia notifica quando i coefficienti TPI cambiano"
         }
       }
     },
@@ -301,7 +301,7 @@
           "advanced": "Parametri avanzati",
           "auto_start_stop": "Auto start and stop",
           "valve_regulation": "Configurazione della regolazione della valvola",
-          "auto_tpi_learning": "Auto TPI Learning",
+          "auto_tpi_learning": "Apprendimento Auto TPI",
           "finalize": "Fatto",
           "configuration_not_complete": "Configurazione non completata"
         }
@@ -528,11 +528,11 @@
         }
       },
       "auto_tpi_learning": {
-        "title": "Auto TPI Learning - {name}",
-        "description": "Configure how the Auto TPI algorithm interacts with your configuration.",
+        "title": "Apprendimento Auto TPI - {name}",
+        "description": "Configura come l'algoritmo Auto TPI interagisce con la tua configurazione.",
         "data": {
-          "auto_tpi_enable_update_config": "Update configuration with calculated TPI coefficients",
-          "auto_tpi_enable_notification": "Send notification when TPI coefficients change"
+          "auto_tpi_enable_update_config": "Aggiorna la configurazione con i coefficienti TPI calcolati",
+          "auto_tpi_enable_notification": "Invia notifica quando i coefficienti TPI cambiano"
         }
       }
     },

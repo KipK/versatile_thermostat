@@ -168,15 +168,15 @@
         }
       },
       "auto_tpi_learning": {
-        "title": "Auto TPI Learning",
-        "description": "Configure how the Auto TPI algorithm interacts with your configuration.",
+        "title": "Εκμάθηση Auto TPI",
+        "description": "Ρυθμίστε πώς ο αλγόριθμος Auto TPI αλληλεπιδρά με τη διαμόρφωσή σας.",
         "data": {
-          "auto_tpi_enable_update_config": "Update configuration with calculated TPI coefficients",
-          "auto_tpi_enable_notification": "Send notification when TPI coefficients change"
+          "auto_tpi_enable_update_config": "Ενημέρωση διαμόρφωσης με υπολογισμένους συντελεστές TPI",
+          "auto_tpi_enable_notification": "Αποστολή ειδοποίησης όταν αλλάζουν οι συντελεστές TPI"
         }
       },
       "menu_options": {
-        "auto_tpi_learning": "Auto TPI Learning"
+        "auto_tpi_learning": "Εκμάθηση Auto TPI"
       }
     },
     "error": {
@@ -356,15 +356,15 @@
         }
       },
       "auto_tpi_learning": {
-        "title": "Auto TPI Learning",
-        "description": "Configure how the Auto TPI algorithm interacts with your configuration.",
+        "title": "Εκμάθηση Auto TPI",
+        "description": "Ρυθμίστε πώς ο αλγόριθμος Auto TPI αλληλεπιδρά με τη διαμόρφωσή σας.",
         "data": {
-          "auto_tpi_enable_update_config": "Update configuration with calculated TPI coefficients",
-          "auto_tpi_enable_notification": "Send notification when TPI coefficients change"
+          "auto_tpi_enable_update_config": "Ενημέρωση διαμόρφωσης με υπολογισμένους συντελεστές TPI",
+          "auto_tpi_enable_notification": "Αποστολή ειδοποίησης όταν αλλάζουν οι συντελεστές TPI"
         }
       },
       "menu_options": {
-        "auto_tpi_learning": "Auto TPI Learning"
+        "auto_tpi_learning": "Εκμάθηση Auto TPI"
       }
     },
     "error": {

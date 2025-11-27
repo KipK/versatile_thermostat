@@ -252,11 +252,11 @@
         }
       },
       "auto_tpi_learning": {
-        "title": "Auto TPI Learning",
-        "description": "Configure how the Auto TPI algorithm interacts with your configuration.",
+        "title": "Обучение Auto TPI",
+        "description": "Настройте взаимодействие алгоритма Auto TPI с вашей конфигурацией.",
         "data": {
-          "auto_tpi_enable_update_config": "Update configuration with calculated TPI coefficients",
-          "auto_tpi_enable_notification": "Send notification when TPI coefficients change"
+          "auto_tpi_enable_update_config": "Обновлять конфигурацию рассчитанными коэффициентами TPI",
+          "auto_tpi_enable_notification": "Отправлять уведомление при изменении коэффициентов TPI"
         }
       }
     },
@@ -299,7 +299,7 @@
           "advanced": "Расширенные параметры",
           "auto_start_stop": "Авто старт и стоп",
           "valve_regulation": "Конфигурация регулировки клапана",
-          "auto_tpi_learning": "Auto TPI Learning",
+          "auto_tpi_learning": "Обучение Auto TPI",
           "finalize": "Все готово",
           "configuration_not_complete": "Конфигурация не завершена"
         }
@@ -525,11 +525,11 @@
         }
       },
       "auto_tpi_learning": {
-        "title": "Auto TPI Learning - {name}",
-        "description": "Configure how the Auto TPI algorithm interacts with your configuration.",
+        "title": "Обучение Auto TPI - {name}",
+        "description": "Настройте взаимодействие алгоритма Auto TPI с вашей конфигурацией.",
         "data": {
-          "auto_tpi_enable_update_config": "Update configuration with calculated TPI coefficients",
-          "auto_tpi_enable_notification": "Send notification when TPI coefficients change"
+          "auto_tpi_enable_update_config": "Обновлять конфигурацию рассчитанными коэффициентами TPI",
+          "auto_tpi_enable_notification": "Отправлять уведомление при изменении коэффициентов TPI"
         }
       }
     },
