@@ -6,7 +6,7 @@ import os
 import numpy as np
 from datetime import datetime, timedelta
 from typing import Dict, Optional, List, Tuple
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, fields
 from enum import Enum
 
 try:
@@ -54,7 +54,6 @@ class DataPoint:
     target_temp: float
     is_heating: bool
     temp_derivative: Optional[float] = None
-    is_gated_off: bool = False
     humidity: Optional[float] = None
     
     def to_dict(self) -> dict:
@@ -62,7 +61,9 @@ class DataPoint:
     
     @classmethod
     def from_dict(cls, d: dict):
-        return cls(**d)
+        # Backward compatibility: ignore unknown fields (like is_gated_off)
+        valid_fields = {f.name for f in fields(cls)}
+        return cls(**{k: v for k, v in d.items() if k in valid_fields})
 
 
 @dataclass
@@ -167,7 +168,6 @@ class AutoTpiManager:
         self._current_tpi_cycle: Optional[TpiCycle] = None
         self._completed_tpi_cycles: List[TpiCycle] = []
         self._thermostat_mode: str = "unknown"
-        self._last_hysteresis_idx: int = -1
 
     @property
     def learning_active(self) -> bool:
@@ -352,15 +352,12 @@ class AutoTpiManager:
 
         # Memory limitation
         if len(self._data) > MAX_DATA_POINTS:
-            removed = len(self._data) - MAX_DATA_POINTS
             self._data = self._data[-MAX_DATA_POINTS:]
-            self._last_hysteresis_idx = max(-1, self._last_hysteresis_idx - removed)
 
         self._last_update = now
         
         # Derivative calculation
         self._compute_derivatives()
-        self._compute_hysteresis_incremental()
         
         await self.async_save_data()
         
@@ -492,41 +489,32 @@ class AutoTpiManager:
         
         _LOGGER.debug("%s - Auto TPI: Derivatives updated using simple method", self._name)
 
-    def _compute_hysteresis_incremental(self):
-        """Compute is_gated_off state based on hysteresis (incremental)."""
-        if not self._data:
-            return
-
-        # If thresholds are not set (0.0), feature is disabled
+    def _apply_gating_filter(self, points: List[DataPoint]) -> List[DataPoint]:
+        """
+        Apply gating filter dynamically at calculation time.
+        This allows for flexible threshold adjustment without re-acquisition.
+        """
+        # If thresholds are 0.0, filtering is disabled
         if self._tpi_threshold_low == 0.0 or self._tpi_threshold_high == 0.0:
-            return
-
-        # Determine start index
-        start_idx = self._last_hysteresis_idx + 1
-
-        # If no new points, nothing to do
-        if start_idx >= len(self._data):
-            return
-
-        # Initialize state
-        current_gated_off = False
-        if self._last_hysteresis_idx >= 0:
-            current_gated_off = self._data[self._last_hysteresis_idx].is_gated_off
-
-        for i in range(start_idx, len(self._data)):
-            point = self._data[i]
+            return points
+        
+        filtered = []
+        gated_off = False
+        
+        for point in points:
             overshoot = point.room_temp - point.target_temp
             
             # Hysteresis logic
             if overshoot > self._tpi_threshold_high:
-                current_gated_off = True
+                gated_off = True
             elif overshoot < self._tpi_threshold_low:
-                current_gated_off = False
+                gated_off = False
             
-            point.is_gated_off = current_gated_off
-
-        # Update last index
-        self._last_hysteresis_idx = len(self._data) - 1
+            # Keep only non-gated points
+            if not gated_off:
+                filtered.append(point)
+        
+        return filtered
 
     async def calculate(self) -> Optional[dict]:
         """Calculate TPI parameters with robust validation using Constrained Optimization."""
@@ -550,23 +538,25 @@ class AutoTpiManager:
             x_loss_list = []
             x_power_list = []
             x_humidity_list = []
-            
-            # We want to fit: DeltaTemp/dt = -alpha * (Room - Ext) + beta * Power (+ gamma * (Humidity - 50))
-            # So Y = DeltaTemp/dt
-            # X1 = -(Room - Ext)
-            # X2 = Power (0-1)
-            # X3 = Humidity - 50
 
+            # Statistics for logging
+            total_points = 0
+            filtered_points = 0
+            
             for cycle in self._completed_tpi_cycles:
                 if not cycle.data_points:
                     continue
 
-                # Filter out gated off points
-                valid_points = [p for p in cycle.data_points if not p.is_gated_off]
+                total_points += len(cycle.data_points)
+
+                # Dynamic filtering
+                valid_points = self._apply_gating_filter(cycle.data_points)
                 
-                # If too few points remain, skip cycle
                 if len(valid_points) < 2:
+                    filtered_points += len(cycle.data_points)
                     continue
+                
+                filtered_points += len(cycle.data_points) - len(valid_points)
                 
                 # Re-calculate cycle metrics based on valid points
                 start_time = valid_points[0].timestamp
@@ -597,8 +587,21 @@ class AutoTpiManager:
                 x_loss_list.append(-(avg_room_temp - avg_ext_temp))
                 x_power_list.append(avg_power)
                 x_humidity_list.append(avg_humidity)
+
+            _LOGGER.info(
+                "%s - Auto TPI: Filtering stats: %d/%d points filtered (%.1f%%), %d samples from %d cycles",
+                self._name, filtered_points, total_points,
+                100 * filtered_points / total_points if total_points > 0 else 0,
+                len(y_list), len(self._completed_tpi_cycles)
+            )
                 
             if len(y_list) < MIN_TPI_CYCLES:
+                _LOGGER.warning(
+                    "%s - Auto TPI: Only %d valid samples after filtering (need %d). "
+                    "Consider adjusting thresholds (low=%.2f, high=%.2f) or disabling gating.",
+                    self._name, len(y_list), MIN_TPI_CYCLES,
+                    self._tpi_threshold_low, self._tpi_threshold_high
+                )
                 return None
             
             # Determine if we use humidity
@@ -806,11 +809,6 @@ class AutoTpiManager:
             # Compress data before saving
             points_to_save = self._compress_historical_data()
             
-            # Since we assume all points in memory have been processed for hysteresis,
-            # and points_to_save preserves the 'is_gated_off' attribute,
-            # we can set the saved index to the last point of the saved data.
-            saved_hysteresis_idx = len(points_to_save) - 1
-
             data = {
                 "version": STORAGE_VERSION,
                 "learning_active": self._learning_active,
@@ -819,7 +817,6 @@ class AutoTpiManager:
                 "thermal_model": self._thermal_model.to_dict() if self._thermal_model else None,
                 "calculated_params": self._calculated_params,
                 "learning_quality": self._learning_quality.value,
-                "last_hysteresis_idx": saved_hysteresis_idx
             }
             os.makedirs(os.path.dirname(self._storage_path), exist_ok=True)
             with open(self._storage_path, 'w') as f:
@@ -856,11 +853,6 @@ class AutoTpiManager:
                     quality_str = data.get("learning_quality", "insufficient")
                     self._learning_quality = LearningQuality(quality_str)
 
-                    # Restore hysteresis index
-                    self._last_hysteresis_idx = data.get("last_hysteresis_idx", -1)
-                    if self._last_hysteresis_idx >= len(self._data):
-                        self._last_hysteresis_idx = len(self._data) - 1
-                    
                     _LOGGER.info("%s - Auto TPI: Data loaded: %d points, %d tpi_cycles, quality=%s",
                                self._unique_id, len(self._data),
                                len(self._completed_tpi_cycles),
@@ -874,7 +866,6 @@ class AutoTpiManager:
                     self._current_tpi_cycle = None
                     self._calculated_params = {}
                     self._learning_quality = LearningQuality.INSUFFICIENT
-                    self._last_hysteresis_idx = -1
                     # We do NOT return here, we just initialized empty state
                     
         except json.JSONDecodeError as e:
@@ -892,8 +883,6 @@ class AutoTpiManager:
             self._current_tpi_cycle = None
             self._calculated_params = {}
             self._learning_quality = LearningQuality.INSUFFICIENT
-            self._last_hysteresis_idx = -1
-            
         except Exception as e:
             _LOGGER.error("%s - Auto TPI: Unexpected load error: %s", self._unique_id, e, exc_info=True)
             # Initialize clean state on any other error
@@ -902,5 +891,4 @@ class AutoTpiManager:
             self._current_tpi_cycle = None
             self._calculated_params = {}
             self._learning_quality = LearningQuality.INSUFFICIENT
-            self._last_hysteresis_idx = -1
 
