@@ -651,9 +651,10 @@ class AutoTpiManager:
                 
                 # Isolation Forest Filtering to replace IQR
                 # Only apply if we have enough points and derivatives are available
+                # Increased threshold to 20 for more reliable statistical analysis
                 valid_points_with_deriv = [p for p in valid_points if p.temp_derivative is not None]
                 
-                if len(valid_points_with_deriv) >= 10:
+                if len(valid_points_with_deriv) >= 20:
                     try:
                         # Features: temp_diff, power, derivative
                         X_features = np.column_stack([
@@ -662,9 +663,11 @@ class AutoTpiManager:
                             [p.temp_derivative for p in valid_points_with_deriv]
                         ])
                         
+                        # Increased contamination from 0.05 to 0.15 (15%) to be more lenient
+                        # This allows for more natural variance in the data
                         clf = SimpleIsolationForest(
                             n_trees=100,
-                            contamination=0.05,
+                            contamination=0.15,
                             random_state=42
                         )
                         labels = clf.fit_predict(X_features)
@@ -672,7 +675,9 @@ class AutoTpiManager:
                         # Keep only inliers
                         outliers_count = np.sum(labels == -1)
                         if outliers_count > 0:
-                            _LOGGER.debug("%s - Isolation Forest: removed %d outliers from cycle", self._name, outliers_count)
+                            _LOGGER.debug("%s - Isolation Forest: removed %d/%d outliers from cycle (%.1f%%)", 
+                                        self._name, outliers_count, len(valid_points_with_deriv),
+                                        100 * outliers_count / len(valid_points_with_deriv))
                             valid_points = [p for p, label in zip(valid_points_with_deriv, labels) if label == 1]
                         else:
                             # If no outliers, keep valid_points_with_deriv (safe choice as we filtered Nones)
