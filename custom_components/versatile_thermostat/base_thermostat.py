@@ -317,6 +317,10 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
         self._last_notified_tpi_coef_int = self._tpi_coef_int
         self._last_notified_tpi_coef_ext = self._tpi_coef_ext
 
+        _LOGGER.info("DEBUG: entry_infos keys: %s", entry_infos.keys())
+        self._auto_tpi_enable_update_config = entry_infos.get(CONF_AUTO_TPI_ENABLE_UPDATE_CONFIG, False)
+        _LOGGER.info("DEBUG: auto_tpi_enable_update_config: %s", self._auto_tpi_enable_update_config)
+
         self.set_hvac_list()
 
         self._unit = self._hass.config.units.temperature_unit
@@ -424,9 +428,12 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
             # If we have learned parameters, apply them
             learned_params = self._auto_tpi_manager.get_calculated_params()
             if learned_params:
-                self._tpi_coef_int = learned_params.get(CONF_TPI_COEF_INT, self._tpi_coef_int)
-                self._tpi_coef_ext = learned_params.get(CONF_TPI_COEF_EXT, self._tpi_coef_ext)
-                _LOGGER.info("%s - Restored Auto TPI parameters: %s", self, learned_params)
+                if self._auto_tpi_enable_update_config:
+                    self._tpi_coef_int = learned_params.get(CONF_TPI_COEF_INT, self._tpi_coef_int)
+                    self._tpi_coef_ext = learned_params.get(CONF_TPI_COEF_EXT, self._tpi_coef_ext)
+                    _LOGGER.info("%s - Restored Auto TPI parameters: %s", self, learned_params)
+                else:
+                    _LOGGER.info("%s - Auto TPI parameters found but not applied because auto_tpi_enable_update_config is False", self)
             
             if self._auto_tpi_manager.learning_active:
                 _LOGGER.info("%s - Auto TPI learning is active (restored from storage)", self)
@@ -1521,12 +1528,15 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
             new_params = await self._auto_tpi_manager.calculate()
             if new_params:
                 _LOGGER.info("%s - Auto TPI: New parameters found: %s", self, new_params)
-                self._tpi_coef_int = new_params.get(CONF_TPI_COEF_INT, self._tpi_coef_int)
-                self._tpi_coef_ext = new_params.get(CONF_TPI_COEF_EXT, self._tpi_coef_ext)
-                # self._cycle_min = new_params.get(CONF_CYCLE_MIN, self._cycle_min) # Not yet implemented
+                if self._auto_tpi_enable_update_config:
+                    self._tpi_coef_int = new_params.get(CONF_TPI_COEF_INT, self._tpi_coef_int)
+                    self._tpi_coef_ext = new_params.get(CONF_TPI_COEF_EXT, self._tpi_coef_ext)
+                    # self._cycle_min = new_params.get(CONF_CYCLE_MIN, self._cycle_min) # Not yet implemented
 
-                if self._prop_algorithm:
-                    self._prop_algorithm.update_tpi_coef(self._tpi_coef_int, self._tpi_coef_ext)
+                    if self._prop_algorithm:
+                        self._prop_algorithm.update_tpi_coef(self._tpi_coef_int, self._tpi_coef_ext)
+                else:
+                    _LOGGER.debug("%s - Auto TPI: New parameters found but update config is disabled", self)
 
                 # Check if we should notify
                 enable_notification = self._entry_infos.get(
