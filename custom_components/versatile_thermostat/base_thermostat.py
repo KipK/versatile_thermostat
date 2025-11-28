@@ -2069,6 +2069,35 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
         write_event_log(_LOGGER, self, f"Calling SERVICE_SET_AUTO_TPI_MODE, auto_tpi_mode: {auto_tpi_mode}")
         await self.async_set_auto_tpi_mode(auto_tpi_mode)
 
+    async def service_reset_auto_tpi_data(self):
+        """Called by a service call:
+        service: versatile_thermostat.reset_auto_tpi_data
+        target:
+            entity_id: climate.thermostat_1
+        """
+        write_event_log(_LOGGER, self, "Calling SERVICE_RESET_AUTO_TPI_DATA")
+        await self.async_reset_auto_tpi_data()
+
+    async def async_reset_auto_tpi_data(self):
+        """Reset the auto TPI data"""
+        _LOGGER.debug("%s - async_reset_auto_tpi_data called", self)
+        if not self._auto_tpi_manager:
+            _LOGGER.warning("%s - Auto TPI Manager not initialized", self)
+            return
+
+        await self._auto_tpi_manager.reset_learning_data()
+        
+        # Fire event
+        self.hass.bus.async_fire(
+            EventType.AUTO_TPI_EVENT.value,
+            {
+                "entity_id": self.entity_id,
+                "type": "reset_data"
+            },
+        )
+        self.update_custom_attributes()
+        self.async_write_ha_state()
+
     async def async_set_auto_tpi_mode(self, auto_tpi_mode: bool):
         """Set the auto TPI mode"""
         _LOGGER.debug("%s - async_set_auto_tpi_mode called with %s", self, auto_tpi_mode)
