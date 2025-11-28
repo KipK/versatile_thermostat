@@ -145,6 +145,118 @@ class NumpyEncoder(json.JSONEncoder):
         return super().default(obj)
 
 
+class SimpleIsolationForest:
+    """Simplified Isolation Forest implementation without sklearn"""
+    
+    def __init__(self, n_trees=100, max_samples=256, contamination=0.05, random_state=None):
+        self.n_trees = n_trees
+        self.max_samples = max_samples
+        self.contamination = contamination
+        self.random_state = random_state
+        self.trees = []
+        self.threshold = None
+        
+    def fit_predict(self, X):
+        """Train and predict in one step"""
+        if self.random_state is not None:
+            np.random.seed(self.random_state)
+        
+        n_samples = X.shape[0]
+        sample_size = min(self.max_samples, n_samples)
+        
+        # Build trees
+        self.trees = []
+        for _ in range(self.n_trees):
+            # Random sampling
+            indices = np.random.choice(n_samples, sample_size, replace=False)
+            X_sample = X[indices]
+            
+            # Create a tree
+            tree = self._build_tree(X_sample, current_depth=0, max_depth=int(np.ceil(np.log2(sample_size))))
+            self.trees.append(tree)
+        
+        # Calculate anomaly scores
+        scores = self._compute_anomaly_scores(X)
+        
+        # Determine threshold based on contamination
+        self.threshold = np.percentile(scores, 100 * (1 - self.contamination))
+        
+        # Predict: 1 for inlier, -1 for outlier
+        predictions = np.where(scores <= self.threshold, 1, -1)
+        
+        return predictions
+    
+    def _build_tree(self, X, current_depth, max_depth):
+        """Recursively build an isolation tree"""
+        n_samples, n_features = X.shape
+        
+        # Stop condition
+        if current_depth >= max_depth or n_samples <= 1:
+            return {'type': 'leaf', 'size': n_samples}
+        
+        # Randomly choose a feature and a split point
+        feature = np.random.randint(0, n_features)
+        feature_values = X[:, feature]
+        
+        if np.all(feature_values == feature_values[0]):
+            return {'type': 'leaf', 'size': n_samples}
+        
+        min_val, max_val = feature_values.min(), feature_values.max()
+        split_value = np.random.uniform(min_val, max_val)
+        
+        # Split data
+        left_mask = feature_values < split_value
+        right_mask = ~left_mask
+        
+        if not np.any(left_mask) or not np.any(right_mask):
+            return {'type': 'leaf', 'size': n_samples}
+        
+        # Recursively build subtrees
+        return {
+            'type': 'node',
+            'feature': feature,
+            'split_value': split_value,
+            'left': self._build_tree(X[left_mask], current_depth + 1, max_depth),
+            'right': self._build_tree(X[right_mask], current_depth + 1, max_depth)
+        }
+    
+    def _path_length(self, x, tree, current_depth=0):
+        """Calculate path length for a point in a tree"""
+        if tree['type'] == 'leaf':
+            # Adjustment for leaves with multiple points
+            return current_depth + self._c(tree['size'])
+        
+        feature = tree['feature']
+        if x[feature] < tree['split_value']:
+            return self._path_length(x, tree['left'], current_depth + 1)
+        else:
+            return self._path_length(x, tree['right'], current_depth + 1)
+    
+    def _c(self, n):
+        """Average path length for n points (theoretical formula)"""
+        if n <= 1:
+            return 0
+        return 2 * (np.log(n - 1) + 0.5772156649) - 2 * (n - 1) / n
+    
+    def _compute_anomaly_scores(self, X):
+        """Calculate anomaly scores for all points"""
+        n_samples = X.shape[0]
+        avg_path_lengths = np.zeros(n_samples)
+        
+        # Average over all trees
+        for tree in self.trees:
+            for i in range(n_samples):
+                avg_path_lengths[i] += self._path_length(X[i], tree)
+        
+        avg_path_lengths /= self.n_trees
+        
+        # Normalize scores
+        c_n = self._c(self.max_samples)
+        scores = 2 ** (-avg_path_lengths / c_n)
+        
+        return scores
+
+
 class AutoTpiManager:
     """Auto TPI Manager with robust learning algorithm."""
     
@@ -296,25 +408,6 @@ class AutoTpiManager:
 
         return compressed_data
 
-    def _is_outlier(self, point: DataPoint, window: List[DataPoint]) -> bool:
-        """Detect outliers with IQR method."""
-        if len(window) < 10:
-            return False
-        
-        temps = [p.room_temp for p in window]
-        q1, q3 = np.percentile(temps, [25, 75])
-        iqr = q3 - q1
-        
-        # Enforce a minimum IQR to avoid rejecting data when temperature is stable
-        # 0.5°C allows for normal sensor noise/fluctuation without triggering outlier detection
-        if iqr < 0.2:
-            iqr = 0.2
-            
-        lower = q1 - 3 * iqr
-        upper = q3 + 3 * iqr
-        
-        return point.room_temp < lower or point.room_temp > upper
-
     async def update(self, room_temp: float, ext_temp: float,
                     power_percent: float, target_temp: float, hvac_action: str,
                     humidity: Optional[float] = None):
@@ -347,12 +440,6 @@ class AutoTpiManager:
             is_heating=power_percent > 10.0,
             humidity=humidity
         )
-
-        # Outlier filtering (on sliding window)
-        recent_window = self._data[-50:] if len(self._data) >= 50 else self._data
-        if self._is_outlier(point, recent_window):
-            _LOGGER.warning("%s - Auto TPI: Outlier detected, skipping data point", self._name)
-            return
 
         self._data.append(point)
         
@@ -562,6 +649,43 @@ class AutoTpiManager:
                 # Dynamic filtering
                 valid_points = self._apply_gating_filter(cycle.data_points)
                 
+                # Isolation Forest Filtering to replace IQR
+                # Only apply if we have enough points and derivatives are available
+                valid_points_with_deriv = [p for p in valid_points if p.temp_derivative is not None]
+                
+                if len(valid_points_with_deriv) >= 10:
+                    try:
+                        # Features: temp_diff, power, derivative
+                        X_features = np.column_stack([
+                            [p.room_temp - p.ext_temp for p in valid_points_with_deriv],
+                            [p.power_percent / 100 for p in valid_points_with_deriv],
+                            [p.temp_derivative for p in valid_points_with_deriv]
+                        ])
+                        
+                        clf = SimpleIsolationForest(
+                            n_trees=100,
+                            contamination=0.05,
+                            random_state=42
+                        )
+                        labels = clf.fit_predict(X_features)
+                        
+                        # Keep only inliers
+                        outliers_count = np.sum(labels == -1)
+                        if outliers_count > 0:
+                            _LOGGER.debug("%s - Isolation Forest: removed %d outliers from cycle", self._name, outliers_count)
+                            valid_points = [p for p, label in zip(valid_points_with_deriv, labels) if label == 1]
+                        else:
+                            # If no outliers, keep valid_points_with_deriv (safe choice as we filtered Nones)
+                            valid_points = valid_points_with_deriv
+                            
+                    except Exception as e:
+                        _LOGGER.warning("%s - Isolation Forest failed: %s", self._name, e)
+                        # Fallback to existing valid_points (but preferably with derivative)
+                        valid_points = valid_points_with_deriv
+                elif len(valid_points_with_deriv) > 0:
+                    # Not enough points for IF, but we should use points with derivatives if possible
+                    valid_points = valid_points_with_deriv
+
                 if len(valid_points) < 2:
                     filtered_points += len(cycle.data_points)
                     continue
