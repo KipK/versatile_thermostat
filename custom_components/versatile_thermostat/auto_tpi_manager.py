@@ -640,8 +640,17 @@ class AutoTpiManager:
             total_points = 0
             filtered_points = 0
             
+            # Detailed filtering statistics
+            cycles_rejected_empty = 0
+            cycles_rejected_gating = 0
+            cycles_rejected_no_deriv = 0
+            cycles_rejected_too_short = 0
+            cycles_rejected_small_delta = 0
+            cycles_accepted = 0
+            
             for cycle in self._completed_tpi_cycles:
                 if not cycle.data_points:
+                    cycles_rejected_empty += 1
                     continue
 
                 total_points += len(cycle.data_points)
@@ -649,10 +658,20 @@ class AutoTpiManager:
                 # Dynamic filtering
                 valid_points = self._apply_gating_filter(cycle.data_points)
                 
+                if len(valid_points) < 2:
+                    cycles_rejected_gating += 1
+                    filtered_points += len(cycle.data_points)
+                    continue
+                
                 # Isolation Forest Filtering to replace IQR
                 # Only apply if we have enough points and derivatives are available
                 # Increased threshold to 20 for more reliable statistical analysis
                 valid_points_with_deriv = [p for p in valid_points if p.temp_derivative is not None]
+                
+                if len(valid_points_with_deriv) < 2:
+                    cycles_rejected_no_deriv += 1
+                    filtered_points += len(cycle.data_points)
+                    continue
                 
                 if len(valid_points_with_deriv) >= 20:
                     try:
@@ -695,8 +714,6 @@ class AutoTpiManager:
                     filtered_points += len(cycle.data_points)
                     continue
                 
-                filtered_points += len(cycle.data_points) - len(valid_points)
-                
                 # Re-calculate cycle metrics based on valid points
                 start_time = valid_points[0].timestamp
                 end_time = valid_points[-1].timestamp
@@ -707,15 +724,22 @@ class AutoTpiManager:
                 # Filter 1: Duration too short (less than 5 minutes)
                 # Short cycles are dominated by transient effects and not reliable for steady-state estimation
                 if duration_h < 0.083:
+                    cycles_rejected_too_short += 1
                     filtered_points += len(cycle.data_points)
                     continue
 
                 # Filter 2: Temperature change too small (noise)
                 # If the temperature didn't change enough, we can't estimate the slope reliably
+                # Reduced from 0.1°C to 0.02°C to accept well-controlled cycles with small variations
                 delta_temp = abs(valid_points[-1].room_temp - valid_points[0].room_temp)
-                if delta_temp < 0.1:
+                if delta_temp < 0.02:
+                    cycles_rejected_small_delta += 1
                     filtered_points += len(cycle.data_points)
                     continue
+                
+                # This cycle is accepted!
+                cycles_accepted += 1
+                filtered_points += len(cycle.data_points) - len(valid_points)
                 
                 # Y: Temperature evolution rate (K/h)
                 # Use linear regression to be more robust to noise
@@ -755,6 +779,14 @@ class AutoTpiManager:
                 self._name, filtered_points, total_points,
                 100 * filtered_points / total_points if total_points > 0 else 0,
                 len(y_list), len(self._completed_tpi_cycles)
+            )
+            
+            _LOGGER.info(
+                "%s - Auto TPI: Cycle rejection breakdown: empty=%d, gating=%d, no_deriv=%d, "
+                "too_short=%d, small_delta=%d, accepted=%d (total=%d)",
+                self._name, cycles_rejected_empty, cycles_rejected_gating, cycles_rejected_no_deriv,
+                cycles_rejected_too_short, cycles_rejected_small_delta, cycles_accepted,
+                len(self._completed_tpi_cycles)
             )
                 
             if len(y_list) < MIN_TPI_CYCLES:
