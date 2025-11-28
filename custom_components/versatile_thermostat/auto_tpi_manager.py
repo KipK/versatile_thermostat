@@ -5,7 +5,7 @@ import json
 import os
 import numpy as np
 from datetime import datetime, timedelta
-from typing import Dict, Optional, List, Tuple
+from typing import Dict, Optional, List, Tuple, Any
 from dataclasses import dataclass, asdict, fields
 from enum import Enum
 
@@ -20,6 +20,8 @@ except ImportError:
     savgol_filter = None
 
 from homeassistant.core import HomeAssistant
+from homeassistant.util import dt as dt_util
+from homeassistant.components.recorder import history
 
 from .const import (
     CONF_TPI_COEF_INT,
@@ -833,6 +835,275 @@ class AutoTpiManager:
                 json.dump(data, f, indent=2, cls=NumpyEncoder)
         except Exception as e:
             _LOGGER.error("%s - Auto TPI: Save error: %s", self._name, e)
+
+    async def import_history_data(
+        self,
+        source_climate_entity_id: str,
+        room_temp_entity_id: str,
+        ext_temp_entity_id: str,
+        humidity_entity_id: Optional[str] = None,
+        days: int = 30
+    ) -> Dict[str, Any]:
+        """Import historical data to bootstrap learning."""
+        _LOGGER.info("%s - Auto TPI: Starting historical data import (days=%d)", self._name, days)
+        
+        start_time = dt_util.now() - timedelta(days=days)
+        end_time = dt_util.now()
+        
+        entity_ids = [source_climate_entity_id, room_temp_entity_id, ext_temp_entity_id]
+        if humidity_entity_id:
+            entity_ids.append(humidity_entity_id)
+            
+        try:
+            # Fetch history in executor
+            # Note: include_start_time_state=True, no_attributes=False
+            history_data = await self._hass.async_add_executor_job(
+                history.state_changes_during_period,
+                self._hass,
+                start_time,
+                end_time,
+                entity_ids,
+                True,
+                False
+            )
+        except Exception as e:
+             _LOGGER.error("%s - Auto TPI: Failed to fetch history: %s", self._name, e)
+             return {"error": str(e)}
+
+        # Resample and align data
+        new_cycles = self._resample_data(
+            history_data,
+            start_time,
+            end_time,
+            source_climate_entity_id,
+            room_temp_entity_id,
+            ext_temp_entity_id,
+            humidity_entity_id
+        )
+        
+        # Integration
+        added_points = 0
+        added_cycles = 0
+        
+        if new_cycles:
+             # Add to completed cycles
+             self._completed_tpi_cycles.extend(new_cycles)
+             # Sort by time
+             self._completed_tpi_cycles.sort(key=lambda c: c.start_time)
+             
+             # Prune
+             if len(self._completed_tpi_cycles) > MAX_STORED_CYCLES:
+                 self._completed_tpi_cycles = self._completed_tpi_cycles[-MAX_STORED_CYCLES:]
+                 
+             # Update stats
+             added_cycles = len(new_cycles)
+             added_points = sum(len(c.data_points) for c in new_cycles)
+             
+             # Save and Calculate
+             await self.async_save_data()
+             await self.calculate()
+             
+        _LOGGER.info("%s - Auto TPI: Import finished. Added %d cycles, %d points.",
+                     self._name, added_cycles, added_points)
+                     
+        return {
+            "cycles_added": added_cycles,
+            "data_points": added_points,
+            "total_cycles": len(self._completed_tpi_cycles)
+        }
+
+    def _resample_data(
+        self,
+        history_data: Dict,
+        start_time: datetime,
+        end_time: datetime,
+        climate_id: str,
+        room_id: str,
+        ext_id: str,
+        hum_id: Optional[str]
+    ) -> List[TpiCycle]:
+        """Resample history data into TpiCycles."""
+        # 5 min grid
+        step_seconds = 300
+        # Create timestamps array (epoch)
+        t_start = start_time.timestamp()
+        t_end = end_time.timestamp()
+        timestamps = np.arange(t_start, t_end, step_seconds)
+        
+        if len(timestamps) < 2:
+            return []
+            
+        def get_sorted_states(eid):
+            states = history_data.get(eid, [])
+            # Sort by last_updated
+            return sorted(states, key=lambda s: s.last_updated.timestamp())
+
+        room_states = get_sorted_states(room_id)
+        ext_states = get_sorted_states(ext_id)
+        clim_states = get_sorted_states(climate_id)
+        hum_states = get_sorted_states(hum_id) if hum_id else []
+        
+        # Pointers
+        idx_room = 0
+        idx_ext = 0
+        idx_clim = 0
+        idx_hum = 0
+        
+        aligned_points = []
+        
+        current_room = None
+        current_ext = None
+        current_clim = None
+        current_hum = None
+        
+        for ts in timestamps:
+            # Advance pointers to find latest state <= ts
+            def advance(states, idx, current):
+                while idx < len(states) and states[idx].last_updated.timestamp() <= ts:
+                    current = states[idx]
+                    idx += 1
+                return idx, current
+
+            idx_room, current_room = advance(room_states, idx_room, current_room)
+            idx_ext, current_ext = advance(ext_states, idx_ext, current_ext)
+            idx_clim, current_clim = advance(clim_states, idx_clim, current_clim)
+            if hum_id:
+                idx_hum, current_hum = advance(hum_states, idx_hum, current_hum)
+            
+            # Check validity
+            if not (current_room and current_ext and current_clim):
+                continue
+                
+            if current_room.state in ("unavailable", "unknown") or \
+               current_ext.state in ("unavailable", "unknown") or \
+               current_clim.state in ("unavailable", "unknown"):
+                continue
+
+            try:
+                r_val = float(current_room.state)
+                e_val = float(current_ext.state)
+            except ValueError:
+                continue
+                
+            h_val = None
+            if current_hum and current_hum.state not in ("unavailable", "unknown"):
+                try:
+                    h_val = float(current_hum.state)
+                except ValueError:
+                    pass
+
+            # Extract Power
+            power = 0.0
+            attrs = current_clim.attributes
+            if "power_percent" in attrs:
+                try:
+                    power = float(attrs["power_percent"])
+                except ValueError:
+                    pass
+            elif current_clim.state == "off":
+                power = 0.0
+            else:
+                # Fallback to hvac_action
+                hvac_action = attrs.get("hvac_action")
+                if hvac_action == "heating":
+                    power = 100.0
+                elif hvac_action in ("idle", "off"):
+                    power = 0.0
+            
+            # Target temp
+            target = 20.0 # Default
+            if "temperature" in attrs:
+                try:
+                    target = float(attrs["temperature"])
+                except ValueError:
+                    pass
+            
+            dp = DataPoint(
+                timestamp=ts,
+                room_temp=r_val,
+                ext_temp=e_val,
+                power_percent=power,
+                target_temp=target,
+                is_heating=power > 10.0,
+                humidity=h_val
+            )
+            aligned_points.append(dp)
+            
+        if not aligned_points:
+            return []
+
+        # Calculate derivatives for aligned points
+        self._compute_derivatives_for_list(aligned_points)
+            
+        # Cycle construction
+        cycle_duration = self._cycle_min * 60
+        cycles = []
+        
+        current_chunk = []
+        chunk_start = aligned_points[0].timestamp
+        
+        for p in aligned_points:
+            # Check for large gaps in data (e.g. lost connectivity)
+            if current_chunk and (p.timestamp - current_chunk[-1].timestamp > step_seconds * 2):
+                 # Gap detected, discard current chunk and restart
+                 current_chunk = []
+                 chunk_start = p.timestamp
+
+            if p.timestamp - chunk_start >= cycle_duration:
+                # Close chunk
+                if current_chunk:
+                    c = TpiCycle(
+                        start_time=chunk_start,
+                        duration_target=cycle_duration,
+                        data_points=current_chunk,
+                        end_time=current_chunk[-1].timestamp
+                    )
+                    
+                    expected = cycle_duration / step_seconds
+                    if len(current_chunk) >= expected * 0.9:
+                         cycles.append(c)
+                
+                # Start new chunk
+                current_chunk = []
+                chunk_start = p.timestamp
+                
+            current_chunk.append(p)
+            
+        return cycles
+
+    def _compute_derivatives_for_list(self, points: List[DataPoint]):
+        """Compute derivatives for a list of points (in-place)."""
+        if not points or len(points) < 5:
+            return
+            
+        # Try Savitzky-Golay if available
+        if savgol_filter is not None and len(points) >= 11:
+            try:
+                temps = np.array([p.room_temp for p in points])
+                times = np.array([p.timestamp for p in points])
+                dt_avg = np.mean(np.diff(times))
+                
+                if dt_avg > 0:
+                    derivs = savgol_filter(temps, window_length=11, polyorder=2, deriv=1, delta=dt_avg)
+                    derivs_h = derivs * 3600.0
+                    for i in range(len(points)):
+                        points[i].temp_derivative = derivs_h[i]
+                    return
+            except Exception:
+                pass
+                
+        # Simple fallback
+        window = 5
+        for i in range(window, len(points)):
+            subset = points[i-window:i+1]
+            times = [p.timestamp for p in subset]
+            temps = [p.room_temp for p in subset]
+            
+            if len(times) > 1:
+                dt = times[-1] - times[0]
+                if dt > 0:
+                    dT = temps[-1] - temps[0]
+                    points[i].temp_derivative = (dT / dt) * 3600
 
     async def async_load_data(self):
         """Load data."""
