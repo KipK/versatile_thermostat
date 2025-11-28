@@ -148,3 +148,12 @@ async def async_setup_entry(
         {},
         "service_reset_auto_tpi_data",
     )
+
+    platform.async_register_entity_service(
+        SERVICE_TRAIN_AUTO_TPI,
+        {
+            vol.Required("source_entity"): cv.entity_id,
+            vol.Optional("days", default=30): cv.positive_int,
+        },
+        "service_train_auto_tpi",
+    )

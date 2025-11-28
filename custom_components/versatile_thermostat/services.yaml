@@ -166,3 +166,30 @@ reset_auto_tpi_data:
             integration: versatile_thermostat
             domain:
                 - climate
+
+train_auto_tpi:
+    name: Train Auto TPI
+    description: Train the Auto TPI algorithm using historical data.
+    target:
+        entity:
+            integration: versatile_thermostat
+            domain:
+                - climate
+    fields:
+        source_entity:
+            name: Source Entity
+            description: The climate entity to read history from.
+            required: true
+            selector:
+                entity:
+                    domain: climate
+        days:
+            name: Days
+            description: Number of days of history to analyze.
+            required: false
+            default: 30
+            selector:
+                number:
+                    min: 1
+                    max: 365
+                    unit_of_measurement: "days"

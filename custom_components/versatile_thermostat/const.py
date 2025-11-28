@@ -398,6 +398,7 @@ SERVICE_SET_AUTO_FAN_MODE = "set_auto_fan_mode"
 SERVICE_SET_HVAC_MODE_SLEEP = "set_hvac_mode_sleep"
 SERVICE_SET_AUTO_TPI_MODE = "set_auto_tpi_mode"
 SERVICE_RESET_AUTO_TPI_DATA = "reset_auto_tpi_data"
+SERVICE_TRAIN_AUTO_TPI = "train_auto_tpi"
 
 DEFAULT_SAFETY_MIN_ON_PERCENT = 0.5
 DEFAULT_SAFETY_DEFAULT_ON_PERCENT = 0.1

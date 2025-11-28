@@ -2078,6 +2078,93 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
         write_event_log(_LOGGER, self, "Calling SERVICE_RESET_AUTO_TPI_DATA")
         await self.async_reset_auto_tpi_data()
 
+    async def service_train_auto_tpi(self, source_entity: str, days: int = 30):
+        """Called by a service call:
+        service: versatile_thermostat.train_auto_tpi
+        data:
+            source_entity: climate.bedroom_ac
+            days: 30
+        target:
+            entity_id: climate.bedroom_vtherm
+        """
+        write_event_log(_LOGGER, self, f"Calling SERVICE_TRAIN_AUTO_TPI, source_entity: {source_entity}, days: {days}")
+        await self.async_train_auto_tpi(source_entity, days)
+
+    async def async_train_auto_tpi(self, source_entity: str, days: int):
+        """Train Auto TPI from history"""
+        _LOGGER.debug("%s - async_train_auto_tpi called", self)
+        if not self._auto_tpi_manager:
+            _LOGGER.warning("%s - Auto TPI Manager not initialized", self)
+            return
+
+        # Notify user that training started
+        await self.hass.services.async_call(
+            "persistent_notification",
+            "create",
+            {
+                "message": f"Auto TPI training started for {self.name} using history from {source_entity} ({days} days). This may take a while.",
+                "title": "Versatile Thermostat Auto TPI",
+            },
+        )
+
+        # Launch training
+        result = await self._auto_tpi_manager.import_history_data(
+            source_climate_entity_id=source_entity,
+            room_temp_entity_id=self._temp_sensor_entity_id,
+            ext_temp_entity_id=self._ext_temp_sensor_entity_id,
+            humidity_entity_id=self._humidity_sensor_entity_id,
+            days=days
+        )
+
+        if result.get("error"):
+            message = f"Auto TPI training failed for {self.name}: {result['error']}"
+            _LOGGER.error(message)
+        else:
+            message = (f"Auto TPI training finished for {self.name}.\n"
+                      f"Added {result.get('cycles_added')} cycles and {result.get('data_points')} data points.\n"
+                      f"Total cycles: {result.get('total_cycles')}.")
+            
+            # Check if we have new parameters
+            new_params = self._auto_tpi_manager.get_calculated_params()
+            if new_params:
+                message += f"\nNew parameters calculated: Kp={new_params.get(CONF_TPI_COEF_INT)}, Kext={new_params.get(CONF_TPI_COEF_EXT)}"
+                
+                # Apply parameters if enabled
+                if self._auto_tpi_enable_update_config:
+                    self._tpi_coef_int = new_params.get(CONF_TPI_COEF_INT, self._tpi_coef_int)
+                    self._tpi_coef_ext = new_params.get(CONF_TPI_COEF_EXT, self._tpi_coef_ext)
+                    
+                    if self._prop_algorithm:
+                        self._prop_algorithm.update_tpi_coef(self._tpi_coef_int, self._tpi_coef_ext)
+                        
+                    # Save to config
+                    entry = self.hass.config_entries.async_get_entry(self._unique_id)
+                    if entry:
+                        new_data = entry.data.copy()
+                        new_data[CONF_TPI_COEF_INT] = self._tpi_coef_int
+                        new_data[CONF_TPI_COEF_EXT] = self._tpi_coef_ext
+                        self.hass.config_entries.async_update_entry(
+                            entry, data=new_data
+                        )
+                        message += "\nParameters applied to configuration."
+            else:
+                 message += "\nNo parameters calculated (insufficient data or quality)."
+
+            _LOGGER.info(message)
+
+        # Notify user of result
+        await self.hass.services.async_call(
+            "persistent_notification",
+            "create",
+            {
+                "message": message,
+                "title": "Versatile Thermostat Auto TPI",
+            },
+        )
+        
+        self.update_custom_attributes()
+        self.async_write_ha_state()
+
     async def async_reset_auto_tpi_data(self):
         """Reset the auto TPI data"""
         _LOGGER.debug("%s - async_reset_auto_tpi_data called", self)
