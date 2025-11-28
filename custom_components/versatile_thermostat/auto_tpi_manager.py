@@ -838,7 +838,7 @@ class AutoTpiManager:
 
     async def import_history_data(
         self,
-        source_climate_entity_id: str,
+        source_climate_entity_id: str | List[str],
         room_temp_entity_id: str,
         ext_temp_entity_id: str,
         humidity_entity_id: Optional[str] = None,
@@ -857,15 +857,21 @@ class AutoTpiManager:
         try:
             # Fetch history in executor
             # Note: include_start_time_state=True, no_attributes=False
-            history_data = await self._hass.async_add_executor_job(
-                history.state_changes_during_period,
-                self._hass,
-                start_time,
-                end_time,
-                entity_ids,
-                True,
-                False
-            )
+            def _get_history():
+                full_history = {}
+                for eid in entity_ids:
+                    entity_history = history.state_changes_during_period(
+                        self._hass,
+                        start_time,
+                        end_time=end_time,
+                        entity_id=eid,
+                        include_start_time_state=True,
+                        no_attributes=False
+                    )
+                    full_history.update(entity_history)
+                return full_history
+
+            history_data = await self._hass.async_add_executor_job(_get_history)
         except Exception as e:
              _LOGGER.error("%s - Auto TPI: Failed to fetch history: %s", self._name, e)
              return {"error": str(e)}
@@ -917,7 +923,7 @@ class AutoTpiManager:
         history_data: Dict,
         start_time: datetime,
         end_time: datetime,
-        climate_id: str,
+        climate_id: str | List[str],
         room_id: str,
         ext_id: str,
         hum_id: Optional[str]
@@ -934,7 +940,12 @@ class AutoTpiManager:
             return []
             
         def get_sorted_states(eid):
-            states = history_data.get(eid, [])
+            if isinstance(eid, list):
+                states = []
+                for e in eid:
+                    states.extend(history_data.get(e, []))
+            else:
+                states = history_data.get(eid, [])
             # Sort by last_updated
             return sorted(states, key=lambda s: s.last_updated.timestamp())
 
@@ -982,14 +993,14 @@ class AutoTpiManager:
             try:
                 r_val = float(current_room.state)
                 e_val = float(current_ext.state)
-            except ValueError:
+            except (ValueError, TypeError):
                 continue
                 
             h_val = None
             if current_hum and current_hum.state not in ("unavailable", "unknown"):
                 try:
                     h_val = float(current_hum.state)
-                except ValueError:
+                except (ValueError, TypeError):
                     pass
 
             # Extract Power
@@ -997,8 +1008,10 @@ class AutoTpiManager:
             attrs = current_clim.attributes
             if "power_percent" in attrs:
                 try:
-                    power = float(attrs["power_percent"])
-                except ValueError:
+                    val = attrs["power_percent"]
+                    if val is not None:
+                        power = float(val)
+                except (ValueError, TypeError):
                     pass
             elif current_clim.state == "off":
                 power = 0.0
@@ -1014,8 +1027,10 @@ class AutoTpiManager:
             target = 20.0 # Default
             if "temperature" in attrs:
                 try:
-                    target = float(attrs["temperature"])
-                except ValueError:
+                    val = attrs["temperature"]
+                    if val is not None:
+                        target = float(val)
+                except (ValueError, TypeError):
                     pass
             
             dp = DataPoint(
