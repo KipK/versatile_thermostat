@@ -574,12 +574,35 @@ class AutoTpiManager:
                 
                 # Duration in hours
                 duration_h = (end_time - start_time) / 3600.0
-                if duration_h <= 0.01: # Avoid division by zero
+                
+                # Filter 1: Duration too short (less than 5 minutes)
+                # Short cycles are dominated by transient effects and not reliable for steady-state estimation
+                if duration_h < 0.083:
+                    filtered_points += len(cycle.data_points)
+                    continue
+
+                # Filter 2: Temperature change too small (noise)
+                # If the temperature didn't change enough, we can't estimate the slope reliably
+                delta_temp = abs(valid_points[-1].room_temp - valid_points[0].room_temp)
+                if delta_temp < 0.1:
+                    filtered_points += len(cycle.data_points)
                     continue
                 
                 # Y: Temperature evolution rate (K/h)
-                temp_evolution = valid_points[-1].room_temp - valid_points[0].room_temp
-                d_temp_dt = temp_evolution / duration_h
+                # Use linear regression to be more robust to noise
+                temps = [p.room_temp for p in valid_points]
+                times = [p.timestamp for p in valid_points]
+                
+                if len(temps) >= 2:
+                    # timestamps are in seconds, so slope is K/s
+                    # Normalize time to avoid numerical issues
+                    times_norm = np.array(times) - times[0]
+                    slope, _ = np.polyfit(times_norm, temps, 1)
+                    d_temp_dt = slope * 3600.0  # Convert to K/h
+                else:
+                    # Fallback to simple difference
+                    temp_evolution = valid_points[-1].room_temp - valid_points[0].room_temp
+                    d_temp_dt = temp_evolution / duration_h
                 
                 # X variables (averages over the valid points)
                 avg_room_temp = np.mean([p.room_temp for p in valid_points])
@@ -647,6 +670,9 @@ class AutoTpiManager:
             # Helper: Train model with bounds
             # bounds: list of (min, max) tuples
             def train_constrained(X_in, Y_in, initial_guess, bounds):
+                if minimize is None:
+                    return initial_guess, float('inf'), False
+
                 def objective(params):
                     return np.sum((Y_in - (X_in @ params))**2)
                 
@@ -850,28 +876,35 @@ class AutoTpiManager:
         start_time = dt_util.now() - timedelta(days=days)
         end_time = dt_util.now()
         
-        entity_ids = [source_climate_entity_id, room_temp_entity_id, ext_temp_entity_id]
+        # Flatten entity_ids (source_climate_entity_id can be a list)
+        entity_ids = []
+        if isinstance(source_climate_entity_id, list):
+            entity_ids.extend(source_climate_entity_id)
+        else:
+            entity_ids.append(source_climate_entity_id)
+            
+        entity_ids.append(room_temp_entity_id)
+        entity_ids.append(ext_temp_entity_id)
         if humidity_entity_id:
             entity_ids.append(humidity_entity_id)
             
         try:
-            # Fetch history in executor
-            # Note: include_start_time_state=True, no_attributes=False
-            def _get_history():
-                full_history = {}
-                for eid in entity_ids:
-                    entity_history = history.state_changes_during_period(
-                        self._hass,
-                        start_time,
-                        end_time=end_time,
-                        entity_id=eid,
-                        include_start_time_state=True,
-                        no_attributes=False
+            # Fetch history in executor (one job per entity to avoid long blocking)
+            full_history = {}
+            
+            def _get_history_sync(hass, start, end, eids):
+                full_hist = {}
+                for eid in eids:
+                     hist = history.state_changes_during_period(
+                        hass, start, end_time=end, entity_id=eid,
+                        include_start_time_state=True, no_attributes=False
                     )
-                    full_history.update(entity_history)
-                return full_history
+                     full_hist.update(hist)
+                return full_hist
 
-            history_data = await self._hass.async_add_executor_job(_get_history)
+            history_data = await self._hass.async_add_executor_job(
+                _get_history_sync, self._hass, start_time, end_time, entity_ids
+            )
         except Exception as e:
              _LOGGER.error("%s - Auto TPI: Failed to fetch history: %s", self._name, e)
              return {"error": str(e)}
@@ -900,6 +933,17 @@ class AutoTpiManager:
              # Prune
              if len(self._completed_tpi_cycles) > MAX_STORED_CYCLES:
                  self._completed_tpi_cycles = self._completed_tpi_cycles[-MAX_STORED_CYCLES:]
+
+             # Add points to self._data
+             for cycle in new_cycles:
+                 self._data.extend(cycle.data_points)
+             
+             # Sort by timestamp
+             self._data.sort(key=lambda p: p.timestamp)
+
+             # Limit size
+             if len(self._data) > MAX_DATA_POINTS:
+                 self._data = self._data[-MAX_DATA_POINTS:]
                  
              # Update stats
              added_cycles = len(new_cycles)
