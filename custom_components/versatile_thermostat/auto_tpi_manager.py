@@ -502,7 +502,7 @@ class AutoTpiManager:
 
     async def start_learning(self, coef_int: float = None, coef_ext: float = None):
         """Start learning, optionally resetting coefficients to configured values."""
-        _LOGGER.info("%s - Auto TPI: Starting learning with coef_int=%.3f, coef_ext=%.3f", 
+        _LOGGER.info("%s - Auto TPI: Starting learning with coef_int=%.3f, coef_ext=%.3f",
                     self._name, coef_int or self.state.coeff_indoor, coef_ext or self.state.coeff_outdoor)
         
         if coef_int is not None:
@@ -512,6 +512,14 @@ class AutoTpiManager:
             self.state.coeff_outdoor = coef_ext
             self.state.coeff_outdoor_autolearn = 0
         
+        # Reset all learning data for fresh start
+        self.state.last_power = 0.0
+        self.state.last_order = 0.0
+        self.state.last_temp_in = 0.0
+        self.state.last_temp_out = 0.0
+        self.state.last_state = 'stop'
+        self.state.last_update_date = None
+        self.state.total_cycles = 0
         self.state.consecutive_failures = 0
         self.state.last_learning_status = "learning_started"
         self.state.autolearn_enabled = True
