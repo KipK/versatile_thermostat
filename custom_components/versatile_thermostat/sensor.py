@@ -332,11 +332,10 @@ class AutoTpiSensor(VersatileThermostatBaseEntity, SensorEntity):
         }
         
         calculated = manager.get_calculated_params()
-        if calculated:
-            self._attr_extra_state_attributes.update({
-                "calculated_coef_int": calculated.get(CONF_TPI_COEF_INT),
-                "calculated_coef_ext": calculated.get(CONF_TPI_COEF_EXT),
-            })
+        self._attr_extra_state_attributes.update({
+            "calculated_coef_int": calculated.get(CONF_TPI_COEF_INT),
+            "calculated_coef_ext": calculated.get(CONF_TPI_COEF_EXT),
+        })
 
         self.async_write_ha_state()
 
