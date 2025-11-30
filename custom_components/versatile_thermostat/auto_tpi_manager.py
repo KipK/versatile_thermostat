@@ -29,7 +29,7 @@ class AutoTpiState:
     coeff_indoor_autolearn: int = 1  # Counter
     coeff_outdoor_autolearn: int = 0
     
-    # Offsets (Unified)
+    # Offsets.
     offset: float = 0.0
     
     # Previous cycle state (Snapshot for learning)
@@ -427,7 +427,8 @@ class AutoTpiManager:
         coeff_int = self.state.coeff_indoor
         coeff_ext = self.state.coeff_outdoor
         offset = self.state.offset
-            
+        # Jeedom has an offset you can dynamically feed to the thermostat.
+        # We keep it here for future addition if needed, it's not used yet.
         power = (direction * delta_in * coeff_int) + (direction * delta_out * coeff_ext) + offset
         return max(0.0, min(100.0, power))
 
