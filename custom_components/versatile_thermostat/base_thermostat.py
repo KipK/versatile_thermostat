@@ -1589,6 +1589,7 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
                 self.power_percent,
                 self.target_temperature,
                 self.hvac_action,
+                str(self.vtherm_hvac_mode),
                 self.current_humidity,
             )
             

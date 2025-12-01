@@ -17,7 +17,7 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
-STORAGE_VERSION = 5
+STORAGE_VERSION = 6
 
 
 @dataclass
@@ -28,6 +28,12 @@ class AutoTpiState:
     coeff_outdoor: float = 0.05
     coeff_indoor_autolearn: int = 1  # Counter
     coeff_outdoor_autolearn: int = 0
+
+    # Learning coefficients for Cool
+    coeff_indoor_cool: float = 0.4
+    coeff_outdoor_cool: float = 0.05
+    coeff_indoor_cool_autolearn: int = 1
+    coeff_outdoor_cool_autolearn: int = 0
     
     # Offsets.
     offset: float = 0.0
@@ -101,8 +107,10 @@ class AutoTpiManager:
         self.state = AutoTpiState()
         if coef_int is not None:
             self.state.coeff_indoor = coef_int
+            self.state.coeff_indoor_cool = coef_int
         if coef_ext is not None:
             self.state.coeff_outdoor = coef_ext
+            self.state.coeff_outdoor_cool = coef_ext
         self._calculated_params = {}
 
         # Transient state
@@ -110,6 +118,7 @@ class AutoTpiManager:
         self._current_temp_out: float = 0.0
         self._current_target_temp: float = 0.0
         self._current_hvac_action: str = 'stop'
+        self._current_hvac_mode: str = 'heat' # 'heat' or 'cool' (or 'off' etc)
         self._last_cycle_power_efficiency: float = 1.0
 
     async def async_save_data(self):
@@ -153,8 +162,17 @@ class AutoTpiManager:
             if version >= STORAGE_VERSION:
                 state_data = data.get("state", {})
                 self.state = AutoTpiState.from_dict(state_data)
-                _LOGGER.info("%s - Auto TPI: State loaded. Cycles: %d, Indoor learn count: %d", 
+                _LOGGER.info("%s - Auto TPI: State loaded. Cycles: %d, Indoor learn count: %d",
                             self._name, self.state.total_cycles, self.state.coeff_indoor_autolearn)
+            # Migration from version 5 (or less) to 6
+            if version < 6:
+                _LOGGER.info("%s - Auto TPI: Migrating from version %d to 6", self._name, version)
+                # Init cooling coefficients with heating ones
+                self.state.coeff_indoor_cool = self.state.coeff_indoor
+                self.state.coeff_outdoor_cool = self.state.coeff_outdoor
+                self.state.coeff_indoor_cool_autolearn = 1
+                self.state.coeff_outdoor_cool_autolearn = 0
+
             else:
                 _LOGGER.info("%s - Auto TPI: Old storage version %d. Resetting to new structure.",
                              self._unique_id, version)
@@ -166,7 +184,7 @@ class AutoTpiManager:
 
     async def update(self, room_temp: float, ext_temp: float,
                     power_percent: float, target_temp: float, hvac_action: str,
-                    humidity: Optional[float] = None) -> float:
+                    hvac_mode: str, humidity: Optional[float] = None) -> float:
         """Update state with new data.
         
         This method is called at each control_heating cycle.
@@ -187,16 +205,37 @@ class AutoTpiManager:
         self._current_temp_out = ext_temp if ext_temp is not None else 0.0
         self._current_target_temp = target_temp if target_temp is not None else 0.0
         self._current_hvac_action = current_state_str
+        self._current_hvac_mode = hvac_mode
         
         # Calculate and return power
-        return self.calculate_power(target_temp, room_temp, ext_temp, current_state_str)
+        # Use hvac_mode to force direction if action is idle (stop)
+        # If action is 'heat' or 'cool', use it. If 'stop', check hvac_mode.
+        calc_state_str = current_state_str
+        if current_state_str == 'stop':
+            if hvac_mode == 'cool':
+                calc_state_str = 'cool'
+            elif hvac_mode == 'heat':
+                calc_state_str = 'heat'
+
+        return self.calculate_power(target_temp, room_temp, ext_temp, calc_state_str)
 
     async def calculate(self) -> Optional[dict]:
         """Return the current calculated TPI parameters."""
         # Return current coefficients for the thermostat to use
         params = {}
-        params[CONF_TPI_COEF_INT] = self.state.coeff_indoor
-        params[CONF_TPI_COEF_EXT] = self.state.coeff_outdoor
+        
+        # Use hvac_mode to determine which coefficients to return
+        # This prevents flapping when switching between heating/cooling actions while in the same mode (e.g. idle)
+        # Note: hvac_mode usually comes from VThermHvacMode (heat, cool, off, auto...)
+        
+        is_cool_mode = self._current_hvac_mode == 'cool' or self._current_hvac_action == 'cool'
+        
+        if is_cool_mode:
+            params[CONF_TPI_COEF_INT] = self.state.coeff_indoor_cool
+            params[CONF_TPI_COEF_EXT] = self.state.coeff_outdoor_cool
+        else:
+            params[CONF_TPI_COEF_INT] = self.state.coeff_indoor
+            params[CONF_TPI_COEF_EXT] = self.state.coeff_outdoor
             
         self._calculated_params = params
         return params
@@ -252,14 +291,14 @@ class AutoTpiManager:
         
         # Priority 1: Indoor Coefficient
         if temp_progress > 0 and target_diff > 0:
-            self._learn_indoor(target_diff, temp_progress, self._last_cycle_power_efficiency)
-            self.state.last_learning_status = "learned_indoor"
+            self._learn_indoor(target_diff, temp_progress, self._last_cycle_power_efficiency, is_cool)
+            self.state.last_learning_status = f"learned_indoor_{'cool' if is_cool else 'heat'}"
             learned = True
             
         # Priority 2: Outdoor Coefficient
         elif outdoor_condition:
-            self._learn_outdoor(current_temp_in, current_temp_out)
-            self.state.last_learning_status = "learned_outdoor"
+            self._learn_outdoor(current_temp_in, current_temp_out, is_cool)
+            self.state.last_learning_status = f"learned_outdoor_{'cool' if is_cool else 'heat'}"
             learned = True
         else:
             self.state.last_learning_status = f"no_valid_conditions(progress={temp_progress:.2f},target_diff={target_diff:.2f})"
@@ -270,7 +309,7 @@ class AutoTpiManager:
             _LOGGER.info("%s - Auto TPI: Learning successful - %s",
                         self._name, self.state.last_learning_status)
 
-    def _learn_indoor(self, delta_theoretical: float, delta_real: float, efficiency: float = 1.0):
+    def _learn_indoor(self, delta_theoretical: float, delta_real: float, efficiency: float = 1.0, is_cool: bool = False):
         """Learn indoor coefficient."""
         if delta_real <= 0:
             _LOGGER.warning("%s - Auto TPI: Cannot learn indoor - delta_real <= 0", self._name)
@@ -287,7 +326,8 @@ class AutoTpiManager:
              return
 
         ratio = adjusted_theoretical / delta_real
-        coeff_new = self.state.coeff_indoor * ratio
+        current_coeff = self.state.coeff_indoor_cool if is_cool else self.state.coeff_indoor
+        coeff_new = current_coeff * ratio
         
         # Validate coefficient - reject only truly invalid values (non-finite or <= 0)
         # For values > 1.0, cap them instead of rejecting (like Jeedom does for lower bound)
@@ -298,28 +338,36 @@ class AutoTpiManager:
         
         # Cap coefficient at 1.0 before averaging (normalized units)
         if coeff_new > 1.0:
-            _LOGGER.info("%s - Auto TPI: Calculated indoor coeff %.3f > 1.0, capping to 1.0 before averaging", 
+            _LOGGER.info("%s - Auto TPI: Calculated indoor coeff %.3f > 1.0, capping to 1.0 before averaging",
                         self._name, coeff_new)
             coeff_new = 1.0
             
         # Weighted average
-        count = self.state.coeff_indoor_autolearn
-        old_coeff = self.state.coeff_indoor
-        self.state.coeff_indoor = (
-            (self.state.coeff_indoor * count + coeff_new) / (count + 1)
+        count = self.state.coeff_indoor_cool_autolearn if is_cool else self.state.coeff_indoor_autolearn
+        old_coeff = self.state.coeff_indoor_cool if is_cool else self.state.coeff_indoor
+        
+        avg_coeff = (
+            (old_coeff * count + coeff_new) / (count + 1)
         )
         # Ensure the averaged result is also valid (defense in depth)
-        if self.state.coeff_indoor > 1.0:
-             self.state.coeff_indoor = 1.0
+        if avg_coeff > 1.0:
+             avg_coeff = 1.0
 
-        self.state.coeff_indoor_autolearn = min(count + 1, 50)
+        new_count = min(count + 1, 50)
+        
+        if is_cool:
+            self.state.coeff_indoor_cool = avg_coeff
+            self.state.coeff_indoor_cool_autolearn = new_count
+        else:
+            self.state.coeff_indoor = avg_coeff
+            self.state.coeff_indoor_autolearn = new_count
         
         _LOGGER.info(
-            "%s - Auto TPI: Learn indoor. Old: %.3f, New calculated: %.3f, Averaged: %.3f (count: %d)",
-            self._name, old_coeff, coeff_new, self.state.coeff_indoor, self.state.coeff_indoor_autolearn
+            "%s - Auto TPI: Learn indoor (%s). Old: %.3f, New calculated: %.3f, Averaged: %.3f (count: %d)",
+            self._name, 'cool' if is_cool else 'heat', old_coeff, coeff_new, avg_coeff, new_count
         )
 
-    def _learn_outdoor(self, current_temp_in: float, current_temp_out: float):
+    def _learn_outdoor(self, current_temp_in: float, current_temp_out: float, is_cool: bool = False):
         """Learn outdoor coefficient."""
         gap_in = self.state.last_order - current_temp_in
         gap_out = self.state.last_order - current_temp_out
@@ -329,32 +377,43 @@ class AutoTpiManager:
             return
 
         ratio_influence = gap_in / gap_out
-        contribution = self.state.coeff_indoor * ratio_influence
-        coeff_new = contribution + self.state.coeff_outdoor
+        current_indoor = self.state.coeff_indoor_cool if is_cool else self.state.coeff_indoor
+        current_outdoor = self.state.coeff_outdoor_cool if is_cool else self.state.coeff_outdoor
+        
+        contribution = current_indoor * ratio_influence
+        coeff_new = contribution + current_outdoor
 
         # Validate coefficient - reject only truly invalid values (non-finite or <= 0)
         # For values > 1.0, cap them instead of rejecting (like Jeedom does for lower bound)
         if not math.isfinite(coeff_new) or coeff_new <= 0:
-            _LOGGER.warning("%s - Auto TPI: Invalid new outdoor coeff: %.3f (non-finite or <= 0), skipping", 
+            _LOGGER.warning("%s - Auto TPI: Invalid new outdoor coeff: %.3f (non-finite or <= 0), skipping",
                            self._name, coeff_new)
             return
         
         # Cap coefficient at 1.0 before averaging (normalized units)
         if coeff_new > 1.0:
-            _LOGGER.info("%s - Auto TPI: Calculated outdoor coeff %.3f > 1.0, capping to 1.0 before averaging", 
+            _LOGGER.info("%s - Auto TPI: Calculated outdoor coeff %.3f > 1.0, capping to 1.0 before averaging",
                         self._name, coeff_new)
             coeff_new = 1.0
 
-        count = self.state.coeff_outdoor_autolearn
-        old_coeff = self.state.coeff_outdoor
-        self.state.coeff_outdoor = (
-            (self.state.coeff_outdoor * count + coeff_new) / (count + 1)
+        count = self.state.coeff_outdoor_cool_autolearn if is_cool else self.state.coeff_outdoor_autolearn
+        old_coeff = current_outdoor
+        
+        avg_coeff = (
+            (old_coeff * count + coeff_new) / (count + 1)
         )
-        self.state.coeff_outdoor_autolearn = min(count + 1, 50)
+        new_count = min(count + 1, 50)
+        
+        if is_cool:
+            self.state.coeff_outdoor_cool = avg_coeff
+            self.state.coeff_outdoor_cool_autolearn = new_count
+        else:
+            self.state.coeff_outdoor = avg_coeff
+            self.state.coeff_outdoor_autolearn = new_count
         
         _LOGGER.info(
-            "%s - Auto TPI: Learn outdoor. Old: %.3f, New calculated: %.3f, Averaged: %.3f (count: %d)",
-            self._name, old_coeff, coeff_new, self.state.coeff_outdoor, self.state.coeff_outdoor_autolearn
+            "%s - Auto TPI: Learn outdoor (%s). Old: %.3f, New calculated: %.3f, Averaged: %.3f (count: %d)",
+            self._name, 'cool' if is_cool else 'heat', old_coeff, coeff_new, avg_coeff, new_count
         )
 
     def _detect_failures(self, current_temp_in: float):
@@ -400,8 +459,13 @@ class AutoTpiManager:
         delta_in = setpoint - temp_in
         delta_out = setpoint - temp_out
         
-        coeff_int = self.state.coeff_indoor
-        coeff_ext = self.state.coeff_outdoor
+        if state_str == 'cool':
+            coeff_int = self.state.coeff_indoor_cool
+            coeff_ext = self.state.coeff_outdoor_cool
+        else:
+            coeff_int = self.state.coeff_indoor
+            coeff_ext = self.state.coeff_outdoor
+            
         offset = self.state.offset
         # Jeedom has an offset you can dynamically feed to the thermostat.
         # We keep it here for future addition if needed, it's not used yet.
