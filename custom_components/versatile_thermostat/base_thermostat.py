@@ -1647,14 +1647,7 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
                     CONF_AUTO_TPI_ENABLE_UPDATE_CONFIG, False
                 )
                 if enable_update_config:
-                    entry = self.hass.config_entries.async_get_entry(self._unique_id)
-                    if entry:
-                        new_data = entry.data.copy()
-                        new_data[CONF_TPI_COEF_INT] = self._tpi_coef_int
-                        new_data[CONF_TPI_COEF_EXT] = self._tpi_coef_ext
-                        self.hass.config_entries.async_update_entry(
-                            entry, data=new_data
-                        )
+                    await self._async_update_tpi_config_entry()
 
         # Stop here if we are off
         if self.vtherm_hvac_mode == VThermHvacMode_OFF:
@@ -2162,6 +2155,23 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
         write_event_log(_LOGGER, self, "Calling SERVICE_SET_HVAC_MODE_SLEEP")
         raise NotImplementedError("service_set_hva_mode_sleep not implemented for this kind of thermostat. Only for over_climate with valve regulation is supported")
 
+    async def _async_update_tpi_config_entry(self):
+        """Update the config entry with current TPI parameters."""
+        entry = self.hass.config_entries.async_get_entry(self._unique_id)
+        if entry:
+            new_data = entry.data.copy()
+            new_data[CONF_TPI_COEF_INT] = self._tpi_coef_int
+            new_data[CONF_TPI_COEF_EXT] = self._tpi_coef_ext
+            new_data[CONF_TPI_THRESHOLD_LOW] = self._tpi_threshold_low
+            new_data[CONF_TPI_THRESHOLD_HIGH] = self._tpi_threshold_high
+            new_data[CONF_MINIMAL_ACTIVATION_DELAY] = self._minimal_activation_delay
+            new_data[CONF_MINIMAL_DEACTIVATION_DELAY] = self._minimal_deactivation_delay
+
+            result = self.hass.config_entries.async_update_entry(
+                entry, data=new_data
+            )
+            _LOGGER.debug("%s - Config entry updated with new TPI params: %s", self, result)
+
     async def service_set_tpi_parameters(
         self,
         tpi_coef_int: float | None = None,
@@ -2224,14 +2234,7 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
         self._tpi_threshold_high = self._prop_algorithm.tpi_threshold_high
 
         # Update the configuration attributes
-        data = {**entry.data, CONF_TPI_COEF_INT: self._tpi_coef_int}
-        data = {**data, CONF_TPI_COEF_EXT: self._tpi_coef_ext}
-        data = {**data, CONF_TPI_THRESHOLD_LOW: self._tpi_threshold_low}
-        data = {**data, CONF_TPI_THRESHOLD_HIGH: self._tpi_threshold_high}
-        data = {**data, CONF_MINIMAL_ACTIVATION_DELAY: self._minimal_activation_delay}
-        data = {**data, CONF_MINIMAL_DEACTIVATION_DELAY: self._minimal_deactivation_delay}
-
-        self.hass.config_entries.async_update_entry(entry, data=data)
+        await self._async_update_tpi_config_entry()
 
         self.recalculate()
         await self.async_control_heating(force=True)
