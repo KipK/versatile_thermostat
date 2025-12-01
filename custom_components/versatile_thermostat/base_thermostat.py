@@ -1463,7 +1463,10 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
         if self._auto_tpi_manager and self._auto_tpi_manager.learning_active:
             on_time = self._prop_algorithm.on_time_sec if self._prop_algorithm else 0
             off_time = self._prop_algorithm.off_time_sec if self._prop_algorithm else 0
-            on_percent = self._prop_algorithm.on_percent if self._prop_algorithm else 0
+            # on_percent = self._prop_algorithm.on_percent if self._prop_algorithm else 0
+            # We use the real on_percent instead of the theoretical one to avoid learning on 0% cycles
+            # if the cycle is too short (min_cycle_duration)
+            on_percent = on_time / (self._cycle_min * 60) if self._cycle_min > 0 else 0
             hvac_mode = str(self.vtherm_hvac_mode)
 
             await self._fire_cycle_start_callbacks(on_time, off_time, on_percent, hvac_mode)
