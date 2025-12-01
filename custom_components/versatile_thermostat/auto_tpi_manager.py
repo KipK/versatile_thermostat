@@ -42,7 +42,6 @@ class AutoTpiState:
     
     # Cycle management
     cycle_start_date: Optional[datetime] = None  # Start of current cycle
-    learning_end_date: Optional[datetime] = None  # Expected end of learning
     
     # Management
     consecutive_failures: int = 0
@@ -57,7 +56,7 @@ class AutoTpiState:
     def from_dict(cls, data):
         d = data.copy()
         # Date conversion from ISO format
-        for date_field in ["last_update_date", "learning_end_date", "cycle_start_date"]:
+        for date_field in ["last_update_date", "cycle_start_date"]:
             if d.get(date_field):
                 try:
                     d[date_field] = datetime.fromisoformat(d[date_field])
@@ -99,6 +98,12 @@ class AutoTpiManager:
         if coef_ext is not None:
             self.state.coeff_outdoor = coef_ext
         self._calculated_params = {}
+
+        # Transient state
+        self._current_temp_in: float = 0.0
+        self._current_temp_out: float = 0.0
+        self._current_target_temp: float = 0.0
+        self._current_hvac_action: str = 'stop'
 
     async def async_save_data(self):
         """Save data."""
@@ -155,10 +160,10 @@ class AutoTpiManager:
     async def update(self, room_temp: float, ext_temp: float,
                     power_percent: float, target_temp: float, hvac_action: str,
                     humidity: Optional[float] = None) -> float:
-        """Update state with new data and perform learning if applicable.
+        """Update state with new data.
         
         This method is called at each control_heating cycle.
-        It checks if a full TPI cycle has elapsed to trigger learning.
+        It updates the transient state used for power calculation and future learning.
         
         Returns the calculated power for validation/indication.
         """
@@ -169,54 +174,14 @@ class AutoTpiManager:
             current_state_str = 'heat'
         elif hvac_action == 'cooling':
             current_state_str = 'cool'
-            
-        now = datetime.now()
-        
-        # 1. Check if we need to start a new cycle
-        if self.state.cycle_start_date is None:
-            _LOGGER.info("%s - Auto TPI: Starting first cycle", self._name)
-            self.state.cycle_start_date = now
-            self.state.learning_end_date = now + timedelta(minutes=self._cycle_min * 0.9)
-        
-        # 2. Check if a full cycle has elapsed
-        cycle_elapsed = False
-        if self.state.cycle_start_date is not None:
-            elapsed_minutes = (now - self.state.cycle_start_date).total_seconds() / 60
-            if elapsed_minutes >= self._cycle_min:
-                cycle_elapsed = True
-                self.state.total_cycles += 1
-                _LOGGER.info("%s - Auto TPI: Cycle #%d completed after %.1f minutes", 
-                            self._name, self.state.total_cycles, elapsed_minutes)
-        
-        # 3. If a cycle has elapsed AND we have previous data, attempt learning
-        if cycle_elapsed and self.state.last_update_date is not None:
-            if self._should_learn():
-                _LOGGER.info("%s - Auto TPI: Attempting to learn from cycle data", self._name)
-                await self._perform_learning(room_temp, ext_temp)
-            else:
-                # Log why we are not learning
-                reason = self._get_no_learn_reason()
-                _LOGGER.debug("%s - Auto TPI: Not learning this cycle: %s", self._name, reason)
-                self.state.last_learning_status = reason
-                
-            # Check for failures
-            self._detect_failures(room_temp)
-            
-            # Reset the cycle
-            self.state.cycle_start_date = now
-            self.state.learning_end_date = now + timedelta(minutes=self._cycle_min * 0.9)
 
-        # 4. Save CURRENT state for the next cycle
-        self.state.last_power = power_percent if power_percent is not None else 0.0
-        self.state.last_order = target_temp if target_temp is not None else 0.0
-        self.state.last_temp_in = room_temp if room_temp is not None else 0.0
-        self.state.last_temp_out = ext_temp if ext_temp is not None else 0.0
-        self.state.last_state = current_state_str
-        self.state.last_update_date = now
+        # Store current values for later use in cycle callbacks
+        self._current_temp_in = room_temp if room_temp is not None else 0.0
+        self._current_temp_out = ext_temp if ext_temp is not None else 0.0
+        self._current_target_temp = target_temp if target_temp is not None else 0.0
+        self._current_hvac_action = current_state_str
         
-        await self.async_save_data()
-        
-        # 5. Calculate and return power
+        # Calculate and return power
         return self.calculate_power(target_temp, room_temp, ext_temp, current_state_str)
 
     async def calculate(self) -> Optional[dict]:
@@ -432,19 +397,56 @@ class AutoTpiManager:
         power = (direction * delta_in * coeff_int) + (direction * delta_out * coeff_ext) + offset
         return max(0.0, min(100.0, power))
 
-    async def on_thermostat_mode_changed(self, mode: str, target_temp: float):
-        """Called when thermostat mode changes."""
-        _LOGGER.info("%s - Auto TPI: Mode changed to %s, target: %.1f", self._name, mode, target_temp)
-        # Reset cycle start when mode changes
-        self.state.cycle_start_date = datetime.now()
-        self.state.learning_end_date = self.state.cycle_start_date + timedelta(minutes=self._cycle_min * 0.9)
+    async def on_cycle_started(self, on_time_sec: float, off_time_sec: float,
+                             on_percent: float, hvac_mode: str):
+        """Called when a TPI cycle starts."""
+        _LOGGER.debug("%s - Auto TPI: Cycle started. On: %.0fs, Off: %.0fs (%.1f%%), Mode: %s",
+                     self._name, on_time_sec, off_time_sec, on_percent * 100, hvac_mode)
+        
+        now = datetime.now()
+        
+        # Snapshot current state for learning at the end of the cycle
+        self.state.last_temp_in = self._current_temp_in
+        self.state.last_temp_out = self._current_temp_out
+        self.state.last_order = self._current_target_temp
+        self.state.last_power = on_percent if on_percent is not None else 0.0
+        
+        # Map VThermHvacMode/HVACMode to internal state string
+        # hvac_mode is expected to be VThermHvacMode or string representation
+        mode_str = str(hvac_mode)
+        if mode_str == 'heat' or mode_str == 'heating':
+            self.state.last_state = 'heat'
+        elif mode_str == 'cool' or mode_str == 'cooling':
+            self.state.last_state = 'cool'
+        else:
+            self.state.last_state = 'stop'
+            
+        self.state.cycle_start_date = now
+        self.state.last_update_date = now
+        
         await self.async_save_data()
 
-    async def on_cycle_elapsed(self):
-        """Called when TPI cycle elapses."""
-        _LOGGER.debug("%s - Auto TPI: on_cycle_elapsed called", self._name)
-        # Learning is now handled in update()
-        pass
+    async def on_cycle_completed(self, on_time_sec: float, off_time_sec: float, hvac_mode: str):
+        """Called when a TPI cycle completes."""
+        elapsed_minutes = (on_time_sec + off_time_sec) / 60
+        self.state.total_cycles += 1
+        
+        _LOGGER.info("%s - Auto TPI: Cycle #%d completed after %.1f minutes",
+                    self._name, self.state.total_cycles, elapsed_minutes)
+        
+        # Attempt learning
+        if self._should_learn():
+            _LOGGER.info("%s - Auto TPI: Attempting to learn from cycle data", self._name)
+            await self._perform_learning(self._current_temp_in, self._current_temp_out)
+        else:
+            reason = self._get_no_learn_reason()
+            _LOGGER.debug("%s - Auto TPI: Not learning this cycle: %s", self._name, reason)
+            self.state.last_learning_status = reason
+            
+        # Check for failures
+        self._detect_failures(self._current_temp_in)
+        
+        await self.async_save_data()
     
     def get_calculated_params(self) -> dict:
         return self._calculated_params
@@ -525,7 +527,6 @@ class AutoTpiManager:
         self.state.last_learning_status = "learning_started"
         self.state.autolearn_enabled = True
         self.state.cycle_start_date = datetime.now()
-        self.state.learning_end_date = self.state.cycle_start_date + timedelta(minutes=self._cycle_min * 0.9)
         
         await self.async_save_data()
 

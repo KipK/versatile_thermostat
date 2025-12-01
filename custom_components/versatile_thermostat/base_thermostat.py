@@ -440,6 +440,11 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
             coef_ext=self._tpi_coef_ext,
         )
 
+        self.register_cycle_callback(
+            on_start=self._auto_tpi_manager.on_cycle_started,
+            on_end=self._auto_tpi_manager.on_cycle_completed
+        )
+
     async def async_added_to_hass(self):
         """Run when entity about to be added."""
         _LOGGER.debug("Calling async_added_to_hass")
@@ -551,6 +556,15 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
             self._on_cycle_end_callbacks.append(on_end)
             _LOGGER.debug("%s - Registered cycle end callback: %s", self, on_end)
 
+    async def _fire_cycle_start_callbacks(self, on_time_sec, off_time_sec, on_percent, hvac_mode):
+        """Fire all cycle start callbacks."""
+        for callback in self._on_cycle_start_callbacks:
+            await callback(on_time_sec, off_time_sec, on_percent, hvac_mode)
+
+    async def _fire_cycle_end_callbacks(self, on_time_sec, off_time_sec, hvac_mode):
+        """Fire all cycle end callbacks."""
+        for callback in self._on_cycle_end_callbacks:
+            await callback(on_time_sec, off_time_sec, hvac_mode)
 
     def stop_recalculate_later(self):
         """Stop any scheduled call later tasks if any."""
@@ -1440,17 +1454,19 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
     ##
     ## Calculation and utility functions
     ##
-    async def _start_tpi_cycle_timer(self, notify_manager=True):
+    async def _start_tpi_cycle_timer(self):
         """Start the TPI cycle timer if Auto TPI is active."""
         if self._cycle_timer:
             self._cycle_timer()
             self._cycle_timer = None
 
         if self._auto_tpi_manager and self._auto_tpi_manager.learning_active:
-            if notify_manager:
-                await self._auto_tpi_manager.on_thermostat_mode_changed(
-                    "HEAT", self.target_temperature
-                )
+            on_time = self._prop_algorithm.on_time_sec if self._prop_algorithm else 0
+            off_time = self._prop_algorithm.off_time_sec if self._prop_algorithm else 0
+            on_percent = self._prop_algorithm.on_percent if self._prop_algorithm else 0
+            hvac_mode = str(self.vtherm_hvac_mode)
+
+            await self._fire_cycle_start_callbacks(on_time, off_time, on_percent, hvac_mode)
 
             self._cycle_timer = async_call_later(
                 self.hass, self._cycle_min * 60, self._on_tpi_cycle_elapsed
@@ -1458,11 +1474,14 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
 
     async def _on_tpi_cycle_elapsed(self, _):
         """Handle TPI cycle elapsed."""
-        if self._auto_tpi_manager:
-            await self._auto_tpi_manager.on_cycle_elapsed()
+        on_time = self._prop_algorithm.on_time_sec if self._prop_algorithm else 0
+        off_time = self._prop_algorithm.off_time_sec if self._prop_algorithm else 0
+        hvac_mode = str(self.vtherm_hvac_mode)
+
+        await self._fire_cycle_end_callbacks(on_time, off_time, hvac_mode)
 
         if self.vtherm_hvac_mode == VThermHvacMode_HEAT:
-            await self._start_tpi_cycle_timer(notify_manager=False)
+            await self._start_tpi_cycle_timer()
 
     async def update_states(self, force=False):
         """Update the states of the thermostat considering the requested state and the current state"""
@@ -1495,23 +1514,19 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
                     if self.hvac_mode == VThermHvacMode_OFF and self.power_manager.is_overpowering_detected:
                         await self.power_manager.set_overpowering(False)
 
-                    # Hook for Auto TPI
-                    if self._auto_tpi_manager and self._auto_tpi_manager.learning_active:
-                        if self.vtherm_hvac_mode == VThermHvacMode_HEAT:
-                            await self._start_tpi_cycle_timer(notify_manager=True)
-                        else:
-                            # We left HEAT (or never were in it, but stopping timer is safe)
-                            if self._cycle_timer:
-                                self._cycle_timer()
-                                self._cycle_timer = None
-                            await self._auto_tpi_manager.on_thermostat_mode_changed(
-                                str(self.vtherm_hvac_mode), self.target_temperature
-                            )
-
                 if changed:
                     self.recalculate(force=force)
                     self.reset_last_change_time_from_vtherm()
                     await self.async_control_heating(force=force or sub_need_control_heating)
+
+                    if self._state_manager.current_state.is_hvac_mode_changed:
+                        if self._auto_tpi_manager and self._auto_tpi_manager.learning_active:
+                            if self.vtherm_hvac_mode == VThermHvacMode_HEAT:
+                                await self._start_tpi_cycle_timer()
+                            else:
+                                if self._cycle_timer:
+                                    self._cycle_timer()
+                                    self._cycle_timer = None
 
             self.calculate_hvac_action()
             self.update_custom_attributes()
@@ -2272,7 +2287,7 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
 
             # Start timer if we are in HEAT
             if self.vtherm_hvac_mode == VThermHvacMode_HEAT:
-                await self._start_tpi_cycle_timer(notify_manager=True)
+                await self._start_tpi_cycle_timer()
         else:
             await self._auto_tpi_manager.stop_learning()
             # Stop timer
