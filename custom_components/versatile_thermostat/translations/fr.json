@@ -276,10 +276,12 @@
         "data": {
           "auto_tpi_enable_update_config": "Mettre à jour la config avec les coefficients calculés",
           "auto_tpi_enable_notification": "Envoyer une notification lors du changement de coefficients",
-          "heater_rampup_time": "Temps de chauffe du radiateur (mn)"
+          "heater_heating_time": "Temps de chauffe du radiateur (mn)",
+          "heater_cooling_time": "Temps de refroidissement du radiateur (mn)"
         },
         "data_description": {
-          "heater_rampup_time": "Temps en mn après lequel le radiateur est considéré comme chaud."
+          "heater_heating_time": "Temps en mn après lequel le radiateur est considéré comme chaud.",
+          "heater_cooling_time": "Temps en mn après lequel le radiateur est considéré comme froid (après un arrêt)."
         }
       }
     },

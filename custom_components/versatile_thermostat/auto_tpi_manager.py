@@ -39,10 +39,12 @@ class AutoTpiState:
     last_temp_out: float = 0.0
     last_state: str = 'stop'  # 'heat', 'cool', 'stop'
     last_update_date: Optional[datetime] = None
+    last_heater_stop_time: Optional[datetime] = None # When heater stopped
     
     # Cycle management
     cycle_start_date: Optional[datetime] = None  # Start of current cycle
     cycle_active: bool = False
+    current_cycle_cold_factor: float = 1.0 # 1.0 = cold, 0.0 = hot
     
     # Management
     consecutive_failures: int = 0
@@ -57,7 +59,7 @@ class AutoTpiState:
     def from_dict(cls, data):
         d = data.copy()
         # Date conversion from ISO format
-        for date_field in ["last_update_date", "cycle_start_date"]:
+        for date_field in ["last_update_date", "cycle_start_date", "last_heater_stop_time"]:
             if d.get(date_field):
                 try:
                     d[date_field] = datetime.fromisoformat(d[date_field])
@@ -82,14 +84,15 @@ class AutoTpiManager:
     def __init__(self, hass: HomeAssistant, unique_id: str, name: str, cycle_min: int,
                  tpi_threshold_low: float = 0.0, tpi_threshold_high: float = 0.0,
                  coef_int: float = 0.6, coef_ext: float = 0.04,
-                 heater_rampup: int = 0):
+                 heater_heating_time: int = 0, heater_cooling_time: int = 0):
         self._hass = hass
         self._unique_id = unique_id
         self._name = name
         self._cycle_min = cycle_min
         self._tpi_threshold_low = tpi_threshold_low
         self._tpi_threshold_high = tpi_threshold_high
-        self._heater_rampup = heater_rampup
+        self._heater_heating_time = heater_heating_time
+        self._heater_cooling_time = heater_cooling_time
 
         self._storage_path = hass.config.path(
             f".storage/versatile_thermostat_{unique_id}_auto_tpi_v2.json"
@@ -439,6 +442,15 @@ class AutoTpiManager:
         self.state.cycle_start_date = now
         self.state.last_update_date = now
         
+        # Calculate cold factor for this cycle
+        self.state.current_cycle_cold_factor = 1.0
+        if self._heater_cooling_time > 0 and self.state.last_heater_stop_time:
+            elapsed_off = (now - self.state.last_heater_stop_time).total_seconds() / 60.0
+            if elapsed_off >= 0:
+                self.state.current_cycle_cold_factor = min(1.0, elapsed_off / self._heater_cooling_time)
+                _LOGGER.debug("%s - Auto TPI: Cold factor calc: elapsed_off=%.1f min, cooling_time=%.1f min, factor=%.2f",
+                              self._name, elapsed_off, self._heater_cooling_time, self.state.current_cycle_cold_factor)
+        
         await self.async_save_data()
 
     async def on_cycle_completed(self, on_time_sec: float, off_time_sec: float, hvac_mode: str):
@@ -453,26 +465,33 @@ class AutoTpiManager:
         on_time_minutes = on_time_sec / 60.0
         self.state.total_cycles += 1
         
-        # Calculate Power Efficiency based on RampUp time
-        # If the heater was ON for 10 min but rampup is 5 min, only 5 min were effective heating
+        # Update last_heater_stop_time if we were heating
+        if self.state.last_state == 'heat':
+            self.state.last_heater_stop_time = datetime.now()
+
+        # Calculate Power Efficiency based on Heating time and Cold Factor
+        # If the heater was ON for 10 min but heating_time is 5 min, only 5 min were effective heating
+        # But if cold_factor is 0.5 (half warm), heating_time is effectively 2.5 min
         self._last_cycle_power_efficiency = 1.0
-        if self._heater_rampup > 0 and on_time_minutes > 0:
-            effective_time = max(0.0, on_time_minutes - self._heater_rampup)
+        effective_heating_time = self._heater_heating_time * self.state.current_cycle_cold_factor
+        
+        if effective_heating_time > 0 and on_time_minutes > 0:
+            effective_time = max(0.0, on_time_minutes - effective_heating_time)
             self._last_cycle_power_efficiency = effective_time / on_time_minutes
             
-            _LOGGER.debug("%s - Auto TPI: Power Efficiency calc: on_time=%.1f min, rampup=%.1f min, eff=%.2f",
-                          self._name, on_time_minutes, self._heater_rampup, self._last_cycle_power_efficiency)
+            _LOGGER.debug("%s - Auto TPI: Power Efficiency calc: on_time=%.1f min, heating_time=%.1f, cold_factor=%.2f, eff_heating_time=%.1f, eff=%.2f",
+                          self._name, on_time_minutes, self._heater_heating_time, self.state.current_cycle_cold_factor, effective_heating_time, self._last_cycle_power_efficiency)
         
         _LOGGER.info("%s - Auto TPI: Cycle #%d completed after %.1f minutes (efficiency: %.2f)",
                     self._name, self.state.total_cycles, elapsed_minutes, self._last_cycle_power_efficiency)
         
         # Attempt learning
-        # We also check if the cycle was significant enough (on_time > rampup)
+        # We also check if the cycle was significant enough (on_time > effective_heating_time)
         is_significant_cycle = True
-        if self._heater_rampup > 0 and on_time_minutes <= self._heater_rampup:
+        if effective_heating_time > 0 and on_time_minutes <= effective_heating_time:
             is_significant_cycle = False
-            _LOGGER.debug("%s - Auto TPI: Cycle ignored for learning - ON time (%.1f) <= RampUp (%.1f)",
-                          self._name, on_time_minutes, self._heater_rampup)
+            _LOGGER.debug("%s - Auto TPI: Cycle ignored for learning - ON time (%.1f) <= Eff. Heating Time (%.1f)",
+                          self._name, on_time_minutes, effective_heating_time)
 
         if self._should_learn() and is_significant_cycle:
             _LOGGER.info("%s - Auto TPI: Attempting to learn from cycle data", self._name)
@@ -480,7 +499,7 @@ class AutoTpiManager:
         else:
             reason = self._get_no_learn_reason()
             if not is_significant_cycle:
-                reason = "on_time_too_short_vs_rampup"
+                reason = "on_time_too_short_vs_heating_time"
                 
             _LOGGER.debug("%s - Auto TPI: Not learning this cycle: %s", self._name, reason)
             self.state.last_learning_status = reason
@@ -547,6 +566,7 @@ class AutoTpiManager:
         self.state.last_temp_out = 0.0
         self.state.last_state = 'stop'
         self.state.last_update_date = None
+        self.state.last_heater_stop_time = None
         self.state.total_cycles = 0
         self.state.consecutive_failures = 0
         self.state.last_learning_status = "learning_started"

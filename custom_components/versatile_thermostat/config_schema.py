@@ -423,6 +423,7 @@ STEP_AUTO_TPI_LEARNING_DATA_SCHEMA = vol.Schema(
     {
         vol.Optional(CONF_AUTO_TPI_ENABLE_UPDATE_CONFIG, default=False): cv.boolean,
         vol.Optional(CONF_AUTO_TPI_ENABLE_NOTIFICATION, default=True): cv.boolean,
-        vol.Optional(CONF_HEATER_RAMPUP, default=0): cv.positive_int,
+        vol.Optional(CONF_HEATER_HEATING_TIME, default=0): cv.positive_int,
+        vol.Optional(CONF_HEATER_COOLING_TIME, default=0): cv.positive_int,
     }
 )

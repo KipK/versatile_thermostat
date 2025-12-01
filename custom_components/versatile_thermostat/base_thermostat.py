@@ -429,7 +429,8 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
         )
 
         # Initialize Auto TPI Manager here because we need self._cycle_min which is initialized in post_init
-        heater_rampup = entry_infos.get(CONF_HEATER_RAMPUP, 0)
+        heater_heating_time = entry_infos.get(CONF_HEATER_HEATING_TIME, 0)
+        heater_cooling_time = entry_infos.get(CONF_HEATER_COOLING_TIME, 0)
         self._auto_tpi_manager = AutoTpiManager(
             self._hass,
             self.unique_id,
@@ -439,7 +440,8 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
             self._tpi_threshold_high,
             coef_int=self._tpi_coef_int,
             coef_ext=self._tpi_coef_ext,
-            heater_rampup=heater_rampup,
+            heater_heating_time=heater_heating_time,
+            heater_cooling_time=heater_cooling_time,
         )
 
         self.register_cycle_callback(

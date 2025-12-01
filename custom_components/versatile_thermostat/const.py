@@ -79,7 +79,8 @@ CONF_TPI_COEF_INT = "tpi_coef_int"
 CONF_TPI_COEF_EXT = "tpi_coef_ext"
 CONF_TPI_THRESHOLD_LOW = "tpi_threshold_low"
 CONF_TPI_THRESHOLD_HIGH = "tpi_threshold_high"
-CONF_HEATER_RAMPUP = "heater_rampup_time"
+CONF_HEATER_HEATING_TIME = "heater_heating_time"
+CONF_HEATER_COOLING_TIME = "heater_cooling_time"
 CONF_PRESENCE_SENSOR = "presence_sensor_entity_id"
 CONF_PRESET_POWER = "power_temp"
 CONF_MINIMAL_ACTIVATION_DELAY = "minimal_activation_delay"
@@ -304,7 +305,8 @@ ALL_CONF = (
         CONF_TPI_COEF_EXT,
         CONF_TPI_THRESHOLD_LOW,
         CONF_TPI_THRESHOLD_HIGH,
-        CONF_HEATER_RAMPUP,
+        CONF_HEATER_HEATING_TIME,
+        CONF_HEATER_COOLING_TIME,
         CONF_PRESENCE_SENSOR,
         CONF_MINIMAL_ACTIVATION_DELAY,
         CONF_MINIMAL_DEACTIVATION_DELAY,

@@ -276,10 +276,12 @@
         "data": {
           "auto_tpi_enable_update_config": "Update configuration with calculated TPI coefficients",
           "auto_tpi_enable_notification": "Send notification when TPI coefficients change",
-          "heater_rampup_time": "Heater ramping up time (mn)"
+          "heater_heating_time": "Heater heating time (mn)",
+          "heater_cooling_time": "Heater cooling down time (mn)"
         },
         "data_description": {
-          "heater_rampup_time": "Time in minutes after which the heater is considered hot."
+          "heater_heating_time": "Time in minutes after which the heater is considered hot.",
+          "heater_cooling_time": "Time in minutes after which the heater is considered cold (after a stop)."
         }
       }
     },
