@@ -50,7 +50,7 @@ class AutoTpiState:
     # Cycle management
     cycle_start_date: Optional[datetime] = None  # Start of current cycle
     cycle_active: bool = False
-    current_cycle_cold_factor: float = 1.0 # 1.0 = cold, 0.0 = hot
+    current_cycle_cold_factor: float = 0.0 # 1.0 = cold, 0.0 = hot
     
     # Management
     consecutive_failures: int = 0
@@ -507,11 +507,11 @@ class AutoTpiManager:
         self.state.last_update_date = now
         
         # Calculate cold factor for this cycle
-        self.state.current_cycle_cold_factor = 1.0
+        self.state.current_cycle_cold_factor = 0.0
         if self._heater_cooling_time > 0 and self.state.last_heater_stop_time:
             elapsed_off = (now - self.state.last_heater_stop_time).total_seconds() / 60.0
             if elapsed_off >= 0:
-                self.state.current_cycle_cold_factor = min(1.0, elapsed_off / self._heater_cooling_time)
+                self.state.current_cycle_cold_factor = max(0.0, elapsed_off / self._heater_cooling_time)
                 _LOGGER.debug("%s - Auto TPI: Cold factor calc: elapsed_off=%.1f min, cooling_time=%.1f min, factor=%.2f",
                               self._name, elapsed_off, self._heater_cooling_time, self.state.current_cycle_cold_factor)
         
