@@ -42,6 +42,7 @@ class AutoTpiState:
     
     # Cycle management
     cycle_start_date: Optional[datetime] = None  # Start of current cycle
+    cycle_active: bool = False
     
     # Management
     consecutive_failures: int = 0
@@ -400,6 +401,13 @@ class AutoTpiManager:
     async def on_cycle_started(self, on_time_sec: float, off_time_sec: float,
                              on_percent: float, hvac_mode: str):
         """Called when a TPI cycle starts."""
+        # Detect if previous cycle was interrupted
+        if self.state.cycle_active:
+            _LOGGER.info("%s - Auto TPI: Previous cycle was interrupted (not completed). Discarding it.", self._name)
+            # You could add specific logic here if needed (stats, etc)
+
+        self.state.cycle_active = True
+        
         _LOGGER.debug("%s - Auto TPI: Cycle started. On: %.0fs, Off: %.0fs (%.1f%%), Mode: %s",
                      self._name, on_time_sec, off_time_sec, on_percent * 100, hvac_mode)
         
@@ -428,6 +436,8 @@ class AutoTpiManager:
 
     async def on_cycle_completed(self, on_time_sec: float, off_time_sec: float, hvac_mode: str):
         """Called when a TPI cycle completes."""
+        self.state.cycle_active = False
+
         elapsed_minutes = (on_time_sec + off_time_sec) / 60
         self.state.total_cycles += 1
         
@@ -539,4 +549,5 @@ class AutoTpiManager:
     async def reset_learning_data(self):
         _LOGGER.info("%s - Auto TPI: Resetting all learning data", self._name)
         self.state = AutoTpiState()
+        self.state.cycle_active = False
         await self.async_save_data()
