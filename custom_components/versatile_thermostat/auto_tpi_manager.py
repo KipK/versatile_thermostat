@@ -443,6 +443,10 @@ class AutoTpiManager:
 
     async def on_cycle_completed(self, on_time_sec: float, off_time_sec: float, hvac_mode: str):
         """Called when a TPI cycle completes."""
+        if not self.state.cycle_active:
+            _LOGGER.debug("%s - Auto TPI: Cycle completed but no cycle active. Ignoring.", self._name)
+            return
+
         self.state.cycle_active = False
 
         elapsed_minutes = (on_time_sec + off_time_sec) / 60
