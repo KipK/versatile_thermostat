@@ -190,12 +190,6 @@ class AutoTpiManager:
 
     async def calculate(self) -> Optional[dict]:
         """Return the current calculated TPI parameters."""
-        # Only return coefficients if we have enough data points
-        if self.state.coeff_indoor_autolearn < self.min_data_points:
-            _LOGGER.debug("%s - Auto TPI: Not enough data points to update coefficients (%d/%d)", 
-                         self._name, self.state.coeff_indoor_autolearn, self.min_data_points)
-            return None
-
         # Return current coefficients for the thermostat to use
         params = {}
         params[CONF_TPI_COEF_INT] = self.state.coeff_indoor
@@ -505,26 +499,9 @@ class AutoTpiManager:
         return self.state.coeff_indoor_autolearn
     
     @property
-    def min_data_points(self) -> int:
-        """Minimum learning cycles for basic reliability"""
-        return 5
-    
-    @property
     def heating_cycles_count(self) -> int:
         """Number of total TPI cycles"""
         return self.state.total_cycles
-    
-    @property
-    def learning_quality(self) -> str:
-        """Quality assessment of the learning model"""
-        if self.state.coeff_indoor_autolearn < self.min_data_points:
-            return "insufficient_data"
-        elif self.state.consecutive_failures > 3:
-            return "poor"
-        elif self.state.consecutive_failures > 0:
-            return "fair"
-        else:
-            return "good"
     
     @property
     def time_constant(self) -> float:
@@ -539,7 +516,7 @@ class AutoTpiManager:
         if self.state.coeff_indoor_autolearn == 0:
             return 0.0
         
-        cycle_confidence = min(self.state.coeff_indoor_autolearn / 20.0, 1.0)
+        cycle_confidence = min(self.state.coeff_indoor_autolearn / 50.0, 1.0)
         
         if self.state.consecutive_failures > 0:
             failure_penalty = min(self.state.consecutive_failures * 0.15, 0.6)
