@@ -275,7 +275,11 @@
         "description": "Configure how the Auto TPI algorithm interacts with your configuration.",
         "data": {
           "auto_tpi_enable_update_config": "Update configuration with calculated TPI coefficients",
-          "auto_tpi_enable_notification": "Send notification when TPI coefficients change"
+          "auto_tpi_enable_notification": "Send notification when TPI coefficients change",
+          "heater_rampup_time": "Heater ramping up time (mn)"
+        },
+        "data_description": {
+          "heater_rampup_time": "Time in minutes after which the heater is considered hot."
         }
       }
     },

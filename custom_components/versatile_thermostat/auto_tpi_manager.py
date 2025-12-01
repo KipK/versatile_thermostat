@@ -81,13 +81,15 @@ class AutoTpiManager:
 
     def __init__(self, hass: HomeAssistant, unique_id: str, name: str, cycle_min: int,
                  tpi_threshold_low: float = 0.0, tpi_threshold_high: float = 0.0,
-                 coef_int: float = 0.6, coef_ext: float = 0.04):
+                 coef_int: float = 0.6, coef_ext: float = 0.04,
+                 heater_rampup: int = 0):
         self._hass = hass
         self._unique_id = unique_id
         self._name = name
         self._cycle_min = cycle_min
         self._tpi_threshold_low = tpi_threshold_low
         self._tpi_threshold_high = tpi_threshold_high
+        self._heater_rampup = heater_rampup
 
         self._storage_path = hass.config.path(
             f".storage/versatile_thermostat_{unique_id}_auto_tpi_v2.json"
@@ -105,6 +107,7 @@ class AutoTpiManager:
         self._current_temp_out: float = 0.0
         self._current_target_temp: float = 0.0
         self._current_hvac_action: str = 'stop'
+        self._last_cycle_power_efficiency: float = 1.0
 
     async def async_save_data(self):
         """Save data."""
@@ -234,7 +237,7 @@ class AutoTpiManager:
         
         if not (is_heat or is_cool):
             self.state.last_learning_status = "not_heating_or_cooling"
-            _LOGGER.debug("%s - Auto TPI: Not learning - system was in %s mode", 
+            _LOGGER.debug("%s - Auto TPI: Not learning - system was in %s mode",
                          self._name, self.state.last_state)
             return
 
@@ -252,7 +255,7 @@ class AutoTpiManager:
         
         # Priority 1: Indoor Coefficient
         if temp_progress > 0 and target_diff > 0:
-            self._learn_indoor(target_diff, temp_progress)
+            self._learn_indoor(target_diff, temp_progress, self._last_cycle_power_efficiency)
             self.state.last_learning_status = "learned_indoor"
             learned = True
             
@@ -267,22 +270,32 @@ class AutoTpiManager:
                          self._name, temp_progress, target_diff)
 
         if learned:
-            _LOGGER.info("%s - Auto TPI: Learning successful - %s", 
+            _LOGGER.info("%s - Auto TPI: Learning successful - %s",
                         self._name, self.state.last_learning_status)
 
-    def _learn_indoor(self, delta_theoretical: float, delta_real: float):
+    def _learn_indoor(self, delta_theoretical: float, delta_real: float, efficiency: float = 1.0):
         """Learn indoor coefficient."""
         if delta_real <= 0:
             _LOGGER.warning("%s - Auto TPI: Cannot learn indoor - delta_real <= 0", self._name)
             return
 
-        ratio = delta_theoretical / delta_real
+        # Adjust theoretical delta by the efficiency of the power delivered
+        # If efficiency was 50% (due to rampup time), we expect only 50% of the result.
+        # So we compare real progress against (theoretical * efficiency)
+        adjusted_theoretical = delta_theoretical * efficiency
+        
+        if adjusted_theoretical <= 0:
+             _LOGGER.warning("%s - Auto TPI: Cannot learn indoor - adjusted_theoretical <= 0 (eff=%.2f)",
+                             self._name, efficiency)
+             return
+
+        ratio = adjusted_theoretical / delta_real
         coeff_new = self.state.coeff_indoor * ratio
         
         # Validate coefficient - reject only truly invalid values (non-finite or <= 0)
         # For values > 1.0, cap them instead of rejecting (like Jeedom does for lower bound)
         if not math.isfinite(coeff_new) or coeff_new <= 0:
-            _LOGGER.warning("%s - Auto TPI: Invalid new indoor coeff: %.3f (non-finite or <= 0), skipping", 
+            _LOGGER.warning("%s - Auto TPI: Invalid new indoor coeff: %.3f (non-finite or <= 0), skipping",
                            self._name, coeff_new)
             return
         
@@ -439,17 +452,38 @@ class AutoTpiManager:
         self.state.cycle_active = False
 
         elapsed_minutes = (on_time_sec + off_time_sec) / 60
+        on_time_minutes = on_time_sec / 60.0
         self.state.total_cycles += 1
         
-        _LOGGER.info("%s - Auto TPI: Cycle #%d completed after %.1f minutes",
-                    self._name, self.state.total_cycles, elapsed_minutes)
+        # Calculate Power Efficiency based on RampUp time
+        # If the heater was ON for 10 min but rampup is 5 min, only 5 min were effective heating
+        self._last_cycle_power_efficiency = 1.0
+        if self._heater_rampup > 0 and on_time_minutes > 0:
+            effective_time = max(0.0, on_time_minutes - self._heater_rampup)
+            self._last_cycle_power_efficiency = effective_time / on_time_minutes
+            
+            _LOGGER.debug("%s - Auto TPI: Power Efficiency calc: on_time=%.1f min, rampup=%.1f min, eff=%.2f",
+                          self._name, on_time_minutes, self._heater_rampup, self._last_cycle_power_efficiency)
+        
+        _LOGGER.info("%s - Auto TPI: Cycle #%d completed after %.1f minutes (efficiency: %.2f)",
+                    self._name, self.state.total_cycles, elapsed_minutes, self._last_cycle_power_efficiency)
         
         # Attempt learning
-        if self._should_learn():
+        # We also check if the cycle was significant enough (on_time > rampup)
+        is_significant_cycle = True
+        if self._heater_rampup > 0 and on_time_minutes <= self._heater_rampup:
+            is_significant_cycle = False
+            _LOGGER.debug("%s - Auto TPI: Cycle ignored for learning - ON time (%.1f) <= RampUp (%.1f)",
+                          self._name, on_time_minutes, self._heater_rampup)
+
+        if self._should_learn() and is_significant_cycle:
             _LOGGER.info("%s - Auto TPI: Attempting to learn from cycle data", self._name)
             await self._perform_learning(self._current_temp_in, self._current_temp_out)
         else:
             reason = self._get_no_learn_reason()
+            if not is_significant_cycle:
+                reason = "on_time_too_short_vs_rampup"
+                
             _LOGGER.debug("%s - Auto TPI: Not learning this cycle: %s", self._name, reason)
             self.state.last_learning_status = reason
             

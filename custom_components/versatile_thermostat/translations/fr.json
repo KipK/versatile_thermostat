@@ -275,7 +275,11 @@
         "description": "Configurer comment l'algorithme Auto TPI interagit avec votre configuration.",
         "data": {
           "auto_tpi_enable_update_config": "Mettre à jour la config avec les coefficients calculés",
-          "auto_tpi_enable_notification": "Envoyer une notification lors du changement de coefficients"
+          "auto_tpi_enable_notification": "Envoyer une notification lors du changement de coefficients",
+          "heater_rampup_time": "Temps de chauffe du radiateur (mn)"
+        },
+        "data_description": {
+          "heater_rampup_time": "Temps en mn après lequel le radiateur est considéré comme chaud."
         }
       }
     },
