@@ -548,6 +548,7 @@ class AutoTpiManager:
         self.state.last_learning_status = "learning_started"
         self.state.autolearn_enabled = True
         self.state.cycle_start_date = datetime.now()
+        self.state.cycle_active = False
         
         await self.async_save_data()
 
