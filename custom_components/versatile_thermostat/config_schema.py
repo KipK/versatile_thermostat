@@ -244,8 +244,10 @@ STEP_TPI_DATA_SCHEMA = vol.Schema(  # pylint: disable=invalid-name
 
 STEP_CENTRAL_TPI_DATA_SCHEMA = vol.Schema(  # pylint: disable=invalid-name
     {
-        vol.Required(CONF_TPI_COEF_INT, default=0.6): selector.NumberSelector(selector.NumberSelectorConfig(min=0.0, max=10.0, step=0.01, mode=selector.NumberSelectorMode.BOX)),
-        vol.Required(CONF_TPI_COEF_EXT, default=0.01): selector.NumberSelector(selector.NumberSelectorConfig(min=0.0, max=1.0, step=0.001, mode=selector.NumberSelectorMode.BOX)),
+        vol.Required(CONF_TPI_COEF_INT_HEAT, default=0.6): selector.NumberSelector(selector.NumberSelectorConfig(min=0.0, max=10.0, step=0.01, mode=selector.NumberSelectorMode.BOX)),
+        vol.Required(CONF_TPI_COEF_EXT_HEAT, default=0.01): selector.NumberSelector(selector.NumberSelectorConfig(min=0.0, max=1.0, step=0.001, mode=selector.NumberSelectorMode.BOX)),
+        vol.Required(CONF_TPI_COEF_INT_COOL, default=0.6): selector.NumberSelector(selector.NumberSelectorConfig(min=0.0, max=10.0, step=0.01, mode=selector.NumberSelectorMode.BOX)),
+        vol.Required(CONF_TPI_COEF_EXT_COOL, default=0.01): selector.NumberSelector(selector.NumberSelectorConfig(min=0.0, max=1.0, step=0.001, mode=selector.NumberSelectorMode.BOX)),
         vol.Required(CONF_MINIMAL_ACTIVATION_DELAY, default=10): cv.positive_int,
         vol.Required(CONF_MINIMAL_DEACTIVATION_DELAY, default=0): cv.positive_int,
         vol.Optional(CONF_TPI_THRESHOLD_LOW, default=0): selector.NumberSelector(

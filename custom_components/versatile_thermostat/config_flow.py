@@ -380,8 +380,10 @@ class VersatileThermostatBaseConfigFlow(FlowHandler):
                 infos.get(CONF_PROP_FUNCTION, None) == PROPORTIONAL_FUNCTION_TPI
                 and infos.get(CONF_USE_TPI_CENTRAL_CONFIG, False) is False
                 and (
-                    infos.get(CONF_TPI_COEF_INT, None) is None
-                    or infos.get(CONF_TPI_COEF_EXT) is None
+                    infos.get(CONF_TPI_COEF_INT_HEAT, None) is None
+                    or infos.get(CONF_TPI_COEF_EXT_HEAT) is None
+                    or infos.get(CONF_TPI_COEF_INT_COOL, None) is None
+                    or infos.get(CONF_TPI_COEF_EXT_COOL) is None
                 )
             ):
                 return False
@@ -609,8 +611,10 @@ class VersatileThermostatBaseConfigFlow(FlowHandler):
             # Remove TPI info
             for key in [
                 CONF_PROP_FUNCTION,
-                CONF_TPI_COEF_INT,
-                CONF_TPI_COEF_EXT,
+                CONF_TPI_COEF_INT_HEAT,
+                CONF_TPI_COEF_EXT_HEAT,
+                CONF_TPI_COEF_INT_COOL,
+                CONF_TPI_COEF_EXT_COOL,
                 CONF_OFFSET_CALIBRATION_LIST,
                 CONF_OPENING_DEGREE_LIST,
                 CONF_CLOSING_DEGREE_LIST,

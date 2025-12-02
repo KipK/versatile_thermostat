@@ -26,8 +26,10 @@ class PropAlgorithm:
     def __init__(
         self,
         function_type: str,
-        tpi_coef_int,
-        tpi_coef_ext,
+        tpi_coef_int_heat,
+        tpi_coef_ext_heat,
+        tpi_coef_int_cool,
+        tpi_coef_ext_cool,
         cycle_min: int,
         minimal_activation_delay: int,
         minimal_deactivation_delay: int,
@@ -38,11 +40,13 @@ class PropAlgorithm:
     ) -> None:
         """Initialisation of the Proportional Algorithm"""
         _LOGGER.debug(
-            "%s - Creation new PropAlgorithm function_type: %s, tpi_coef_int: %s, tpi_coef_ext: %s, cycle_min:%d, minimal_activation_delay:%d, minimal_deactivation_delay:%d, tpi_threshold_low=%s, tpi_threshold_high=%s",  # pylint: disable=line-too-long
+            "%s - Creation new PropAlgorithm function_type: %s, tpi_coef_int_heat: %s, tpi_coef_ext_heat: %s, tpi_coef_int_cool: %s, tpi_coef_ext_cool: %s, cycle_min:%d, minimal_activation_delay:%d, minimal_deactivation_delay:%d, tpi_threshold_low=%s, tpi_threshold_high=%s",  # pylint: disable=line-too-long
             vtherm_entity_id,
             function_type,
-            tpi_coef_int,
-            tpi_coef_ext,
+            tpi_coef_int_heat,
+            tpi_coef_ext_heat,
+            tpi_coef_int_cool,
+            tpi_coef_ext_cool,
             cycle_min,
             minimal_activation_delay,
             minimal_deactivation_delay,
@@ -53,20 +57,24 @@ class PropAlgorithm:
         # Issue 506 - check parameters
         if (
             vtherm_entity_id is None
-            or not is_number(tpi_coef_int)
-            or not is_number(tpi_coef_ext)
+            or not is_number(tpi_coef_int_heat)
+            or not is_number(tpi_coef_ext_heat)
+            or not is_number(tpi_coef_int_cool)
+            or not is_number(tpi_coef_ext_cool)
             or not is_number(cycle_min)
             or not is_number(minimal_activation_delay)
             or not is_number(minimal_deactivation_delay)
             or function_type != PROPORTIONAL_FUNCTION_TPI
         ):
             _LOGGER.error(
-                "%s - configuration is wrong. function_type=%s, entity_id is %s, tpi_coef_int is %s, tpi_coef_ext is %s, cycle_min is %s, minimal_activation_delay is %s, minimal_deactivation_delay is %s",
+                "%s - configuration is wrong. function_type=%s, entity_id is %s, tpi_coef_int_heat is %s, tpi_coef_ext_heat is %s, tpi_coef_int_cool is %s, tpi_coef_ext_cool is %s, cycle_min is %s, minimal_activation_delay is %s, minimal_deactivation_delay is %s",
                 vtherm_entity_id,
                 function_type,
                 vtherm_entity_id,
-                tpi_coef_int,
-                tpi_coef_ext,
+                tpi_coef_int_heat,
+                tpi_coef_ext_heat,
+                tpi_coef_int_cool,
+                tpi_coef_ext_cool,
                 cycle_min,
                 minimal_activation_delay,
                 minimal_deactivation_delay,
@@ -77,8 +85,10 @@ class PropAlgorithm:
 
         self._vtherm_entity_id = vtherm_entity_id
         self._function = function_type
-        self._tpi_coef_int = tpi_coef_int
-        self._tpi_coef_ext = tpi_coef_ext
+        self._tpi_coef_int_heat = tpi_coef_int_heat
+        self._tpi_coef_ext_heat = tpi_coef_ext_heat
+        self._tpi_coef_int_cool = tpi_coef_int_cool
+        self._tpi_coef_ext_cool = tpi_coef_ext_cool
         self._cycle_min = cycle_min
         self._minimal_activation_delay = minimal_activation_delay
         self._minimal_deactivation_delay = minimal_deactivation_delay
@@ -140,7 +150,10 @@ class PropAlgorithm:
                 self._calculated_on_percent = 0
             else:
                 if self._function == PROPORTIONAL_FUNCTION_TPI:
-                    self._calculated_on_percent = self._tpi_coef_int * delta_temp + self._tpi_coef_ext * delta_ext_temp
+                    if hvac_mode == VThermHvacMode_COOL:
+                        self._calculated_on_percent = self._tpi_coef_int_cool * delta_temp + self._tpi_coef_ext_cool * delta_ext_temp
+                    else:
+                        self._calculated_on_percent = self._tpi_coef_int_heat * delta_temp + self._tpi_coef_ext_heat * delta_ext_temp
                 else:
                     _LOGGER.warning(
                         "%s - Proportional algorithm: unknown %s function. Heating will be disabled",
@@ -236,18 +249,24 @@ class PropAlgorithm:
 
     def update_parameters(
         self,
-        tpi_coef_int,
-        tpi_coef_ext,
+        tpi_coef_int_heat,
+        tpi_coef_ext_heat,
+        tpi_coef_int_cool,
+        tpi_coef_ext_cool,
         minimal_activation_delay,
         minimal_deactivation_delay,
         tpi_threshold_low,
         tpi_threshold_high,
     ):
         """Update the parameters of the algorithm"""
-        if tpi_coef_int is not None:
-            self._tpi_coef_int = tpi_coef_int
-        if tpi_coef_ext is not None:
-            self._tpi_coef_ext = tpi_coef_ext
+        if tpi_coef_int_heat is not None:
+            self._tpi_coef_int_heat = tpi_coef_int_heat
+        if tpi_coef_ext_heat is not None:
+            self._tpi_coef_ext_heat = tpi_coef_ext_heat
+        if tpi_coef_int_cool is not None:
+            self._tpi_coef_int_cool = tpi_coef_int_cool
+        if tpi_coef_ext_cool is not None:
+            self._tpi_coef_ext_cool = tpi_coef_ext_cool
         if tpi_threshold_low is not None:
             self._tpi_threshold_low = tpi_threshold_low
         if tpi_threshold_high is not None:
@@ -259,10 +278,12 @@ class PropAlgorithm:
 
         self._apply_threshold = self._tpi_threshold_low != 0.0 and self._tpi_threshold_high != 0.0
         _LOGGER.debug(
-            "%s - Parameters updated. tpi_coef_int: %s, tpi_coef_ext: %s, tpi_threshold_low: %s, tpi_threshold_high: %s, minimal_activation_delay: %s, minimal_deactivation_delay: %s",
+            "%s - Parameters updated. tpi_coef_int_heat: %s, tpi_coef_ext_heat: %s, tpi_coef_int_cool: %s, tpi_coef_ext_cool: %s, tpi_threshold_low: %s, tpi_threshold_high: %s, minimal_activation_delay: %s, minimal_deactivation_delay: %s",
             self._vtherm_entity_id,
-            self._tpi_coef_int,
-            self._tpi_coef_ext,
+            self._tpi_coef_int_heat,
+            self._tpi_coef_ext_heat,
+            self._tpi_coef_int_cool,
+            self._tpi_coef_ext_cool,
             self._tpi_threshold_low,
             self._tpi_threshold_high,
             self._minimal_activation_delay,
@@ -294,14 +315,24 @@ class PropAlgorithm:
         return int(self._off_time_sec)
 
     @property
-    def tpi_coef_int(self) -> float:
-        """Returns the TPI coefficient int"""
-        return self._tpi_coef_int
+    def tpi_coef_int_heat(self) -> float:
+        """Returns the TPI coefficient int heat"""
+        return self._tpi_coef_int_heat
 
     @property
-    def tpi_coef_ext(self) -> float:
-        """Returns the TPI coefficient ext"""
-        return self._tpi_coef_ext
+    def tpi_coef_ext_heat(self) -> float:
+        """Returns the TPI coefficient ext heat"""
+        return self._tpi_coef_ext_heat
+
+    @property
+    def tpi_coef_int_cool(self) -> float:
+        """Returns the TPI coefficient int cool"""
+        return self._tpi_coef_int_cool
+
+    @property
+    def tpi_coef_ext_cool(self) -> float:
+        """Returns the TPI coefficient ext cool"""
+        return self._tpi_coef_ext_cool
 
     @property
     def tpi_threshold_low(self) -> float:

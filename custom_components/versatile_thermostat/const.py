@@ -38,7 +38,7 @@ from .vtherm_state import VThermState  # pylint: disable=unused-import
 _LOGGER = logging.getLogger(__name__)
 
 CONFIG_VERSION = 2
-CONFIG_MINOR_VERSION = 1
+CONFIG_MINOR_VERSION = 2
 
 DEVICE_MANUFACTURER = "JMCOLLIN"
 DEVICE_MODEL = "Versatile Thermostat"
@@ -74,8 +74,10 @@ CONF_MOTION_DELAY = "motion_delay"
 CONF_MOTION_OFF_DELAY = "motion_off_delay"
 CONF_MOTION_PRESET = "motion_preset"
 CONF_NO_MOTION_PRESET = "no_motion_preset"
-CONF_TPI_COEF_INT = "tpi_coef_int"
-CONF_TPI_COEF_EXT = "tpi_coef_ext"
+CONF_TPI_COEF_INT_HEAT = "tpi_coef_int_heat"
+CONF_TPI_COEF_EXT_HEAT = "tpi_coef_ext_heat"
+CONF_TPI_COEF_INT_COOL = "tpi_coef_int_cool"
+CONF_TPI_COEF_EXT_COOL = "tpi_coef_ext_cool"
 CONF_TPI_THRESHOLD_LOW = "tpi_threshold_low"
 CONF_TPI_THRESHOLD_HIGH = "tpi_threshold_high"
 CONF_PRESENCE_SENSOR = "presence_sensor_entity_id"
@@ -292,8 +294,10 @@ ALL_CONF = (
         CONF_DEVICE_POWER,
         CONF_CYCLE_MIN,
         CONF_PROP_FUNCTION,
-        CONF_TPI_COEF_INT,
-        CONF_TPI_COEF_EXT,
+        CONF_TPI_COEF_INT_HEAT,
+        CONF_TPI_COEF_EXT_HEAT,
+        CONF_TPI_COEF_INT_COOL,
+        CONF_TPI_COEF_EXT_COOL,
         CONF_PRESENCE_SENSOR,
         CONF_MINIMAL_ACTIVATION_DELAY,
         CONF_MINIMAL_DEACTIVATION_DELAY,

@@ -121,8 +121,10 @@
         "title": "TPI",
         "description": "Time Proportional Integral attributes&nbsp;[![?](https://img.icons8.com/color/18/help.png)](https://github.com/jmcollin78/versatile_thermostat/blob/main/documentation/en/algorithms.md#lalgorithme-tpi)",
         "data": {
-          "tpi_coef_int": "coef_int",
-          "tpi_coef_ext": "coef_ext",
+          "tpi_coef_int_heat": "Coef Int Heat",
+          "tpi_coef_ext_heat": "Coef Ext Heat",
+          "tpi_coef_int_cool": "Coef Int Cool",
+          "tpi_coef_ext_cool": "Coef Ext Cool",
           "tpi_threshold_low": "Low TPI threshold",
           "tpi_threshold_high": "High TPI threshold",
           "use_tpi_central_config": "Use central TPI configuration",
@@ -130,8 +132,10 @@
           "minimal_deactivation_delay": "Minimum deactivation delay"
         },
         "data_description": {
-          "tpi_coef_int": "Coefficient to use for internal temperature delta",
-          "tpi_coef_ext": "Coefficient to use for external temperature delta",
+          "tpi_coef_int_heat": "Coefficient to use for internal temperature delta in heat mode",
+          "tpi_coef_ext_heat": "Coefficient to use for external temperature delta in heat mode",
+          "tpi_coef_int_cool": "Coefficient to use for internal temperature delta in cool mode",
+          "tpi_coef_ext_cool": "Coefficient to use for external temperature delta in cool mode",
           "tpi_threshold_low": "Threshold in ° under which the TPI algorithm will be on. 0 means no threshold",
           "tpi_threshold_high": "Threshold in ° above which the TPI algorithm will be off. 0 means no threshold",
           "use_tpi_central_config": "Check to use the central TPI configuration. Uncheck to use a specific TPI configuration for this VTherm",
@@ -385,8 +389,10 @@
         "title": "TPI - {name}",
         "description": "Time Proportional Integral attributes&nbsp;[![?](https://img.icons8.com/color/18/help.png)](https://github.com/jmcollin78/versatile_thermostat/blob/main/documentation/en/algorithms.md#lalgorithme-tpi)",
         "data": {
-          "tpi_coef_int": "coef_int",
-          "tpi_coef_ext": "coef_ext",
+          "tpi_coef_int_heat": "Coef Int Heat",
+          "tpi_coef_ext_heat": "Coef Ext Heat",
+          "tpi_coef_int_cool": "Coef Int Cool",
+          "tpi_coef_ext_cool": "Coef Ext Cool",
           "tpi_threshold_low": "Low TPI threshold",
           "tpi_threshold_high": "High TPI threshold",
           "use_tpi_central_config": "Use central TPI configuration",
@@ -394,8 +400,10 @@
           "minimal_deactivation_delay": "Minimum deactivation delay"
         },
         "data_description": {
-          "tpi_coef_int": "Coefficient to use for internal temperature delta",
-          "tpi_coef_ext": "Coefficient to use for external temperature delta",
+          "tpi_coef_int_heat": "Coefficient to use for internal temperature delta in heat mode",
+          "tpi_coef_ext_heat": "Coefficient to use for external temperature delta in heat mode",
+          "tpi_coef_int_cool": "Coefficient to use for internal temperature delta in cool mode",
+          "tpi_coef_ext_cool": "Coefficient to use for external temperature delta in cool mode",
           "tpi_threshold_low": "Threshold in ° under which the TPI algorithm will be on. 0 means no threshold",
           "tpi_threshold_high": "Threshold in ° above which the TPI algorithm will be off. 0 means no threshold",
           "use_tpi_central_config": "Check to use the central TPI configuration. Uncheck to use a specific TPI configuration for this VTherm",

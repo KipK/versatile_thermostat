@@ -58,6 +58,10 @@ from .const import (
     CONF_THERMOSTAT_CLIMATE,
     CONF_THERMOSTAT_VALVE,
     CONF_MAX_ON_PERCENT,
+    CONF_TPI_COEF_INT_HEAT,
+    CONF_TPI_COEF_EXT_HEAT,
+    CONF_TPI_COEF_INT_COOL,
+    CONF_TPI_COEF_EXT_COOL,
 )
 
 from .vtherm_api import VersatileThermostatAPI
@@ -307,6 +311,22 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry):
                 if old_value is not None:
                     new[new_key] = old_value
                 new.pop(key, None)
+
+        # Migration 2.1 to 2.2 -> TPI coefficients split
+        if config_entry.version == 2 and config_entry.minor_version < 2:
+            _LOGGER.debug("Migrating to 2.2: Split TPI coefficients")
+            tpi_coef_int = config_entry.data.get("tpi_coef_int")
+            tpi_coef_ext = config_entry.data.get("tpi_coef_ext")
+
+            if tpi_coef_int is not None:
+                new[CONF_TPI_COEF_INT_HEAT] = tpi_coef_int
+                new[CONF_TPI_COEF_INT_COOL] = tpi_coef_int
+                new.pop("tpi_coef_int", None)
+
+            if tpi_coef_ext is not None:
+                new[CONF_TPI_COEF_EXT_HEAT] = tpi_coef_ext
+                new[CONF_TPI_COEF_EXT_COOL] = tpi_coef_ext
+                new.pop("tpi_coef_ext", None)
 
         hass.config_entries.async_update_entry(
             config_entry,

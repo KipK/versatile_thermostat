@@ -155,8 +155,10 @@ async def async_setup_entry(
     platform.async_register_entity_service(
         SERVICE_SET_TPI_PARAMETERS,
         {
-            vol.Optional(CONF_TPI_COEF_INT): selector.NumberSelector(selector.NumberSelectorConfig(min=0.0, max=10.0, step=0.01, mode=selector.NumberSelectorMode.BOX)),
-            vol.Optional(CONF_TPI_COEF_EXT): selector.NumberSelector(selector.NumberSelectorConfig(min=0.0, max=1.0, step=0.001, mode=selector.NumberSelectorMode.BOX)),
+            vol.Optional(CONF_TPI_COEF_INT_HEAT): selector.NumberSelector(selector.NumberSelectorConfig(min=0.0, max=10.0, step=0.01, mode=selector.NumberSelectorMode.BOX)),
+            vol.Optional(CONF_TPI_COEF_EXT_HEAT): selector.NumberSelector(selector.NumberSelectorConfig(min=0.0, max=1.0, step=0.001, mode=selector.NumberSelectorMode.BOX)),
+            vol.Optional(CONF_TPI_COEF_INT_COOL): selector.NumberSelector(selector.NumberSelectorConfig(min=0.0, max=10.0, step=0.01, mode=selector.NumberSelectorMode.BOX)),
+            vol.Optional(CONF_TPI_COEF_EXT_COOL): selector.NumberSelector(selector.NumberSelectorConfig(min=0.0, max=1.0, step=0.001, mode=selector.NumberSelectorMode.BOX)),
             vol.Optional(CONF_MINIMAL_ACTIVATION_DELAY): cv.positive_int,
             vol.Optional(CONF_MINIMAL_DEACTIVATION_DELAY): cv.positive_int,
             vol.Optional(CONF_TPI_THRESHOLD_LOW): selector.NumberSelector(selector.NumberSelectorConfig(min=-10.0, max=10.0, step=0.1, mode=selector.NumberSelectorMode.BOX)),

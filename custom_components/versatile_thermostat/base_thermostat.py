@@ -204,8 +204,10 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
 
         self._cancel_recalculate_later: Callable[[], None] | None = None
 
-        self._tpi_coef_int: float = 0
-        self._tpi_coef_ext: float = 0
+        self._tpi_coef_int_heat: float = 0
+        self._tpi_coef_ext_heat: float = 0
+        self._tpi_coef_int_cool: float = 0
+        self._tpi_coef_ext_cool: float = 0
         self._minimal_activation_delay: int = 0
         self._minimal_deactivation_delay: int = 0
         self._tpi_threshold_low: float = 0
@@ -314,8 +316,21 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
         )
         self._ext_temp_sensor_entity_id = entry_infos.get(CONF_EXTERNAL_TEMP_SENSOR)
 
-        self._tpi_coef_int = entry_infos.get(CONF_TPI_COEF_INT)
-        self._tpi_coef_ext = entry_infos.get(CONF_TPI_COEF_EXT)
+        self._tpi_coef_int_heat = entry_infos.get(CONF_TPI_COEF_INT_HEAT)
+        self._tpi_coef_ext_heat = entry_infos.get(CONF_TPI_COEF_EXT_HEAT)
+        self._tpi_coef_int_cool = entry_infos.get(CONF_TPI_COEF_INT_COOL)
+        self._tpi_coef_ext_cool = entry_infos.get(CONF_TPI_COEF_EXT_COOL)
+
+        # For migration purpose
+        if self._tpi_coef_int_heat is None:
+            self._tpi_coef_int_heat = entry_infos.get("tpi_coef_int")
+        if self._tpi_coef_ext_heat is None:
+            self._tpi_coef_ext_heat = entry_infos.get("tpi_coef_ext")
+        if self._tpi_coef_int_cool is None:
+            self._tpi_coef_int_cool = entry_infos.get("tpi_coef_int")
+        if self._tpi_coef_ext_cool is None:
+            self._tpi_coef_ext_cool = entry_infos.get("tpi_coef_ext")
+
         self._tpi_threshold_low = entry_infos.get(CONF_TPI_THRESHOLD_LOW, 0.0)
         self._tpi_threshold_high = entry_infos.get(CONF_TPI_THRESHOLD_HIGH, 0.0)
         # If one is 0 then both are 0
@@ -352,7 +367,8 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
                 "Removing the delta temp ext factor. "
                 "Thermostat will not be fully operational."
             )
-            self._tpi_coef_ext = 0
+            self._tpi_coef_ext_heat = 0
+            self._tpi_coef_ext_cool = 0
 
         self._minimal_activation_delay = entry_infos.get(CONF_MINIMAL_ACTIVATION_DELAY, 0)
         self._minimal_deactivation_delay = entry_infos.get(CONF_MINIMAL_DEACTIVATION_DELAY, 0)
@@ -1887,8 +1903,10 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
 
     async def service_set_tpi_parameters(
         self,
-        tpi_coef_int: float | None = None,
-        tpi_coef_ext: float | None = None,
+        tpi_coef_int_heat: float | None = None,
+        tpi_coef_ext_heat: float | None = None,
+        tpi_coef_int_cool: float | None = None,
+        tpi_coef_ext_cool: float | None = None,
         minimal_activation_delay: int | None = None,
         minimal_deactivation_delay: int | None = None,
         tpi_threshold_low: float | None = None,
@@ -1897,8 +1915,10 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
         """Called by a service call:
         service: versatile_thermostat.set_tpi_parameters
         data:
-            tpi_coef_int: 0.6
-            tpi_coef_ext: 0.01
+            tpi_coef_int_heat: 0.6
+            tpi_coef_ext_heat: 0.01
+            tpi_coef_int_cool: 0.6
+            tpi_coef_ext_cool: 0.01
             minimal_activation_delay: 30
             minimal_deactivation_delay: 30
             tpi_threshold_low: 0.1
@@ -1913,8 +1933,10 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
         write_event_log(
             _LOGGER,
             self,
-            f"Calling SERVICE_SET_TPI_PARAMETERS, tpi_coef_int: {tpi_coef_int}, "
-            f"tpi_coef_ext: {tpi_coef_ext}"
+            f"Calling SERVICE_SET_TPI_PARAMETERS, tpi_coef_int_heat: {tpi_coef_int_heat}, "
+            f"tpi_coef_ext_heat: {tpi_coef_ext_heat}"
+            f"tpi_coef_int_cool: {tpi_coef_int_cool}, "
+            f"tpi_coef_ext_cool: {tpi_coef_ext_cool}"
             f"minimal_activation_delay: {minimal_activation_delay}, "
             f"minimal_deactivation_delay: {minimal_deactivation_delay}, "
             f"tpi_threshold_low: {tpi_threshold_low}, "
@@ -1932,23 +1954,29 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
             raise ServiceValidationError(f"{self} - Impossible to set TPI parameters when using central TPI configuration.")
 
         self._prop_algorithm.update_parameters(
-            tpi_coef_int,
-            tpi_coef_ext,
+            tpi_coef_int_heat,
+            tpi_coef_ext_heat,
+            tpi_coef_int_cool,
+            tpi_coef_ext_cool,
             minimal_activation_delay,
             minimal_deactivation_delay,
             tpi_threshold_low,
             tpi_threshold_high,
         )
-        self._tpi_coef_int = self._prop_algorithm.tpi_coef_int
-        self._tpi_coef_ext = self._prop_algorithm.tpi_coef_ext
+        self._tpi_coef_int_heat = self._prop_algorithm.tpi_coef_int_heat
+        self._tpi_coef_ext_heat = self._prop_algorithm.tpi_coef_ext_heat
+        self._tpi_coef_int_cool = self._prop_algorithm.tpi_coef_int_cool
+        self._tpi_coef_ext_cool = self._prop_algorithm.tpi_coef_ext_cool
         self._minimal_activation_delay = self._prop_algorithm.minimal_activation_delay
         self._minimal_deactivation_delay = self._prop_algorithm.minimal_deactivation_delay
         self._tpi_threshold_low = self._prop_algorithm.tpi_threshold_low
         self._tpi_threshold_high = self._prop_algorithm.tpi_threshold_high
 
         # Update the configuration attributes
-        data = {**entry.data, CONF_TPI_COEF_INT: self._tpi_coef_int}
-        data = {**data, CONF_TPI_COEF_EXT: self._tpi_coef_ext}
+        data = {**entry.data, CONF_TPI_COEF_INT_HEAT: self._tpi_coef_int_heat}
+        data = {**data, CONF_TPI_COEF_EXT_HEAT: self._tpi_coef_ext_heat}
+        data = {**data, CONF_TPI_COEF_INT_COOL: self._tpi_coef_int_cool}
+        data = {**data, CONF_TPI_COEF_EXT_COOL: self._tpi_coef_ext_cool}
         data = {**data, CONF_TPI_THRESHOLD_LOW: self._tpi_threshold_low}
         data = {**data, CONF_TPI_THRESHOLD_HIGH: self._tpi_threshold_high}
         data = {**data, CONF_MINIMAL_ACTIVATION_DELAY: self._minimal_activation_delay}
