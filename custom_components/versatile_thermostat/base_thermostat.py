@@ -442,9 +442,6 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
             heater_cooling_time=heater_cooling_time,
         )
 
-        self.register_cycle_callback(
-            on_start=self._auto_tpi_manager.on_cycle_started,
-        )
 
     async def async_added_to_hass(self):
         """Run when entity about to be added."""
