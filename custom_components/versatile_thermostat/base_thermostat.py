@@ -4,6 +4,7 @@
 """ Implements the VersatileThermostat climate component """
 import math
 import logging
+import asyncio
 from typing import Any, Generic
 from collections.abc import Callable
 
@@ -26,8 +27,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.device_registry import DeviceInfo, DeviceEntryType
 
 from homeassistant.helpers.event import (
-    async_track_state_change_event,
-    async_call_later,
+    async_track_state_change_event
 )
 
 
@@ -118,7 +118,6 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
 
         # Callbacks for TPI cycle events
         self._on_cycle_start_callbacks: list[Callable] = []
-        self._cycle_timer = None
 
         self._state_manager = StateManager()
         # self._hvac_mode = None
@@ -445,7 +444,6 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
 
         self.register_cycle_callback(
             on_start=self._auto_tpi_manager.on_cycle_started,
-            on_end=self._auto_tpi_manager.on_cycle_completed
         )
 
     async def async_added_to_hass(self):
@@ -524,9 +522,8 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
 
         self.stop_recalculate_later()
 
-        if self._cycle_timer:
-            self._cycle_timer()
-            self._cycle_timer = None
+        if self._auto_tpi_manager:
+            self._auto_tpi_manager.stop_cycle_loop()
 
         # stop listening for all managers
         for manager in self._managers:
@@ -555,6 +552,22 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
             if self._underlyings:
                 for under in self._underlyings:
                     under.register_cycle_callback(on_start)
+
+    async def _fire_cycle_start_callbacks(self, on_time_sec, off_time_sec, on_percent, hvac_mode):
+        """Fire cycle start callbacks."""
+        for callback in self._on_cycle_start_callbacks:
+            try:
+                if is_async := (
+                    asyncio.iscoroutinefunction(callback)
+                    or (hasattr(callback, "__call__") and asyncio.iscoroutinefunction(callback.__call__))
+                ):
+                    await callback(on_time_sec, off_time_sec, on_percent, hvac_mode)
+                else:
+                    await self.hass.async_add_executor_job(
+                        callback, on_time_sec, off_time_sec, on_percent, hvac_mode
+                    )
+            except Exception as ex:  # pylint: disable=broad-except
+                _LOGGER.error("%s - Error calling cycle start callback: %s", self, ex)
 
 
     def stop_recalculate_later(self):
@@ -1450,37 +1463,34 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
     ##
     ## Calculation and utility functions
     ##
-    async def _start_tpi_cycle_timer(self):
-        """Start the TPI cycle timer if Auto TPI is active."""
-        if self._cycle_timer:
-            self._cycle_timer()
-            self._cycle_timer = None
+    async def _get_tpi_data(self) -> dict[str, Any]:
+        """Calculate and return TPI cycle parameters.
+        Called by AutoTpiManager at the start of each cycle.
+        """
+        # Force recalculation to have fresh values
+        self._prop_algorithm.calculate(
+            self.target_temperature,
+            self._cur_temp,
+            self._cur_ext_temp,
+            self.last_temperature_slope,
+            self.vtherm_hvac_mode or VThermHvacMode_OFF,
+        )
 
-        if self._auto_tpi_manager and self._auto_tpi_manager.learning_active:
-            on_time = self._prop_algorithm.on_time_sec if self._prop_algorithm else 0
-            off_time = self._prop_algorithm.off_time_sec if self._prop_algorithm else 0
-            # on_percent = self._prop_algorithm.on_percent if self._prop_algorithm else 0
-            # We use the real on_percent instead of the theoretical one to avoid learning on 0% cycles
-            # if the cycle is too short (min_cycle_duration)
-            on_percent = on_time / (self._cycle_min * 60) if self._cycle_min > 0 else 0
-            hvac_mode = str(self.vtherm_hvac_mode)
+        return {
+            "on_time_sec": self._prop_algorithm.on_time_sec if self._prop_algorithm else 0,
+            "off_time_sec": self._prop_algorithm.off_time_sec if self._prop_algorithm else 0,
+            "on_percent": self._prop_algorithm.on_percent if self._prop_algorithm else 0,
+            "hvac_mode": str(self.vtherm_hvac_mode),
+        }
 
-            await self._fire_cycle_start_callbacks(on_time, off_time, on_percent, hvac_mode)
-
-            self._cycle_timer = async_call_later(
-                self.hass, self._cycle_min * 60, self._on_tpi_cycle_elapsed
-            )
-
-    async def _on_tpi_cycle_elapsed(self, _):
-        """Handle TPI cycle elapsed."""
-        on_time = self._prop_algorithm.on_time_sec if self._prop_algorithm else 0
-        off_time = self._prop_algorithm.off_time_sec if self._prop_algorithm else 0
-        hvac_mode = str(self.vtherm_hvac_mode)
-
-        await self._fire_cycle_end_callbacks(on_time, off_time, hvac_mode)
-
-        if self.vtherm_hvac_mode == VThermHvacMode_HEAT:
-            await self._start_tpi_cycle_timer()
+    async def _on_tpi_cycle_start(self, params: dict[str, Any]):
+        """Called by AutoTpiManager when a new cycle starts."""
+        await self._fire_cycle_start_callbacks(
+            params.get("on_time_sec", 0),
+            params.get("off_time_sec", 0),
+            params.get("on_percent", 0),
+            params.get("hvac_mode", "stop")
+        )
 
     async def update_states(self, force=False):
         """Update the states of the thermostat considering the requested state and the current state"""
@@ -1519,13 +1529,17 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
                     await self.async_control_heating(force=force or sub_need_control_heating)
 
                     if self._state_manager.current_state.is_hvac_mode_changed:
-                        if self._auto_tpi_manager and self._auto_tpi_manager.learning_active:
-                            if self.vtherm_hvac_mode == VThermHvacMode_HEAT:
-                                await self._start_tpi_cycle_timer()
+                        if self._auto_tpi_manager:
+                            if (
+                                self.vtherm_hvac_mode == VThermHvacMode_HEAT
+                                and self._auto_tpi_manager.learning_active
+                            ):
+                                await self._auto_tpi_manager.start_cycle_loop(
+                                    self._get_tpi_data,
+                                    self._on_tpi_cycle_start
+                                )
                             else:
-                                if self._cycle_timer:
-                                    self._cycle_timer()
-                                    self._cycle_timer = None
+                                self._auto_tpi_manager.stop_cycle_loop()
 
             self.calculate_hvac_action()
             self.update_custom_attributes()
@@ -2293,14 +2307,14 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
 
             # Start timer if we are in HEAT
             if self.vtherm_hvac_mode == VThermHvacMode_HEAT:
-                await self._start_tpi_cycle_timer()
+                await self._auto_tpi_manager.start_cycle_loop(
+                    self._get_tpi_data,
+                    self._on_tpi_cycle_start
+                )
         else:
             await self._auto_tpi_manager.stop_learning()
-            # Stop timer
-            if self._cycle_timer:
-                self._cycle_timer()
-                self._cycle_timer = None
-        
+            self._auto_tpi_manager.stop_cycle_loop()
+
         # Fire event to notify potential listeners (like the switch if it existed, or UI)
         self.hass.bus.async_fire(
             EventType.AUTO_TPI_EVENT.value,

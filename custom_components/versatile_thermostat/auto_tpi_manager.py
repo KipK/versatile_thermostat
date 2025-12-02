@@ -8,7 +8,11 @@ from datetime import datetime
 from typing import Optional
 from dataclasses import dataclass, asdict
 
+import asyncio
+from typing import Callable
+
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.event import async_call_later
 
 from .const import (
     CONF_TPI_COEF_INT,
@@ -120,6 +124,14 @@ class AutoTpiManager:
         self._current_hvac_action: str = 'stop'
         self._current_hvac_mode: str = 'heat' # 'heat' or 'cool' (or 'off' etc)
         self._last_cycle_power_efficiency: float = 1.0
+        self._current_cycle_params: dict = None
+
+        self._timer_remove_callback: Callable[[], None] | None = None
+        # data_provider: async function that returns a dict with:
+        # on_time_sec, off_time_sec, on_percent, hvac_mode
+        self._data_provider: Callable[[], dict] | None = None
+        # event_sender: async function that sends events to thermostat
+        self._event_sender: Callable[[dict], None] | None = None
 
     async def async_save_data(self):
         """Save data."""
@@ -651,3 +663,113 @@ class AutoTpiManager:
         self.state = AutoTpiState()
         self.state.cycle_active = False
         await self.async_save_data()
+
+    async def start_cycle_loop(self, data_provider: Callable[[], dict], event_sender: Callable[[dict], None]):
+        """Start the TPI cycle loop."""
+        _LOGGER.debug("%s - Auto TPI: Starting cycle loop", self._name)
+        self._data_provider = data_provider
+        self._event_sender = event_sender
+
+        # Stop existing timer if any
+        if self._timer_remove_callback:
+            self._timer_remove_callback()
+            self._timer_remove_callback = None
+
+        # Execute immediately
+        await self._tick()
+
+    def stop_cycle_loop(self):
+        """Stop the TPI cycle loop."""
+        _LOGGER.debug("%s - Auto TPI: Stopping cycle loop", self._name)
+        if self._timer_remove_callback:
+            self._timer_remove_callback()
+            self._timer_remove_callback = None
+        self._data_provider = None
+        self._event_sender = None
+
+    def _schedule_next_timer(self):
+        """Schedule the next timer."""
+        # Ensure we don't have multiple timers
+        if self._timer_remove_callback:
+            self._timer_remove_callback()
+            
+        self._timer_remove_callback = async_call_later(
+            self._hass, self._cycle_min * 60, self._on_timer_fired
+        )
+
+    async def _on_timer_fired(self, _):
+        """Called when timer fires."""
+        await self._tick()
+
+    async def _tick(self):
+        """Perform a tick of the cycle loop."""
+        if not self._data_provider:
+            return
+
+        now = datetime.now()
+        
+        # 1. Handle previous cycle completion
+        if self.state.cycle_start_date is not None and self._current_cycle_params is not None:
+            elapsed_minutes = (now - self.state.cycle_start_date).total_seconds() / 60
+            expected_duration = self._cycle_min
+            tolerance = expected_duration * 0.05  # 5% tolerance
+
+            if abs(elapsed_minutes - expected_duration) <= tolerance:
+                _LOGGER.debug(
+                    "%s - Cycle validation success: duration=%.1fmin (expected=%.1fmin). Triggering learning.",
+                    self._name, elapsed_minutes, expected_duration
+                )
+                # Use stored parameters from the PREVIOUS cycle
+                prev_params = self._current_cycle_params
+                await self.on_cycle_completed(
+                    on_time_sec=prev_params.get("on_time_sec", 0),
+                    off_time_sec=prev_params.get("off_time_sec", 0),
+                    hvac_mode=prev_params.get("hvac_mode", "stop")
+                )
+            else:
+                _LOGGER.debug(
+                    "%s - Cycle validation failed: duration=%.1fmin (expected=%.1fmin, tolerance=%.1fmin). Skipping learning.",
+                    self._name, elapsed_minutes, expected_duration, tolerance
+                )
+            
+            # Reset previous cycle tracking
+            self._current_cycle_params = None
+
+        # 2. Get fresh data from thermostat
+        try:
+            if asyncio.iscoroutinefunction(self._data_provider):
+                params = await self._data_provider()
+            else:
+                params = self._data_provider()
+        except Exception as e:
+            _LOGGER.error("%s - Auto TPI: Error getting data from thermostat: %s", self._name, e)
+            # Retry later ?
+            self._schedule_next_timer()
+            return
+
+        if not params:
+            _LOGGER.warning("%s - Auto TPI: No data received from thermostat", self._name)
+            self._schedule_next_timer()
+            return
+            
+        self._current_cycle_params = params
+        on_time = params.get("on_time_sec", 0)
+        off_time = params.get("off_time_sec", 0)
+        on_percent = params.get("on_percent", 0)
+        hvac_mode = params.get("hvac_mode", "stop")
+
+        # 3. Notify start of cycle
+        await self.on_cycle_started(on_time, off_time, on_percent, hvac_mode)
+        
+        # 4. Notify thermostat to apply changes
+        if self._event_sender:
+            try:
+                if asyncio.iscoroutinefunction(self._event_sender):
+                    await self._event_sender(params)
+                else:
+                    self._event_sender(params)
+            except Exception as e:
+                _LOGGER.error("%s - Auto TPI: Error sending event to thermostat: %s", self._name, e)
+
+        # 5. Schedule next tick
+        self._schedule_next_timer()
