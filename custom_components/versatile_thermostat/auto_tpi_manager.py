@@ -140,6 +140,7 @@ class AutoTpiManager:
 
     def _save_data_sync(self):
         """Sync save."""
+        tmp_path = f"{self._storage_path}.tmp"
         try:
             # Helper for datetime serialization
             def json_serial(obj):
@@ -153,10 +154,19 @@ class AutoTpiManager:
             }
             
             os.makedirs(os.path.dirname(self._storage_path), exist_ok=True)
-            with open(self._storage_path, 'w') as f:
+            with open(tmp_path, 'w') as f:
                 json.dump(data, f, indent=2, default=json_serial)
+            
+            # Atomic replace
+            os.replace(tmp_path, self._storage_path)
+
         except Exception as e:
             _LOGGER.error("%s - Auto TPI: Save error: %s", self._name, e)
+            if os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except Exception:
+                    pass
 
     async def async_load_data(self):
         """Load data."""
