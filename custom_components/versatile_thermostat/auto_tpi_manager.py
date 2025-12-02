@@ -58,7 +58,7 @@ class AutoTpiState:
     
     # Management
     consecutive_failures: int = 0
-    autolearn_enabled: bool = True
+    autolearn_enabled: bool = False
     last_learning_status: str = "startup"
     total_cycles: int = 0  # Total number of TPI cycles
 
