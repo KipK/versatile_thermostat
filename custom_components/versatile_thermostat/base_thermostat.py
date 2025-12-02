@@ -118,7 +118,6 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
 
         # Callbacks for TPI cycle events
         self._on_cycle_start_callbacks: list[Callable] = []
-        self._on_cycle_end_callbacks: list[Callable] = []
         self._cycle_timer = None
 
         self._state_manager = StateManager()
@@ -542,33 +541,21 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
     def register_cycle_callback(
         self,
         on_start: Callable | None = None,
-        on_end: Callable | None = None,
     ):
         """Register callbacks for TPI cycle events.
 
         Args:
             on_start: Callback called at the start of each TPI cycle
                       Signature: async def callback(on_time_sec, off_time_sec, on_percent, hvac_mode)
-            on_end: Callback called at the end of each TPI cycle
-                    Signature: async def callback(on_time_sec, off_time_sec, hvac_mode)
         """
         if on_start:
             self._on_cycle_start_callbacks.append(on_start)
             _LOGGER.debug("%s - Registered cycle start callback: %s", self, on_start)
+            # Register to existing underlyings
+            if self._underlyings:
+                for under in self._underlyings:
+                    under.register_cycle_callback(on_start)
 
-        if on_end:
-            self._on_cycle_end_callbacks.append(on_end)
-            _LOGGER.debug("%s - Registered cycle end callback: %s", self, on_end)
-
-    async def _fire_cycle_start_callbacks(self, on_time_sec, off_time_sec, on_percent, hvac_mode):
-        """Fire all cycle start callbacks."""
-        for callback in self._on_cycle_start_callbacks:
-            await callback(on_time_sec, off_time_sec, on_percent, hvac_mode)
-
-    async def _fire_cycle_end_callbacks(self, on_time_sec, off_time_sec, hvac_mode):
-        """Fire all cycle end callbacks."""
-        for callback in self._on_cycle_end_callbacks:
-            await callback(on_time_sec, off_time_sec, hvac_mode)
 
     def stop_recalculate_later(self):
         """Stop any scheduled call later tasks if any."""
@@ -592,6 +579,11 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
 
         # Initialize all UnderlyingEntities
         self.init_underlyings()
+
+        # Register callbacks to new underlyings
+        for under in self._underlyings:
+            for callback in self._on_cycle_start_callbacks:
+                under.register_cycle_callback(callback)
 
         # init presets. Should be after underlyings init because for over_climate it uses the hvac_modes
         await self.init_presets(central_configuration)
