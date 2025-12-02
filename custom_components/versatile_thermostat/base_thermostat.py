@@ -454,9 +454,12 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
             learned_params = self._auto_tpi_manager.get_calculated_params()
             if learned_params:
                 if self._auto_tpi_enable_update_config:
-                    self._tpi_coef_int = learned_params.get(CONF_TPI_COEF_INT, self._tpi_coef_int)
-                    self._tpi_coef_ext = learned_params.get(CONF_TPI_COEF_EXT, self._tpi_coef_ext)
-                    _LOGGER.info("%s - Restored Auto TPI parameters: %s", self, learned_params)
+                    if self._auto_tpi_manager.learning_active:
+                        self._tpi_coef_int = learned_params.get(CONF_TPI_COEF_INT, self._tpi_coef_int)
+                        self._tpi_coef_ext = learned_params.get(CONF_TPI_COEF_EXT, self._tpi_coef_ext)
+                        _LOGGER.info("%s - Restored Auto TPI parameters: %s", self, learned_params)
+                    else:
+                        _LOGGER.info("%s - Auto TPI parameters found but not applied because learning is disabled", self)
                 else:
                     _LOGGER.info("%s - Auto TPI parameters found but not applied because auto_tpi_enable_update_config is False", self)
             
