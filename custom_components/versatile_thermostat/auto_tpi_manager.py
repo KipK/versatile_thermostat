@@ -107,14 +107,15 @@ class AutoTpiManager:
         self._storage_path = hass.config.path(
             f".storage/versatile_thermostat_{unique_id}_auto_tpi_v2.json"
         )
+        self._default_coef_int = coef_int if coef_int is not None else 0.6
+        self._default_coef_ext = coef_ext if coef_ext is not None else 0.04
 
-        self.state = AutoTpiState()
-        if coef_int is not None:
-            self.state.coeff_indoor = coef_int
-            self.state.coeff_indoor_cool = coef_int
-        if coef_ext is not None:
-            self.state.coeff_outdoor = coef_ext
-            self.state.coeff_outdoor_cool = coef_ext
+        self.state = AutoTpiState(
+            coeff_indoor=self._default_coef_int,
+            coeff_outdoor=self._default_coef_ext,
+            coeff_indoor_cool=self._default_coef_int,
+            coeff_outdoor_cool=self._default_coef_ext
+        )
         self._calculated_params = {}
 
         # Transient state
@@ -160,6 +161,7 @@ class AutoTpiManager:
     async def async_load_data(self):
         """Load data."""
         await self._hass.async_add_executor_job(self._load_data_sync)
+        await self.calculate()
 
     def _load_data_sync(self):
         """Sync load."""
@@ -174,17 +176,17 @@ class AutoTpiManager:
             if version >= STORAGE_VERSION:
                 state_data = data.get("state", {})
                 self.state = AutoTpiState.from_dict(state_data)
+                
+                # If no learning has been done yet, force the configured defaults
+                if self.state.total_cycles == 0:
+                     _LOGGER.info("%s - Auto TPI: No learning cycles yet. Enforcing configured coefficients.", self._name)
+                     self.state.coeff_indoor = self._default_coef_int
+                     self.state.coeff_outdoor = self._default_coef_ext
+                     self.state.coeff_indoor_cool = self._default_coef_int
+                     self.state.coeff_outdoor_cool = self._default_coef_ext
+                     
                 _LOGGER.info("%s - Auto TPI: State loaded. Cycles: %d, Indoor learn count: %d",
                             self._name, self.state.total_cycles, self.state.coeff_indoor_autolearn)
-            # Migration from version 5 (or less) to 6
-            if version < 6:
-                _LOGGER.info("%s - Auto TPI: Migrating from version %d to 6", self._name, version)
-                # Init cooling coefficients with heating ones
-                self.state.coeff_indoor_cool = self.state.coeff_indoor
-                self.state.coeff_outdoor_cool = self.state.coeff_outdoor
-                self.state.coeff_indoor_cool_autolearn = 1
-                self.state.coeff_outdoor_cool_autolearn = 0
-
             else:
                 _LOGGER.info("%s - Auto TPI: Old storage version %d. Resetting to new structure.",
                              self._unique_id, version)
@@ -192,7 +194,12 @@ class AutoTpiManager:
 
         except Exception as e:
             _LOGGER.error("%s - Auto TPI: Load error: %s. Resetting.", self._name, e)
-            self.state = AutoTpiState()
+            self.state = AutoTpiState(
+                coeff_indoor=self._default_coef_int,
+                coeff_outdoor=self._default_coef_ext,
+                coeff_indoor_cool=self._default_coef_int,
+                coeff_outdoor_cool=self._default_coef_ext
+            )
 
     async def update(self, room_temp: float, ext_temp: float,
                     power_percent: float, target_temp: float, hvac_action: str,
