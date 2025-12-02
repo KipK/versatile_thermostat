@@ -1874,6 +1874,11 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
                     if self._auto_tpi_manager and self._auto_tpi_manager.learning_active
                     else "off"
                 ),
+                "auto_tpi_learning": (
+                    self._auto_tpi_manager.state.to_dict()
+                    if self._auto_tpi_manager
+                    else None
+                ),
             },
             "configuration": {
                 "ac_mode": self._ac_mode,
