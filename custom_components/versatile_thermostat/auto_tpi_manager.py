@@ -600,9 +600,20 @@ class AutoTpiManager:
         return self.state.autolearn_enabled
     
     @property
-    def data_points(self) -> int:
-        """Number of learning cycles completed (indoor coefficient updates)"""
+    def int_cycles(self) -> int:
+        """Number of learning cycles completed for internal coefficient"""
+        is_cool_mode = self._current_hvac_mode == 'cool' or self._current_hvac_action == 'cool'
+        if is_cool_mode:
+            return self.state.coeff_indoor_cool_autolearn
         return self.state.coeff_indoor_autolearn
+
+    @property
+    def ext_cycles(self) -> int:
+        """Number of learning cycles completed for external coefficient"""
+        is_cool_mode = self._current_hvac_mode == 'cool' or self._current_hvac_action == 'cool'
+        if is_cool_mode:
+            return self.state.coeff_outdoor_cool_autolearn
+        return self.state.coeff_outdoor_autolearn
     
     @property
     def heating_cycles_count(self) -> int:
@@ -619,10 +630,18 @@ class AutoTpiManager:
     @property
     def confidence(self) -> float:
         """Confidence level in the learned model (0.0 to 1.0)"""
-        if self.state.coeff_indoor_autolearn == 0:
-            return 0.0
+        # We consider stability reached when both coefficients have 50 cycles
+        int_cycles = self.int_cycles
+        ext_cycles = self.ext_cycles
         
-        cycle_confidence = min(self.state.coeff_indoor_autolearn / 50.0, 1.0)
+        if int_cycles == 0 and ext_cycles == 0:
+            return 0.0
+            
+        # Average of progress for both
+        confidence_int = min(int_cycles / 50.0, 1.0)
+        confidence_ext = min(ext_cycles / 50.0, 1.0)
+        
+        cycle_confidence = (confidence_int + confidence_ext) / 2.0
         
         if self.state.consecutive_failures > 0:
             failure_penalty = min(self.state.consecutive_failures * 0.15, 0.6)

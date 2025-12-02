@@ -323,7 +323,8 @@ class AutoTpiSensor(VersatileThermostatBaseEntity, SensorEntity):
             
         # Update attributes
         self._attr_extra_state_attributes = {
-            "learning_cycles": manager.data_points,  # Number of completed learning cycles
+            "coeff_int_cycles": manager.int_cycles,
+            "coeff_ext_cycles": manager.ext_cycles,
             "heating_cycles_count": manager.heating_cycles_count,  # Total heating cycles
             "thermal_time_constant_hours": manager.time_constant,  # Building's thermal time constant τ
             "model_confidence": manager.confidence,  # Model confidence (R² or percentage)
