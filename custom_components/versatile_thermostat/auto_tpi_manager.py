@@ -48,6 +48,8 @@ class AutoTpiState:
     last_temp_in: float = 0.0
     last_temp_out: float = 0.0
     last_state: str = 'stop'  # 'heat', 'cool', 'stop'
+    previous_state: str = 'stop' # State of the previous cycle
+    last_on_temp_in: float = 0.0 # Temp at the end of ON time
     last_update_date: Optional[datetime] = None
     last_heater_stop_time: Optional[datetime] = None # When heater stopped
     
@@ -128,6 +130,7 @@ class AutoTpiManager:
         self._current_cycle_params: dict = None
 
         self._timer_remove_callback: Callable[[], None] | None = None
+        self._timer_capture_remove_callback: Callable[[], None] | None = None
         # data_provider: async function that returns a dict with:
         # on_time_sec, off_time_sec, on_percent, hvac_mode
         self._data_provider: Callable[[], dict] | None = None
@@ -281,7 +284,22 @@ class AutoTpiManager:
         # Failures check
         if self.state.consecutive_failures >= 3:
             return False
+        
+        # 1. First Cycle Exclusion
+        if self.state.previous_state == 'stop':
+            _LOGGER.debug("%s - Auto TPI: Not learning - First cycle (previous state was stop)", self._name)
+            return False
+        if self.state.last_order == 0:
+            _LOGGER.debug("%s - Auto TPI: Not learning - Last order is 0", self._name)
+            return False
             
+        # 2. Mild Weather Exclusion (Safe Ratio)
+        # Avoid division by small numbers or learning when delta is too small to be significant
+        delta_out = self.state.last_order - self._current_temp_out
+        if abs(delta_out) < 2.0:
+             _LOGGER.debug("%s - Auto TPI: Not learning - Delta out too small (< 2.0)", self._name)
+             return False
+
         return True
 
     def _get_no_learn_reason(self) -> str:
@@ -378,8 +396,26 @@ class AutoTpiManager:
 
     def _learn_indoor(self, delta_theoretical: float, delta_real: float, efficiency: float = 1.0, is_cool: bool = False):
         """Learn indoor coefficient."""
-        if delta_real <= 0:
-            _LOGGER.warning("%s - Auto TPI: Cannot learn indoor - delta_real <= 0", self._name)
+        
+        # 3. Correct Delta Calculation
+        # We want to use the rise during the ON period, not the full cycle drift.
+        # However, delta_real passed here comes from _perform_learning which uses current_temp - last_temp.
+        # We need to recalculate it using last_on_temp_in if available.
+        
+        if is_cool:
+             # For cooling, we expect temp to drop during ON time
+             real_rise = self.state.last_temp_in - self.state.last_on_temp_in
+        else:
+             # For heating, we expect temp to rise during ON time
+             real_rise = self.state.last_on_temp_in - self.state.last_temp_in
+             
+        # Fallback if last_on_temp_in wasn't captured properly (e.g. restart)
+        if self.state.last_on_temp_in == 0.0:
+             real_rise = delta_real
+             _LOGGER.debug("%s - Auto TPI: last_on_temp_in missing, falling back to full cycle delta", self._name)
+
+        if real_rise <= 0.01: # Minimal rise required (0.01 to account for float precision/small sensors)
+            _LOGGER.warning("%s - Auto TPI: Cannot learn indoor - real_rise %.3f <= 0.01", self._name, real_rise)
             return
 
         # Adjust theoretical delta by the efficiency of the power delivered
@@ -392,34 +428,30 @@ class AutoTpiManager:
                              self._name, efficiency)
              return
 
-        ratio = adjusted_theoretical / delta_real
+        ratio = adjusted_theoretical / real_rise
         current_coeff = self.state.coeff_indoor_cool if is_cool else self.state.coeff_indoor_heat
         coeff_new = current_coeff * ratio
         
         # Validate coefficient - reject only truly invalid values (non-finite or <= 0)
-        # For values > 1.0, cap them instead of rejecting (like Jeedom does for lower bound)
         if not math.isfinite(coeff_new) or coeff_new <= 0:
             _LOGGER.warning("%s - Auto TPI: Invalid new indoor coeff: %.3f (non-finite or <= 0), skipping",
                            self._name, coeff_new)
             return
         
-        # Cap coefficient at 1.0 before averaging (normalized units)
-        if coeff_new > 1.0:
-            _LOGGER.info("%s - Auto TPI: Calculated indoor coeff %.3f > 1.0, capping to 1.0 before averaging",
-                        self._name, coeff_new)
-            coeff_new = 1.0
+        # 4. Cap Coefficient
+        MAX_COEFF = 0.6
+        if coeff_new > MAX_COEFF:
+            _LOGGER.info("%s - Auto TPI: Calculated indoor coeff %.3f > %.1f, capping to %.1f before averaging",
+                        self._name, coeff_new, MAX_COEFF, MAX_COEFF)
+            coeff_new = MAX_COEFF
             
-        # Weighted average
-        count = self.state.coeff_indoor_cool_autolearn if is_cool else self.state.coeff_indoor_autolearn
+        # 5. EMA Smoothing (20% weight)
+        # new_avg = (old_avg * 0.8) + (new_sample * 0.2)
         old_coeff = self.state.coeff_indoor_cool if is_cool else self.state.coeff_indoor_heat
-        
-        avg_coeff = (
-            (old_coeff * count + coeff_new) / (count + 1)
-        )
-        # Ensure the averaged result is also valid (defense in depth)
-        if avg_coeff > 1.0:
-             avg_coeff = 1.0
+        avg_coeff = (old_coeff * 0.8) + (coeff_new * 0.2)
 
+        # Update counters just for stats/logging, no longer used for weighting
+        count = self.state.coeff_indoor_cool_autolearn if is_cool else self.state.coeff_indoor_autolearn
         new_count = min(count + 1, 50)
         
         if is_cool:
@@ -430,8 +462,8 @@ class AutoTpiManager:
             self.state.coeff_indoor_autolearn = new_count
         
         _LOGGER.info(
-            "%s - Auto TPI: Learn indoor (%s). Old: %.3f, New calculated: %.3f, Averaged: %.3f (count: %d)",
-            self._name, 'cool' if is_cool else 'heat', old_coeff, coeff_new, avg_coeff, new_count
+            "%s - Auto TPI: Learn indoor (%s). Old: %.3f, New calculated: %.3f (rise=%.3f), Averaged: %.3f (count: %d)",
+            self._name, 'cool' if is_cool else 'heat', old_coeff, coeff_new, real_rise, avg_coeff, new_count
         )
 
     def _learn_outdoor(self, current_temp_in: float, current_temp_out: float, is_cool: bool = False):
@@ -546,6 +578,11 @@ class AutoTpiManager:
         if self.state.cycle_active:
             _LOGGER.info("%s - Auto TPI: Previous cycle was interrupted (not completed). Discarding it.", self._name)
             # You could add specific logic here if needed (stats, etc)
+        
+        # Cancel any pending capture timer
+        if self._timer_capture_remove_callback:
+            self._timer_capture_remove_callback()
+            self._timer_capture_remove_callback = None
 
         self.state.cycle_active = True
         
@@ -559,7 +596,11 @@ class AutoTpiManager:
         self.state.last_temp_out = self._current_temp_out
         self.state.last_order = self._current_target_temp
         self.state.last_power = on_percent if on_percent is not None else 0.0
+        self.state.last_on_temp_in = 0.0 # Reset
         
+        # Save previous state before updating last_state (for first cycle detection)
+        self.state.previous_state = self.state.last_state
+
         # Map VThermHvacMode/HVACMode to internal state string
         # hvac_mode is expected to be VThermHvacMode or string representation
         mode_str = str(hvac_mode)
@@ -573,6 +614,14 @@ class AutoTpiManager:
         self.state.cycle_start_date = now
         self.state.last_update_date = now
         
+        # Schedule capture of temperature at the end of the ON pulse
+        if on_time_sec > 0:
+            self._timer_capture_remove_callback = async_call_later(
+                self._hass,
+                on_time_sec,
+                self._capture_end_of_on_temp
+            )
+
         # Calculate cold factor for this cycle
         self.state.current_cycle_cold_factor = 0.0
         if self._heater_cooling_time > 0 and self.state.last_heater_stop_time:
@@ -752,12 +801,22 @@ class AutoTpiManager:
         # Execute immediately
         await self._tick()
 
+    async def _capture_end_of_on_temp(self, _):
+        """Called when the ON period ends (heater turns off)."""
+        self.state.last_on_temp_in = self._current_temp_in
+        _LOGGER.debug("%s - Auto TPI: Captured last_on_temp_in: %.3f", self._name, self.state.last_on_temp_in)
+        self._timer_capture_remove_callback = None
+
     def stop_cycle_loop(self):
         """Stop the TPI cycle loop."""
         _LOGGER.debug("%s - Auto TPI: Stopping cycle loop", self._name)
         if self._timer_remove_callback:
             self._timer_remove_callback()
             self._timer_remove_callback = None
+        if self._timer_capture_remove_callback:
+            self._timer_capture_remove_callback()
+            self._timer_capture_remove_callback = None
+
         self._data_provider = None
         self._event_sender = None
 
