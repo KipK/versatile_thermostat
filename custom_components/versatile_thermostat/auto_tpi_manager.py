@@ -369,12 +369,18 @@ class AutoTpiManager:
                 learned = True
             
         # Priority 2: Outdoor Coefficient
-        elif outdoor_condition:
+        # Fallback if Priority 1 failed (e.g., real_rise too small) or wasn't applicable
+        if not learned and outdoor_condition:
             if self._learn_outdoor(current_temp_in, current_temp_out, is_cool):
                 self.state.last_learning_status = f"learned_outdoor_{'cool' if is_cool else 'heat'}"
                 learned = True
-        else:
-            self.state.last_learning_status = f"no_valid_conditions(progress={temp_progress:.2f},target_diff={target_diff:.2f})"
+        
+        if not learned:
+            if not outdoor_condition and not (temp_progress > 0 and target_diff > 0):
+                self.state.last_learning_status = f"no_valid_conditions(progress={temp_progress:.2f},target_diff={target_diff:.2f})"
+                _LOGGER.debug("%s - Auto TPI: No valid learning conditions. Temp progress: %.3f, Target diff: %.3f",
+                             self._name, temp_progress, target_diff)
+            # Else status was set by learn_indoor failure
             _LOGGER.debug("%s - Auto TPI: No valid learning conditions. Temp progress: %.3f, Target diff: %.3f",
                          self._name, temp_progress, target_diff)
 
