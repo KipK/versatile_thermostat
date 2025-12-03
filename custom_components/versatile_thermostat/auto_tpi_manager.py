@@ -409,7 +409,7 @@ class AutoTpiManager:
              _LOGGER.debug("%s - Auto TPI: last_on_temp_in missing, falling back to full cycle delta", self._name)
 
         if real_rise <= 0.01: # Minimal rise required (0.01 to account for float precision/small sensors)
-            _LOGGER.warning("%s - Auto TPI: Cannot learn indoor - real_rise %.3f <= 0.01", self._name, real_rise)
+            _LOGGER.debug("%s - Auto TPI: Cannot learn indoor - real_rise %.3f <= 0.01. Will try outdoor learning.", self._name, real_rise)
             self.state.last_learning_status = "real_rise_too_small"
             return False
 
