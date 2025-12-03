@@ -845,7 +845,7 @@ class AutoTpiManager:
         if self.state.cycle_start_date is not None and self._current_cycle_params is not None:
             elapsed_minutes = (now - self.state.cycle_start_date).total_seconds() / 60
             expected_duration = self._cycle_min
-            tolerance = expected_duration * 0.05  # 5% tolerance
+            tolerance = max(expected_duration * 0.1, 1.0)
 
             if abs(elapsed_minutes - expected_duration) <= tolerance:
                 _LOGGER.debug(
