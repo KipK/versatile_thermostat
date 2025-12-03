@@ -528,9 +528,19 @@ class AutoTpiManager:
         count = self.state.coeff_outdoor_cool_autolearn if is_cool else self.state.coeff_outdoor_autolearn
         old_coeff = current_outdoor
         
-        avg_coeff = (
-            (old_coeff * count + coeff_new) / (count + 1)
-        )
+        # 5. Calculation Method
+        if self._calculation_method == "average":
+            # Weighted average
+            avg_coeff = ((old_coeff * count) + coeff_new) / (count + 1)
+            _LOGGER.debug("%s - Auto TPI: Outdoor Weighted Average: old=%.3f (weight=%d), new=%.3f, result=%.3f",
+                          self._name, old_coeff, count, coeff_new, avg_coeff)
+
+        else: # EMA
+            # EMA Smoothing
+            alpha = self._ema_alpha
+            avg_coeff = (old_coeff * (1.0 - alpha)) + (coeff_new * alpha)
+            _LOGGER.debug("%s - Auto TPI: Outdoor EMA: old=%.3f, new=%.3f, alpha=%.2f, result=%.3f",
+                          self._name, old_coeff, coeff_new, alpha, avg_coeff)
         new_count = min(count + 1, 50)
         
         if is_cool:
