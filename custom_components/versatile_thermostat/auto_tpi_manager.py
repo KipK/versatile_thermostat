@@ -376,15 +376,15 @@ class AutoTpiManager:
         
         # Priority 1: Indoor Coefficient
         if temp_progress > 0 and target_diff > 0:
-            self._learn_indoor(target_diff, temp_progress, self._last_cycle_power_efficiency, is_cool)
-            self.state.last_learning_status = f"learned_indoor_{'cool' if is_cool else 'heat'}"
-            learned = True
+            if self._learn_indoor(target_diff, temp_progress, self._last_cycle_power_efficiency, is_cool):
+                self.state.last_learning_status = f"learned_indoor_{'cool' if is_cool else 'heat'}"
+                learned = True
             
         # Priority 2: Outdoor Coefficient
         elif outdoor_condition:
-            self._learn_outdoor(current_temp_in, current_temp_out, is_cool)
-            self.state.last_learning_status = f"learned_outdoor_{'cool' if is_cool else 'heat'}"
-            learned = True
+            if self._learn_outdoor(current_temp_in, current_temp_out, is_cool):
+                self.state.last_learning_status = f"learned_outdoor_{'cool' if is_cool else 'heat'}"
+                learned = True
         else:
             self.state.last_learning_status = f"no_valid_conditions(progress={temp_progress:.2f},target_diff={target_diff:.2f})"
             _LOGGER.debug("%s - Auto TPI: No valid learning conditions. Temp progress: %.3f, Target diff: %.3f",
@@ -394,7 +394,7 @@ class AutoTpiManager:
             _LOGGER.info("%s - Auto TPI: Learning successful - %s",
                         self._name, self.state.last_learning_status)
 
-    def _learn_indoor(self, delta_theoretical: float, delta_real: float, efficiency: float = 1.0, is_cool: bool = False):
+    def _learn_indoor(self, delta_theoretical: float, delta_real: float, efficiency: float = 1.0, is_cool: bool = False) -> bool:
         """Learn indoor coefficient."""
         
         # 3. Correct Delta Calculation
@@ -416,7 +416,8 @@ class AutoTpiManager:
 
         if real_rise <= 0.01: # Minimal rise required (0.01 to account for float precision/small sensors)
             _LOGGER.warning("%s - Auto TPI: Cannot learn indoor - real_rise %.3f <= 0.01", self._name, real_rise)
-            return
+            self.state.last_learning_status = "real_rise_too_small"
+            return False
 
         # Adjust theoretical delta by the efficiency of the power delivered
         # If efficiency was 50% (due to rampup time), we expect only 50% of the result.
@@ -426,7 +427,8 @@ class AutoTpiManager:
         if adjusted_theoretical <= 0:
              _LOGGER.warning("%s - Auto TPI: Cannot learn indoor - adjusted_theoretical <= 0 (eff=%.2f)",
                              self._name, efficiency)
-             return
+             self.state.last_learning_status = "adjusted_theoretical_lte_0"
+             return False
 
         ratio = adjusted_theoretical / real_rise
         current_coeff = self.state.coeff_indoor_cool if is_cool else self.state.coeff_indoor_heat
@@ -436,7 +438,8 @@ class AutoTpiManager:
         if not math.isfinite(coeff_new) or coeff_new <= 0:
             _LOGGER.warning("%s - Auto TPI: Invalid new indoor coeff: %.3f (non-finite or <= 0), skipping",
                            self._name, coeff_new)
-            return
+            self.state.last_learning_status = "invalid_indoor_coeff"
+            return False
         
         # 4. Cap Coefficient
         MAX_COEFF = 0.6
@@ -465,15 +468,17 @@ class AutoTpiManager:
             "%s - Auto TPI: Learn indoor (%s). Old: %.3f, New calculated: %.3f (rise=%.3f), Averaged: %.3f (count: %d)",
             self._name, 'cool' if is_cool else 'heat', old_coeff, coeff_new, real_rise, avg_coeff, new_count
         )
+        return True
 
-    def _learn_outdoor(self, current_temp_in: float, current_temp_out: float, is_cool: bool = False):
+    def _learn_outdoor(self, current_temp_in: float, current_temp_out: float, is_cool: bool = False) -> bool:
         """Learn outdoor coefficient."""
         gap_in = self.state.last_order - current_temp_in
         gap_out = self.state.last_order - current_temp_out
         
         if gap_out == 0:
             _LOGGER.debug("%s - Auto TPI: Cannot learn outdoor - gap_out is 0", self._name)
-            return
+            self.state.last_learning_status = "gap_out_is_zero"
+            return False
 
         ratio_influence = gap_in / gap_out
         current_indoor = self.state.coeff_indoor_cool if is_cool else self.state.coeff_indoor_heat
@@ -487,7 +492,8 @@ class AutoTpiManager:
         if not math.isfinite(coeff_new) or coeff_new <= 0:
             _LOGGER.warning("%s - Auto TPI: Invalid new outdoor coeff: %.3f (non-finite or <= 0), skipping",
                            self._name, coeff_new)
-            return
+            self.state.last_learning_status = "invalid_outdoor_coeff"
+            return False
         
         # Cap coefficient at 1.0 before averaging (normalized units)
         if coeff_new > 1.0:
@@ -514,6 +520,7 @@ class AutoTpiManager:
             "%s - Auto TPI: Learn outdoor (%s). Old: %.3f, New calculated: %.3f, Averaged: %.3f (count: %d)",
             self._name, 'cool' if is_cool else 'heat', old_coeff, coeff_new, avg_coeff, new_count
         )
+        return True
 
     def _detect_failures(self, current_temp_in: float):
         """Detect system failures."""
