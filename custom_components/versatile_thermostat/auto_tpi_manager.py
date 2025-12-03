@@ -327,21 +327,8 @@ class AutoTpiManager:
         target_temp = self.state.last_order
 
         # 1. Mandatory Condition: Heating Logic Updates
-        # Ensure calculation only proceeds if (target_temp - indoor_temp) > 0
-        if is_heat:
-            if target_temp - current_temp_in <= 0:
-                self.state.last_learning_status = "target_reached_or_exceeded_heat"
-                _LOGGER.debug("%s - Auto TPI: Not learning - target reached or exceeded (heat)", self._name)
-                return
-
-        # 2. Cooling Logic Updates
-        # Adaptation: Apply similar logic for cooling mode. Likely (indoor_temp - target_temp) > 0
-        if is_cool:
-            if current_temp_in - target_temp <= 0:
-                self.state.last_learning_status = "target_reached_or_exceeded_cool"
-                _LOGGER.debug("%s - Auto TPI: Not learning - target reached or exceeded (cool)", self._name)
-                return
-
+        # We allow learning even if target is reached (overshoot) to adjust coefficients down
+        
         # 3. Ratio Validation
         # Validate the calculated ratio: ratio = (target_temp - indoor_temp) / (target_temp - outdoor_temp)
         # We use current temps (end of cycle) for this validation to be consistent with the gap check
@@ -355,10 +342,11 @@ class AutoTpiManager:
 
         ratio = delta_in / delta_out
 
-        if not (0 < ratio < 10):
+        # Allow negative ratio (overshoot) but bound it to avoid anomalies
+        if not (-5 < ratio < 10):
             mode_name = "heat" if is_heat else "cool"
             self.state.last_learning_status = f"ratio_out_of_range_{mode_name}({ratio:.2f})"
-            _LOGGER.debug("%s - Auto TPI: Not learning - ratio %.2f out of range (0-10) for %s",
+            _LOGGER.debug("%s - Auto TPI: Not learning - ratio %.2f out of range (-5 to 10) for %s",
                           self._name, ratio, mode_name)
             return
 
