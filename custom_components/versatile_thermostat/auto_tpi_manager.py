@@ -96,7 +96,9 @@ class AutoTpiManager:
     def __init__(self, hass: HomeAssistant, unique_id: str, name: str, cycle_min: int,
                  tpi_threshold_low: float = 0.0, tpi_threshold_high: float = 0.0,
                  coef_int: float = 0.6, coef_ext: float = 0.04,
-                 heater_heating_time: int = 0, heater_cooling_time: int = 0):
+                 heater_heating_time: int = 0, heater_cooling_time: int = 0,
+                 calculation_method: str = "ema", ema_alpha: float = 0.2,
+                 avg_initial_weight: int = 1, max_coef_int: float = 0.6):
         self._hass = hass
         self._unique_id = unique_id
         self._name = name
@@ -105,6 +107,11 @@ class AutoTpiManager:
         self._tpi_threshold_high = tpi_threshold_high
         self._heater_heating_time = heater_heating_time
         self._heater_cooling_time = heater_cooling_time
+
+        self._calculation_method = calculation_method
+        self._ema_alpha = ema_alpha
+        self._avg_initial_weight = avg_initial_weight
+        self._max_coef_int = max_coef_int
 
         self._storage_path = hass.config.path(
             f".storage/versatile_thermostat_{unique_id}_auto_tpi_v2.json"
@@ -197,6 +204,11 @@ class AutoTpiManager:
                      self.state.coeff_outdoor_heat = self._default_coef_ext
                      self.state.coeff_indoor_cool = self._default_coef_int
                      self.state.coeff_outdoor_cool = self._default_coef_ext
+                     # Initialize counters with the configured weight
+                     self.state.coeff_indoor_autolearn = self._avg_initial_weight
+                     self.state.coeff_indoor_cool_autolearn = self._avg_initial_weight
+                     self.state.coeff_outdoor_autolearn = 0
+                     self.state.coeff_outdoor_cool_autolearn = 0
                      
                 _LOGGER.info("%s - Auto TPI: State loaded. Cycles: %d, Indoor learn count: %d",
                             self._name, self.state.total_cycles, self.state.coeff_indoor_autolearn)
@@ -436,19 +448,37 @@ class AutoTpiManager:
             return False
         
         # 4. Cap Coefficient
-        MAX_COEFF = 0.6
+        MAX_COEFF = self._max_coef_int
         if coeff_new > MAX_COEFF:
             _LOGGER.info("%s - Auto TPI: Calculated indoor coeff %.3f > %.1f, capping to %.1f before averaging",
                         self._name, coeff_new, MAX_COEFF, MAX_COEFF)
             coeff_new = MAX_COEFF
             
-        # 5. EMA Smoothing (20% weight)
-        # new_avg = (old_avg * 0.8) + (new_sample * 0.2)
         old_coeff = self.state.coeff_indoor_cool if is_cool else self.state.coeff_indoor_heat
-        avg_coeff = (old_coeff * 0.8) + (coeff_new * 0.2)
-
-        # Update counters just for stats/logging, no longer used for weighting
         count = self.state.coeff_indoor_cool_autolearn if is_cool else self.state.coeff_indoor_autolearn
+        
+        # 5. Calculation Method
+        if self._calculation_method == "average":
+            # Weighted average
+            # avg_coeff = ((old_coeff * count + coeff_new) / (count + 1))
+            # We must use the current count (not incremented) as weight for old_coeff
+            
+            # If count is 0 (should not happen for valid state), treat as 1
+            weight_old = max(count, 1)
+            
+            avg_coeff = ((old_coeff * weight_old) + coeff_new) / (weight_old + 1)
+            _LOGGER.debug("%s - Auto TPI: Weighted Average: old=%.3f (weight=%d), new=%.3f, result=%.3f",
+                          self._name, old_coeff, weight_old, coeff_new, avg_coeff)
+
+        else: # EMA
+            # EMA Smoothing (20% weight by default)
+            # new_avg = (old_avg * (1 - alpha)) + (new_sample * alpha)
+            alpha = self._ema_alpha
+            avg_coeff = (old_coeff * (1.0 - alpha)) + (coeff_new * alpha)
+            _LOGGER.debug("%s - Auto TPI: EMA: old=%.3f, new=%.3f, alpha=%.2f, result=%.3f",
+                          self._name, old_coeff, coeff_new, alpha, avg_coeff)
+
+        # Update counters
         new_count = min(count + 1, 50)
         
         if is_cool:
@@ -754,7 +784,7 @@ class AutoTpiManager:
         
         if coef_int is not None:
             self.state.coeff_indoor_heat = coef_int
-            self.state.coeff_indoor_autolearn = 1
+            self.state.coeff_indoor_autolearn = self._avg_initial_weight
         if coef_ext is not None:
             self.state.coeff_outdoor_heat = coef_ext
             self.state.coeff_outdoor_autolearn = 0

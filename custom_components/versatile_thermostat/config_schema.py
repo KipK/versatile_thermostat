@@ -425,5 +425,31 @@ STEP_AUTO_TPI_LEARNING_DATA_SCHEMA = vol.Schema(
         vol.Optional(CONF_AUTO_TPI_ENABLE_NOTIFICATION, default=True): cv.boolean,
         vol.Optional(CONF_HEATER_HEATING_TIME, default=0): cv.positive_int,
         vol.Optional(CONF_HEATER_COOLING_TIME, default=0): cv.positive_int,
+        vol.Optional(
+            CONF_AUTO_TPI_CALCULATION_METHOD, default=AUTO_TPI_METHOD_EMA
+        ): selector.SelectSelector(
+            selector.SelectSelectorConfig(
+                options=CONF_AUTO_TPI_CALCULATION_METHODS,
+                translation_key="auto_tpi_calculation_method",
+                mode="dropdown",
+            )
+        ),
+        vol.Optional(
+            CONF_AUTO_TPI_EMA_ALPHA, default=0.2
+        ): selector.NumberSelector(
+            selector.NumberSelectorConfig(
+                min=0.0, max=1.0, step=0.01, mode=selector.NumberSelectorMode.BOX
+            )
+        ),
+        vol.Optional(
+            CONF_AUTO_TPI_AVG_INITIAL_WEIGHT, default=1
+        ): cv.positive_int,
+        vol.Optional(
+            CONF_AUTO_TPI_MAX_COEF_INT, default=0.6
+        ): selector.NumberSelector(
+            selector.NumberSelectorConfig(
+                min=0.0, max=10.0, step=0.01, mode=selector.NumberSelectorMode.BOX
+            )
+        ),
     }
 )

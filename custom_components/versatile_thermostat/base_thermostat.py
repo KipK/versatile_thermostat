@@ -429,7 +429,12 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
         # Initialize Auto TPI Manager here because we need self._cycle_min which is initialized in post_init
         heater_heating_time = entry_infos.get(CONF_HEATER_HEATING_TIME, 0)
         heater_cooling_time = entry_infos.get(CONF_HEATER_COOLING_TIME, 0)
-        _LOGGER.info("%s - DEBUG: TPI coefficients from entry_infos: int=%.3f, ext=%.3f", 
+        calculation_method = entry_infos.get(CONF_AUTO_TPI_CALCULATION_METHOD, AUTO_TPI_METHOD_EMA)
+        ema_alpha = entry_infos.get(CONF_AUTO_TPI_EMA_ALPHA, 0.2)
+        avg_initial_weight = entry_infos.get(CONF_AUTO_TPI_AVG_INITIAL_WEIGHT, 1)
+        max_coef_int = entry_infos.get(CONF_AUTO_TPI_MAX_COEF_INT, 0.6)
+
+        _LOGGER.info("%s - DEBUG: TPI coefficients from entry_infos: int=%.3f, ext=%.3f",
                      self, self._tpi_coef_int, self._tpi_coef_ext)
         self._auto_tpi_manager = AutoTpiManager(
             self._hass,
@@ -442,6 +447,10 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
             coef_ext=self._tpi_coef_ext,
             heater_heating_time=heater_heating_time,
             heater_cooling_time=heater_cooling_time,
+            calculation_method=calculation_method,
+            ema_alpha=ema_alpha,
+            avg_initial_weight=avg_initial_weight,
+            max_coef_int=max_coef_int,
         )
         _LOGGER.info("%s - DEBUG: AutoTpiManager initialized with defaults: int=%.3f, ext=%.3f",
                      self, self._auto_tpi_manager._default_coef_int, self._auto_tpi_manager._default_coef_ext)

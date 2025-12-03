@@ -155,6 +155,13 @@ CONF_VALVE_4 = "valve_entity4_id"
 CONF_AUTO_TPI_MODE = "auto_tpi_mode"
 CONF_AUTO_TPI_ENABLE_UPDATE_CONFIG = "auto_tpi_enable_update_config"
 CONF_AUTO_TPI_ENABLE_NOTIFICATION = "auto_tpi_enable_notification"
+CONF_AUTO_TPI_CALCULATION_METHOD = "auto_tpi_calculation_method"
+AUTO_TPI_METHOD_AVG = "average"
+AUTO_TPI_METHOD_EMA = "ema"
+CONF_AUTO_TPI_CALCULATION_METHODS = [AUTO_TPI_METHOD_AVG, AUTO_TPI_METHOD_EMA]
+CONF_AUTO_TPI_EMA_ALPHA = "auto_tpi_ema_alpha"
+CONF_AUTO_TPI_AVG_INITIAL_WEIGHT = "auto_tpi_avg_initial_weight"
+CONF_AUTO_TPI_MAX_COEF_INT = "auto_tpi_max_coef_int"
 
 
 # Global params into configuration.yaml
@@ -347,6 +354,10 @@ ALL_CONF = (
         CONF_MIN_OPENING_DEGREES,
         CONF_MAX_CLOSING_DEGREE,
         CONF_OPENING_THRESHOLD_DEGREE,
+        CONF_AUTO_TPI_CALCULATION_METHOD,
+        CONF_AUTO_TPI_EMA_ALPHA,
+        CONF_AUTO_TPI_AVG_INITIAL_WEIGHT,
+        CONF_AUTO_TPI_MAX_COEF_INT,
     ]
     + CONF_PRESETS_VALUES
     + CONF_PRESETS_AWAY_VALUES
