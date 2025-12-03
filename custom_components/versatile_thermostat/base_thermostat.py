@@ -429,6 +429,8 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
         # Initialize Auto TPI Manager here because we need self._cycle_min which is initialized in post_init
         heater_heating_time = entry_infos.get(CONF_HEATER_HEATING_TIME, 0)
         heater_cooling_time = entry_infos.get(CONF_HEATER_COOLING_TIME, 0)
+        _LOGGER.info("%s - DEBUG: TPI coefficients from entry_infos: int=%.3f, ext=%.3f", 
+                     self, self._tpi_coef_int, self._tpi_coef_ext)
         self._auto_tpi_manager = AutoTpiManager(
             self._hass,
             self.unique_id,
@@ -441,6 +443,8 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
             heater_heating_time=heater_heating_time,
             heater_cooling_time=heater_cooling_time,
         )
+        _LOGGER.info("%s - DEBUG: AutoTpiManager initialized with defaults: int=%.3f, ext=%.3f",
+                     self, self._auto_tpi_manager._default_coef_int, self._auto_tpi_manager._default_coef_ext)
 
 
     async def async_added_to_hass(self):
@@ -449,10 +453,14 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
 
         # Load data from Auto TPI Manager
         if self._auto_tpi_manager:
+            _LOGGER.info("%s - DEBUG: Before load_data - int=%.3f, ext=%.3f", 
+                         self, self._tpi_coef_int, self._tpi_coef_ext)
             await self._auto_tpi_manager.async_load_data()
             # If we have learned parameters, apply them
             learned_params = self._auto_tpi_manager.get_calculated_params()
             if learned_params:
+                _LOGGER.info("%s - DEBUG: Learned params found: %s, learning_active=%s, update_config=%s",
+                             self, learned_params, self._auto_tpi_manager.learning_active, self._auto_tpi_enable_update_config)
                 if self._auto_tpi_enable_update_config:
                     if self._auto_tpi_manager.learning_active:
                         self._tpi_coef_int = learned_params.get(CONF_TPI_COEF_INT, self._tpi_coef_int)
@@ -462,6 +470,9 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
                         _LOGGER.info("%s - Auto TPI parameters found but not applied because learning is disabled", self)
                 else:
                     _LOGGER.info("%s - Auto TPI parameters found but not applied because auto_tpi_enable_update_config is False", self)
+            
+            _LOGGER.info("%s - DEBUG: After load_data - int=%.3f, ext=%.3f",
+                         self, self._tpi_coef_int, self._tpi_coef_ext)
             
             if self._auto_tpi_manager.learning_active:
                 _LOGGER.info("%s - Auto TPI learning is active (restored from storage)", self)
