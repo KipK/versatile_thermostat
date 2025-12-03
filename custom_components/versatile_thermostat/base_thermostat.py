@@ -1612,9 +1612,13 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
             
             # Check if we have new parameters
             new_params = await self._auto_tpi_manager.calculate()
-            if new_params and (
-                new_params.get(CONF_TPI_COEF_INT) != self._tpi_coef_int
-                or new_params.get(CONF_TPI_COEF_EXT) != self._tpi_coef_ext
+            if (
+                self._auto_tpi_manager.learning_active
+                and new_params
+                and (
+                    new_params.get(CONF_TPI_COEF_INT) != self._tpi_coef_int
+                    or new_params.get(CONF_TPI_COEF_EXT) != self._tpi_coef_ext
+                )
             ):
                 _LOGGER.info("%s - Auto TPI: New parameters found: %s", self, new_params)
                 if self._auto_tpi_enable_update_config:
