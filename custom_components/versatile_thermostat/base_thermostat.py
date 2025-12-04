@@ -348,16 +348,6 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
         self._auto_tpi_enable_update_config = entry_infos.get(CONF_AUTO_TPI_ENABLE_UPDATE_CONFIG, False)
         _LOGGER.info("DEBUG: auto_tpi_enable_update_config: %s", self._auto_tpi_enable_update_config)
 
-        # Initialize max_capacity settings
-        self._auto_max_capacity = entry_infos.get(CONF_AUTO_MAX_CAPACITY, True)
-        
-        if not self._auto_max_capacity:
-            # User provided manual values
-            self._max_capacity_heat = entry_infos.get(CONF_MAX_CAPACITY_HEAT, 0.0)
-            self._max_capacity_cool = entry_infos.get(CONF_MAX_CAPACITY_COOL, 0.0)
-            _LOGGER.info("%s - Using manual max capacities: heat=%.3f, cool=%.3f", 
-                        self, self._max_capacity_heat, self._max_capacity_cool)
-
         self.set_hvac_list()
 
         self._unit = self._hass.config.units.temperature_unit
@@ -454,6 +444,7 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
         max_coef_int = entry_infos.get(CONF_AUTO_TPI_MAX_COEF_INT, 0.6)
         heating_rate = entry_infos.get(CONF_AUTO_TPI_HEATING_RATE, 0.1)
         cooling_rate = entry_infos.get(CONF_AUTO_TPI_COOLING_RATE, 0.1)
+        use_capacity_as_rate = entry_infos.get(CONF_USE_CAPACITY_AS_RATE, False)
 
         _LOGGER.info("%s - DEBUG: TPI coefficients from entry_infos: int=%.3f, ext=%.3f",
                      self, self._tpi_coef_int, self._tpi_coef_ext)
@@ -474,6 +465,7 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
             max_coef_int=max_coef_int,
             heating_rate=heating_rate,
             cooling_rate=cooling_rate,
+            use_capacity_as_rate=use_capacity_as_rate,
         )
         _LOGGER.info("%s - DEBUG: AutoTpiManager initialized with defaults: int=%.3f, ext=%.3f",
                      self, self._auto_tpi_manager._default_coef_int, self._auto_tpi_manager._default_coef_ext)

@@ -99,7 +99,8 @@ class AutoTpiManager:
                  heater_heating_time: int = 0, heater_cooling_time: int = 0,
                  calculation_method: str = "ema", ema_alpha: float = 0.2,
                  avg_initial_weight: int = 1, max_coef_int: float = 0.6,
-                 heating_rate: float = 0.1, cooling_rate: float = 0.1):
+                 heating_rate: float = 0.1, cooling_rate: float = 0.1,
+                 use_capacity_as_rate: bool = False):
         self._hass = hass
         self._unique_id = unique_id
         self._name = name
@@ -115,6 +116,7 @@ class AutoTpiManager:
         self._max_coef_int = max_coef_int
         self._heating_rate = heating_rate
         self._cooling_rate = cooling_rate
+        self._use_capacity_as_rate = use_capacity_as_rate
 
         # Transient state for max capacities (passed from thermostat)
         self._current_max_capacity_heat: float = 0.0
@@ -465,9 +467,13 @@ class AutoTpiManager:
         # If efficiency was 50% (due to rampup time), we expect only 50% of the result.
         # So we compare real progress against (theoretical * efficiency)
         # Apply the appropriate rate based on mode
+        # Apply the appropriate rate based on mode
         # We don't aim to correct the full error in one cycle but only a fraction of it
         # (e.g. 10% for heating or cooling) to ensure stability and avoid saturation.
-        rate = self._cooling_rate if is_cool else self._heating_rate
+        if self._use_capacity_as_rate and max_capacity > 0:
+            rate = max_capacity
+        else:
+            rate = self._cooling_rate if is_cool else self._heating_rate
         adjusted_theoretical = delta_theoretical * efficiency * rate
         
         # Clamp to Max Capacity if known (passed from thermostat)
