@@ -21,7 +21,7 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
-STORAGE_VERSION = 7  # Removed max_capacity from AutoTpiState
+STORAGE_VERSION = 8  # Restore max_capacity into AutoTpiState
 
 
 @dataclass
@@ -38,7 +38,11 @@ class AutoTpiState:
     coeff_outdoor_cool: float = 0.01
     coeff_indoor_cool_autolearn: int = 1
     coeff_outdoor_cool_autolearn: int = 0
-    
+
+    # Max Capacity (physical power of the system)
+    max_capacity_heat: float = 0.0
+    max_capacity_cool: float = 0.0
+
     # Offsets.
     offset: float = 0.0
     
@@ -117,10 +121,6 @@ class AutoTpiManager:
         self._heating_rate = heating_rate
         self._cooling_rate = cooling_rate
         self._use_capacity_as_rate = use_capacity_as_rate
-
-        # Transient state for max capacities (passed from thermostat)
-        self._current_max_capacity_heat: float = 0.0
-        self._current_max_capacity_cool: float = 0.0
 
         self._storage_path = hass.config.path(
             f".storage/versatile_thermostat_{unique_id}_auto_tpi_v2.json"
@@ -242,24 +242,15 @@ class AutoTpiManager:
 
     async def update(self, room_temp: float, ext_temp: float,
                     power_percent: float, target_temp: float, hvac_action: str,
-                    hvac_mode: str, humidity: Optional[float] = None,
-                    max_capacity_heat: float = 0.0, max_capacity_cool: float = 0.0) -> float:
+                    hvac_mode: str, humidity: Optional[float] = None) -> float:
         """Update state with new data.
-        
+
         This method is called at each control_heating cycle.
         It updates the transient state used for power calculation and future learning.
-        
-        Args:
-            max_capacity_heat: Physical heating limit from thermostat (°C/cycle)
-            max_capacity_cool: Physical cooling limit from thermostat (°C/cycle)
-        
+
         Returns the calculated power for validation/indication.
         """
-        
-        # Store max capacities from thermostat
-        self._current_max_capacity_heat = max_capacity_heat
-        self._current_max_capacity_cool = max_capacity_cool
-        
+
         # Convert hvac_action to 'heat', 'cool', or 'stop'
         current_state_str = 'stop'
         if hvac_action == 'heating':
@@ -312,10 +303,11 @@ class AutoTpiManager:
         if not self.state.autolearn_enabled:
             return False
 
-        # Power conditions: 0 < last_power < 100
-        if not (0 < self.state.last_power < 100):
+        # Power conditions: 0 < last_power < 0.99
+        # If power is >= 0.99 (99%), we don't learn coefficients but we detect max capacity (handled elsewhere)
+        if not (0 < self.state.last_power < 0.99):
             return False
-            
+
         # Failures check
         if self.state.consecutive_failures >= 3:
             return False
@@ -341,9 +333,8 @@ class AutoTpiManager:
         """Get reason why learning is not happening."""
         if not self.state.autolearn_enabled:
             return "learning_disabled"
-        # We allow learning even at 100% power to detect max capacity
-        # if not (0 < self.state.last_power < 100):
-        #    return f"power_out_of_range({self.state.last_power:.1f}%)"
+        if not (0 < self.state.last_power < 0.99):
+            return f"power_out_of_range({self.state.last_power * 100:.1f}%)"
         if self.state.consecutive_failures >= 3:
             return f"too_many_failures({self.state.consecutive_failures})"
         return "unknown"
@@ -399,14 +390,16 @@ class AutoTpiManager:
         learned = False
         
         # Priority 1: Indoor Coefficient
-        # We only learn coefficient if power is not saturated (0 < power < 100)
+        # We only learn coefficient if power is not saturated (0 < power < 0.99)
         # OR if we have overshoot (which allows reducing coeff even if saturated previously)
         # But here we stick to standard range for coeff learning to avoid windup at 100%.
-        if 0 < self.state.last_power < 100:
+        if 0 < self.state.last_power < 0.99:
             if temp_progress > 0 and target_diff > 0:
                 # Pass the appropriate max capacity based on mode
-                current_max_capacity = self._current_max_capacity_cool if is_cool else self._current_max_capacity_heat
-                
+                # Capacity is stored in °C/h, we need °C/cycle for learning check
+                cycle_duration_h = self._cycle_min / 60.0
+                current_max_capacity = (self.state.max_capacity_cool if is_cool else self.state.max_capacity_heat) * cycle_duration_h
+
                 if self._learn_indoor(target_diff, temp_progress, self._last_cycle_power_efficiency, is_cool, current_max_capacity):
                     self.state.last_learning_status = f"learned_indoor_{'cool' if is_cool else 'heat'}"
                     learned = True
@@ -783,8 +776,64 @@ class AutoTpiManager:
             
         # Check for failures
         self._detect_failures(self._current_temp_in)
-        
+
+        # Max Capacity detection (Run always, even if learning is disabled)
+        await self._detect_max_capacity(on_time_minutes, self._current_temp_in)
+
         await self.async_save_data()
+
+    async def _detect_max_capacity(self, on_time_minutes: float, current_temp_in: float):
+        """Detect max capacity if we were at 100%."""
+        if self.state.last_power < 0.99:
+            return
+
+        is_heat = self.state.last_state == 'heat'
+        is_cool = self.state.last_state == 'cool'
+
+        if not (is_heat or is_cool):
+            return
+
+        # Calculate real temperature change per hour
+        # We use current_temp_in (end of cycle) - last_temp_in (start of cycle)
+        # Note: In cooling, temp should drop, so we take absolute diff or invert
+        temp_diff = current_temp_in - self.state.last_temp_in
+        if is_cool:
+            temp_diff = -temp_diff
+
+        if temp_diff <= 0.01:
+            return
+
+        # Convert to °C/hour
+        # If cycle is 10 min, we multiply by 6
+        cycle_duration_h = self._cycle_min / 60.0
+        if cycle_duration_h <= 0:
+            return
+
+        measured_capacity = temp_diff / cycle_duration_h
+
+        # EMA Smoothing (alpha 0.1)
+        alpha = 0.1
+        
+        if is_cool:
+            old_capacity = self.state.max_capacity_cool
+            if old_capacity == 0.0:
+                new_capacity = measured_capacity
+            else:
+                new_capacity = (old_capacity * (1.0 - alpha)) + (measured_capacity * alpha)
+            
+            self.state.max_capacity_cool = new_capacity
+            _LOGGER.info("%s - Auto TPI: New Max Cooling Capacity detected: %.3f °C/h (was: %.3f, measured: %.3f)",
+                         self._name, new_capacity, old_capacity, measured_capacity)
+        else:
+            old_capacity = self.state.max_capacity_heat
+            if old_capacity == 0.0:
+                new_capacity = measured_capacity
+            else:
+                new_capacity = (old_capacity * (1.0 - alpha)) + (measured_capacity * alpha)
+            
+            self.state.max_capacity_heat = new_capacity
+            _LOGGER.info("%s - Auto TPI: New Max Heating Capacity detected: %.3f °C/h (was: %.3f, measured: %.3f)",
+                         self._name, new_capacity, old_capacity, measured_capacity)
     
     def get_calculated_params(self) -> dict:
         return self._calculated_params
