@@ -225,6 +225,8 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
         self._max_capacity_heat_last_update: datetime | None = None
         self._max_capacity_cool_last_update: datetime | None = None
         self._cycle_start_temp: float | None = None
+        self._last_cycle_power_percent: float | None = None
+        self._last_cycle_is_cooling: bool = False
 
         self.post_init(entry_infos)
 
@@ -1533,15 +1535,27 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
 
     async def _on_tpi_cycle_start(self, params: dict[str, Any]):
         """Called by AutoTpiManager when a new cycle starts."""
-        # Store temperature for capacity detection at cycle start
+        # Call capacity detection with temperature change from LAST cycle
+        # We compare current temp (end of last cycle) with start of last cycle
+        if (
+            self._cycle_start_temp is not None
+            and self._cur_temp is not None
+            and self._last_cycle_power_percent is not None
+        ):
+            temp_change = self._cur_temp - self._cycle_start_temp
+            
+            # Use the power and mode of the cycle that just finished
+            self._update_max_capacity_if_needed(
+                self._last_cycle_power_percent,
+                temp_change,
+                self._last_cycle_is_cooling
+            )
+
+        # Store state for the NEW cycle starting now
         self._cycle_start_temp = self._cur_temp
-        
-        # Call capacity detection with temperature change from last cycle
-        if self._cycle_start_temp is not None and self._cur_temp is not None:
-            temp_change = self._cur_temp - self._cycle_start_temp  
-            is_cooling = (params.get("hvac_mode") == "cool")
-            power_pct = self.power_percent if self.power_percent is not None else 0.0
-            self._update_max_capacity_if_needed(power_pct, temp_change, is_cooling)
+        # params["on_percent"] is 0.0-1.0, we want percentage 0-100
+        self._last_cycle_power_percent = params.get("on_percent", 0) * 100
+        self._last_cycle_is_cooling = (params.get("hvac_mode") == "cool")
         
         await self._fire_cycle_start_callbacks(
             params.get("on_time_sec", 0),
@@ -1876,29 +1890,42 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
         """Update max_capacity if we detect a new peak at 100% power."""
         if power_percent < 99.0:
             return
-        
+
         temp_change_abs = abs(temp_change)
         if temp_change_abs <= 0.01:
             return
         
+        # EMA alpha for smoothing capacity updates
+        # 0.1 means we trust the new value at 10% and the history at 90%
+        alpha = 0.1
+
         if is_cooling:
-            if temp_change_abs > self._max_capacity_cool:
-                old_capacity = self._max_capacity_cool
-                self._max_capacity_cool = temp_change_abs
-                self._max_capacity_cool_last_update = self.now
-                _LOGGER.info(
-                    "%s - New Max Cooling Capacity: %.3f °C/cycle (was: %.3f)",
-                    self, self._max_capacity_cool, old_capacity
-                )
+            old_capacity = self._max_capacity_cool
+            if old_capacity == 0.0:
+                new_capacity = temp_change_abs
+            else:
+                new_capacity = (old_capacity * (1 - alpha)) + (temp_change_abs * alpha)
+            
+            self._max_capacity_cool = new_capacity
+            self._max_capacity_cool_last_update = self.now
+            _LOGGER.info(
+                "%s - New Max Cooling Capacity detected: %.3f °C/cycle (was: %.3f, measured: %.3f)",
+                self, self._max_capacity_cool, old_capacity, temp_change_abs
+            )
         else:
-            if temp_change_abs > self._max_capacity_heat:
-                old_capacity = self._max_capacity_heat
-                self._max_capacity_heat = temp_change_abs
-                self._max_capacity_heat_last_update = self.now
-                _LOGGER.info(
-                    "%s - New Max Heating Capacity: %.3f °C/cycle (was: %.3f)",
-                    self, self._max_capacity_heat, old_capacity
-                )
+            # For heating
+            old_capacity = self._max_capacity_heat
+            if old_capacity == 0.0:
+                new_capacity = temp_change_abs
+            else:
+                new_capacity = (old_capacity * (1 - alpha)) + (temp_change_abs * alpha)
+            
+            self._max_capacity_heat = new_capacity
+            self._max_capacity_heat_last_update = self.now
+            _LOGGER.info(
+                "%s - New Max Heating Capacity detected: %.3f °C/cycle (was: %.3f, measured: %.3f)",
+                self, self._max_capacity_heat, old_capacity, temp_change_abs
+            )
 
     def recalculate(self, force=False):
         """A utility function to force the calculation of a the algo and
@@ -1974,6 +2001,8 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
                     if self._auto_tpi_manager
                     else None
                 ),
+                "max_capacity_heat": self._max_capacity_heat,
+                "max_capacity_cool": self._max_capacity_cool,
             },
             "configuration": {
                 "ac_mode": self._ac_mode,
