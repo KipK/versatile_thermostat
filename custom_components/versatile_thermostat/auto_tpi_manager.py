@@ -803,6 +803,12 @@ class AutoTpiManager:
             _LOGGER.info("%s - Auto TPI: Max Capacity check skipped - Not in heat or cool mode (%s)", self._name, self.state.last_state)
             return
 
+        # Ignore heating capacity detection if heater was cold
+        if is_heat and self.state.current_cycle_cold_factor > 0.2:
+            _LOGGER.info("%s - Auto TPI: Max Capacity check skipped - Heater was cold (factor %.2f > 0.2)",
+                         self._name, self.state.current_cycle_cold_factor)
+            return
+
         # Calculate real temperature change per hour
         # We use current_temp_in (end of cycle) - last_temp_in (start of cycle)
         # Note: In cooling, temp should drop, so we take absolute diff or invert
@@ -825,7 +831,7 @@ class AutoTpiManager:
         measured_capacity = temp_diff / cycle_duration_h
 
         # EMA Smoothing (alpha 0.1)
-        alpha = 0.1
+        alpha = 0.3
         
         if is_cool:
             old_capacity = self.state.max_capacity_cool
