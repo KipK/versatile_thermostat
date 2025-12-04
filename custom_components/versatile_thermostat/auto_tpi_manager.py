@@ -98,7 +98,8 @@ class AutoTpiManager:
                  coef_int: float = 0.6, coef_ext: float = 0.04,
                  heater_heating_time: int = 0, heater_cooling_time: int = 0,
                  calculation_method: str = "ema", ema_alpha: float = 0.2,
-                 avg_initial_weight: int = 1, max_coef_int: float = 0.6):
+                 avg_initial_weight: int = 1, max_coef_int: float = 0.6,
+                 heating_rate: float = 0.1):
         self._hass = hass
         self._unique_id = unique_id
         self._name = name
@@ -112,6 +113,7 @@ class AutoTpiManager:
         self._ema_alpha = ema_alpha
         self._avg_initial_weight = avg_initial_weight
         self._max_coef_int = max_coef_int
+        self._heating_rate = heating_rate
 
         self._storage_path = hass.config.path(
             f".storage/versatile_thermostat_{unique_id}_auto_tpi_v2.json"
@@ -433,7 +435,9 @@ class AutoTpiManager:
         # Adjust theoretical delta by the efficiency of the power delivered
         # If efficiency was 50% (due to rampup time), we expect only 50% of the result.
         # So we compare real progress against (theoretical * efficiency)
-        adjusted_theoretical = delta_theoretical * efficiency
+        # We also apply the heating_rate: we don't aim to correct the full error in one cycle
+        # but only a fraction of it (e.g. 10%) to ensure stability and avoid saturation.
+        adjusted_theoretical = delta_theoretical * efficiency * self._heating_rate
         
         if adjusted_theoretical <= 0:
              _LOGGER.warning("%s - Auto TPI: Cannot learn indoor - adjusted_theoretical <= 0 (eff=%.2f)",
