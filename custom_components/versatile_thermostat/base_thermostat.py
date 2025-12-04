@@ -1663,8 +1663,8 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
                             self.vtherm_hvac_mode or VThermHvacMode_OFF,
                         )
                         # Update last_power in AutoTpi to reflect the actual power we are going to use
-                        if self.power_percent is not None:
-                             self._auto_tpi_manager.state.last_power = self.power_percent
+                        if self.on_percent is not None:
+                             self._auto_tpi_manager.state.last_power = self.on_percent
                              await self._auto_tpi_manager.async_save_data()
 
                 else:

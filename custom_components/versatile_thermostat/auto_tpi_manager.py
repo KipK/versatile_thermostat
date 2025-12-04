@@ -752,8 +752,12 @@ class AutoTpiManager:
             _LOGGER.debug("%s - Auto TPI: Power Efficiency calc: on_time=%.1f min, heating_time=%.1f, cold_factor=%.2f, eff_heating_time=%.1f, eff=%.2f",
                           self._name, on_time_minutes, self._heater_heating_time, self.state.current_cycle_cold_factor, effective_heating_time, self._last_cycle_power_efficiency)
         
-        _LOGGER.info("%s - Auto TPI: Cycle #%d completed after %.1f minutes (efficiency: %.2f)",
-                    self._name, self.state.total_cycles, elapsed_minutes, self._last_cycle_power_efficiency)
+        if self.learning_active:
+            _LOGGER.info("%s - Auto TPI: Cycle #%d completed after %.1f minutes (efficiency: %.2f)",
+                        self._name, self.state.total_cycles, elapsed_minutes, self._last_cycle_power_efficiency)
+        else:
+            _LOGGER.debug("%s - Auto TPI: Cycle #%d completed after %.1f minutes (efficiency: %.2f)",
+                        self._name, self.state.total_cycles, elapsed_minutes, self._last_cycle_power_efficiency)
         
         # Attempt learning
         # We also check if the cycle was significant enough (on_time > effective_heating_time)
@@ -778,19 +782,25 @@ class AutoTpiManager:
         self._detect_failures(self._current_temp_in)
 
         # Max Capacity detection (Run always, even if learning is disabled)
+        _LOGGER.info("%s - Auto TPI: Invoking Max Capacity detection", self._name)
         await self._detect_max_capacity(on_time_minutes, self._current_temp_in)
 
         await self.async_save_data()
 
     async def _detect_max_capacity(self, on_time_minutes: float, current_temp_in: float):
         """Detect max capacity if we were at 100%."""
+        _LOGGER.info("%s - Auto TPI: Checking Max Capacity. last_power=%.3f, last_state=%s, current_temp_in=%.2f, last_temp_in=%.2f",
+                     self._name, self.state.last_power, self.state.last_state, current_temp_in, self.state.last_temp_in)
+
         if self.state.last_power < 0.99:
+            _LOGGER.info("%s - Auto TPI: Max Capacity check skipped - Power < 0.99 (%.3f)", self._name, self.state.last_power)
             return
 
         is_heat = self.state.last_state == 'heat'
         is_cool = self.state.last_state == 'cool'
 
         if not (is_heat or is_cool):
+            _LOGGER.info("%s - Auto TPI: Max Capacity check skipped - Not in heat or cool mode (%s)", self._name, self.state.last_state)
             return
 
         # Calculate real temperature change per hour
@@ -799,8 +809,11 @@ class AutoTpiManager:
         temp_diff = current_temp_in - self.state.last_temp_in
         if is_cool:
             temp_diff = -temp_diff
+        
+        _LOGGER.info("%s - Auto TPI: Max Capacity Check - Temp diff: %.3f (is_cool=%s)", self._name, temp_diff, is_cool)
 
         if temp_diff <= 0.01:
+            _LOGGER.info("%s - Auto TPI: Max Capacity check skipped - Temp diff too small (%.3f <= 0.01)", self._name, temp_diff)
             return
 
         # Convert to °C/hour
