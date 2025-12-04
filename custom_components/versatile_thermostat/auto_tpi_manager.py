@@ -32,6 +32,7 @@ class AutoTpiState:
     coeff_outdoor_heat: float = 0.01
     coeff_indoor_autolearn: int = 1  # Counter
     coeff_outdoor_autolearn: int = 0
+    max_capacity: float = 0.0 # Max detected capacity in deg/cycle
 
     # Learning coefficients for Cool
     coeff_indoor_cool: float = 0.1
@@ -325,8 +326,9 @@ class AutoTpiManager:
         """Get reason why learning is not happening."""
         if not self.state.autolearn_enabled:
             return "learning_disabled"
-        if not (0 < self.state.last_power < 100):
-            return f"power_out_of_range({self.state.last_power:.1f}%)"
+        # We allow learning even at 100% power to detect max capacity
+        # if not (0 < self.state.last_power < 100):
+        #    return f"power_out_of_range({self.state.last_power:.1f}%)"
         if self.state.consecutive_failures >= 3:
             return f"too_many_failures({self.state.consecutive_failures})"
         return "unknown"
@@ -381,11 +383,39 @@ class AutoTpiManager:
 
         learned = False
         
+        # 0. Max Capacity Detection (if power near 100%)
+        # If we are at full power, the current rise IS the physical limit (capacity) of the system.
+        # We store it to avoid asking for more than this in future cycles.
+        if self.state.last_power >= 0.99 and temp_progress > 0:
+             # Calculate raw rise without efficiency adjustment (we want the physical max)
+             # But we need to use the same metric as real_rise in _learn_indoor
+             if is_cool:
+                 current_max_rise = self.state.last_temp_in - self.state.last_on_temp_in
+             else:
+                 current_max_rise = self.state.last_on_temp_in - self.state.last_temp_in
+                 
+             if current_max_rise > 0.01:
+                 # Update max_capacity (use a slow moving average or max? Max is safer to avoid underestimation)
+                 # But we also want to adapt if capacity drops (e.g. lower boiler temp).
+                 # Let's use a max-hold with slow decay or just simple update if higher.
+                 if current_max_rise > self.state.max_capacity:
+                     self.state.max_capacity = current_max_rise
+                     _LOGGER.info("%s - Auto TPI: New Max Capacity detected: %.3f deg/cycle", self._name, self.state.max_capacity)
+                 # Optional: Logic to decrease max_capacity if we are consistently lower at 100%?
+                 # For now, let's keep it simple: we learn the "observed max".
+
         # Priority 1: Indoor Coefficient
-        if temp_progress > 0 and target_diff > 0:
-            if self._learn_indoor(target_diff, temp_progress, self._last_cycle_power_efficiency, is_cool):
-                self.state.last_learning_status = f"learned_indoor_{'cool' if is_cool else 'heat'}"
-                learned = True
+        # We only learn coefficient if power is not saturated (0 < power < 100)
+        # OR if we have overshoot (which allows reducing coeff even if saturated previously)
+        # But here we stick to standard range for coeff learning to avoid windup at 100%.
+        if 0 < self.state.last_power < 100:
+            if temp_progress > 0 and target_diff > 0:
+                if self._learn_indoor(target_diff, temp_progress, self._last_cycle_power_efficiency, is_cool):
+                    self.state.last_learning_status = f"learned_indoor_{'cool' if is_cool else 'heat'}"
+                    learned = True
+        else:
+             _LOGGER.debug("%s - Auto TPI: Skipping indoor coeff learning because power is saturated (%.1f%%)",
+                           self._name, self.state.last_power * 100)
             
         # Priority 2: Outdoor Coefficient
         # Fallback if Priority 1 failed (e.g., real_rise too small) or wasn't applicable
@@ -439,6 +469,15 @@ class AutoTpiManager:
         # but only a fraction of it (e.g. 10%) to ensure stability and avoid saturation.
         adjusted_theoretical = delta_theoretical * efficiency * self._heating_rate
         
+        # Clamp to Max Capacity if known
+        # If the system can physically only rise by 0.2°C/cycle, asking for 0.5°C will just windup the gain.
+        if self.state.max_capacity > 0:
+            original_target = adjusted_theoretical
+            adjusted_theoretical = min(adjusted_theoretical, self.state.max_capacity)
+            if adjusted_theoretical < original_target:
+                 _LOGGER.debug("%s - Auto TPI: Target rise clamped from %.3f to %.3f (Max Capacity)",
+                               self._name, original_target, adjusted_theoretical)
+
         if adjusted_theoretical <= 0:
              _LOGGER.warning("%s - Auto TPI: Cannot learn indoor - adjusted_theoretical <= 0 (eff=%.2f)",
                              self._name, efficiency)
