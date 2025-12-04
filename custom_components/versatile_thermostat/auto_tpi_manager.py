@@ -135,6 +135,7 @@ class AutoTpiManager:
         self._current_hvac_mode: str = 'heat' # 'heat' or 'cool' (or 'off' etc)
         self._last_cycle_power_efficiency: float = 1.0
         self._current_cycle_params: dict = None
+        self._save_lock = asyncio.Lock()
 
         self._timer_remove_callback: Callable[[], None] | None = None
         self._timer_capture_remove_callback: Callable[[], None] | None = None
@@ -146,10 +147,13 @@ class AutoTpiManager:
 
     async def async_save_data(self):
         """Save data."""
-        await self._hass.async_add_executor_job(self._save_data_sync)
+        async with self._save_lock:
+            _LOGGER.debug("%s - Auto TPI: requesting save data", self._name)
+            await self._hass.async_add_executor_job(self._save_data_sync)
 
     def _save_data_sync(self):
         """Sync save."""
+        _LOGGER.debug("%s - Auto TPI: starting sync save", self._name)
         tmp_path = f"{self._storage_path}.tmp"
         try:
             # Helper for datetime serialization
@@ -169,6 +173,7 @@ class AutoTpiManager:
             
             # Atomic replace
             os.replace(tmp_path, self._storage_path)
+            _LOGGER.debug("%s - Auto TPI: sync save completed successfully", self._name)
 
         except Exception as e:
             _LOGGER.error("%s - Auto TPI: Save error: %s", self._name, e)
