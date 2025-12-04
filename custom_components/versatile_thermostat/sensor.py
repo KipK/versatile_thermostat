@@ -329,6 +329,8 @@ class AutoTpiSensor(VersatileThermostatBaseEntity, SensorEntity):
             "thermal_time_constant_hours": manager.time_constant,  # Building's thermal time constant τ
             "model_confidence": manager.confidence,  # Model confidence (R² or percentage)
             "last_learning_status": manager.state.last_learning_status,  # Reason for last learning outcome
+            "max_capacity_heat": manager.state.max_capacity_heat,
+            "max_capacity_cool": manager.state.max_capacity_cool,
         }
         
         # Add calculated TPI coefficients
