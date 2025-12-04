@@ -396,9 +396,31 @@ class AutoTpiManager:
         if 0 < self.state.last_power < 0.99:
             if temp_progress > 0 and target_diff > 0:
                 # Pass the appropriate max capacity based on mode
-                # Capacity is stored in °C/h, we need °C/cycle for learning check
-                cycle_duration_h = self._cycle_min / 60.0
-                current_max_capacity = (self.state.max_capacity_cool if is_cool else self.state.max_capacity_heat) * cycle_duration_h
+                # Capacity stored is Reference Capacity (Adiabatic).
+                # We need Effective Capacity for current conditions: Eff = Ref * (1 - Loss)
+                
+                ref_capacity = self.state.max_capacity_cool if is_cool else self.state.max_capacity_heat
+                current_max_capacity = 0.0
+                
+                if ref_capacity > 0:
+                    if is_cool:
+                        k_ext = self.state.coeff_outdoor_cool
+                        delta_t = current_temp_out - current_temp_in
+                    else:
+                        k_ext = self.state.coeff_outdoor_heat
+                        delta_t = current_temp_in - current_temp_out
+                        
+                    loss_factor = k_ext * max(0.0, delta_t)
+                    loss_factor = min(loss_factor, 0.95) # Allow effective capacity to drop low but not negative
+                    
+                    effective_capacity_h = ref_capacity * (1.0 - loss_factor)
+                    
+                    # Convert to °C/cycle
+                    cycle_duration_h = self._cycle_min / 60.0
+                    current_max_capacity = effective_capacity_h * cycle_duration_h
+                    
+                    _LOGGER.debug("%s - Auto TPI: Est. Effective Capacity: Ref=%.3f, Loss=%.2f (dT=%.1f), Eff=%.3f/h",
+                                  self._name, ref_capacity, loss_factor, delta_t, effective_capacity_h)
 
                 if self._learn_indoor(target_diff, temp_progress, self._last_cycle_power_efficiency, is_cool, current_max_capacity):
                     self.state.last_learning_status = f"learned_indoor_{'cool' if is_cool else 'heat'}"
@@ -830,29 +852,49 @@ class AutoTpiManager:
 
         measured_capacity = temp_diff / cycle_duration_h
 
-        # EMA Smoothing (alpha 0.1)
+        # Normalize to Reference Capacity (Adiabatic)
+        # Power_Net = Power_Input (100%) - Power_Loss
+        # Power_Loss = K_ext * (Tin - Tout)
+        # Capacity_Ref = Capacity_Meas / (1 - Loss)
+        if is_cool:
+            k_ext = self.state.coeff_outdoor_cool
+            delta_t_loss = self.state.last_temp_out - self.state.last_temp_in
+        else:
+            k_ext = self.state.coeff_outdoor_heat
+            delta_t_loss = self.state.last_temp_in - self.state.last_temp_out
+
+        loss_factor = k_ext * max(0.0, delta_t_loss)
+        # Safety clamp: avoid division by zero or extreme inflation
+        loss_factor = min(loss_factor, 0.8)
+
+        measured_ref_capacity = measured_capacity / (1.0 - loss_factor)
+
+        _LOGGER.debug("%s - Auto TPI: Capacity Normalization: Meas=%.3f, K_ext=%.3f, dT=%.1f, Loss=%.2f, Ref=%.3f",
+                      self._name, measured_capacity, k_ext, delta_t_loss, loss_factor, measured_ref_capacity)
+
+        # EMA Smoothing (alpha 0.3)
         alpha = 0.3
-        
+
         if is_cool:
             old_capacity = self.state.max_capacity_cool
             if old_capacity == 0.0:
-                new_capacity = measured_capacity
+                new_capacity = measured_ref_capacity
             else:
-                new_capacity = (old_capacity * (1.0 - alpha)) + (measured_capacity * alpha)
-            
+                new_capacity = (old_capacity * (1.0 - alpha)) + (measured_ref_capacity * alpha)
+
             self.state.max_capacity_cool = new_capacity
-            _LOGGER.info("%s - Auto TPI: New Max Cooling Capacity detected: %.3f °C/h (was: %.3f, measured: %.3f)",
-                         self._name, new_capacity, old_capacity, measured_capacity)
+            _LOGGER.info("%s - Auto TPI: New Max Cooling Ref Capacity detected: %.3f °C/h (was: %.3f, measured_ref: %.3f)",
+                         self._name, new_capacity, old_capacity, measured_ref_capacity)
         else:
             old_capacity = self.state.max_capacity_heat
             if old_capacity == 0.0:
-                new_capacity = measured_capacity
+                new_capacity = measured_ref_capacity
             else:
-                new_capacity = (old_capacity * (1.0 - alpha)) + (measured_capacity * alpha)
-            
+                new_capacity = (old_capacity * (1.0 - alpha)) + (measured_ref_capacity * alpha)
+
             self.state.max_capacity_heat = new_capacity
-            _LOGGER.info("%s - Auto TPI: New Max Heating Capacity detected: %.3f °C/h (was: %.3f, measured: %.3f)",
-                         self._name, new_capacity, old_capacity, measured_capacity)
+            _LOGGER.info("%s - Auto TPI: New Max Heating Ref Capacity detected: %.3f °C/h (was: %.3f, measured_ref: %.3f)",
+                         self._name, new_capacity, old_capacity, measured_ref_capacity)
     
     def get_calculated_params(self) -> dict:
         return self._calculated_params
