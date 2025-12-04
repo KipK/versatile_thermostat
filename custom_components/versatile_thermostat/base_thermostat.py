@@ -222,10 +222,8 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
         # Max capacity tracking (physical heating/cooling speed limits)
         self._max_capacity_heat: float = 0.0
         self._max_capacity_cool: float = 0.0
-        self._auto_max_capacity: bool = True
         self._max_capacity_heat_last_update: datetime | None = None
         self._max_capacity_cool_last_update: datetime | None = None
-        self._cooling_rate: float = 0.1
         self._cycle_start_temp: float | None = None
 
         self.post_init(entry_infos)
@@ -1335,11 +1333,6 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
         return self._max_capacity_cool
 
     @property
-    def cooling_rate(self) -> float:
-        """Get the cooling rate for TPI algorithm."""
-        return self._cooling_rate
-
-    @property
     def vtherm_type(self) -> str | None:
         """Return the type of thermostat"""
         return None
@@ -1881,7 +1874,7 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
 
     def _update_max_capacity_if_needed(self, power_percent: float, temp_change: float, is_cooling: bool) -> None:
         """Update max_capacity if we detect a new peak at 100% power."""
-        if not self._auto_max_capacity or power_percent < 99.0:
+        if power_percent < 99.0:
             return
         
         temp_change_abs = abs(temp_change)
@@ -1995,8 +1988,6 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
                 "max_on_percent": self._max_on_percent,
                 "have_valve_regulation": self.have_valve_regulation,
                 "cycle_min": self._cycle_min,
-                "auto_max_capacity": self._auto_max_capacity,
-                "cooling_rate": self._cooling_rate,
             },
             "preset_temperatures": {
                 "frost_temp": self._presets.get(VThermPreset.FROST, 0),
