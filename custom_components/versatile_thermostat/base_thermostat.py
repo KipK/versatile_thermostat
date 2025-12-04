@@ -1661,6 +1661,10 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
 
         # Feed the Auto TPI manager (Before starting the cycle to apply new coeffs if any)
         if self._auto_tpi_manager:
+            # Convert stored °C/h back to °C/cycle for the TPI manager
+            capacity_heat_per_cycle = self._max_capacity_heat * (self._cycle_min / 60.0)
+            capacity_cool_per_cycle = self._max_capacity_cool * (self._cycle_min / 60.0)
+
             await self._auto_tpi_manager.update(
                 self._cur_temp,
                 self._cur_ext_temp,
@@ -1669,8 +1673,8 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
                 self.hvac_action,
                 str(self.vtherm_hvac_mode),
                 self.current_humidity,
-                max_capacity_heat=self._max_capacity_heat,
-                max_capacity_cool=self._max_capacity_cool,
+                max_capacity_heat=capacity_heat_per_cycle,
+                max_capacity_cool=capacity_cool_per_cycle,
             )
             
             # Check if we have new parameters
@@ -1895,6 +1899,9 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
         if temp_change_abs <= 0.01:
             return
         
+        # Convert measured change (per cycle) to per hour
+        measured_deg_per_h = temp_change_abs * (60.0 / self._cycle_min)
+
         # EMA alpha for smoothing capacity updates
         # 0.1 means we trust the new value at 10% and the history at 90%
         alpha = 0.1
@@ -1902,29 +1909,29 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
         if is_cooling:
             old_capacity = self._max_capacity_cool
             if old_capacity == 0.0:
-                new_capacity = temp_change_abs
+                new_capacity = measured_deg_per_h
             else:
-                new_capacity = (old_capacity * (1 - alpha)) + (temp_change_abs * alpha)
+                new_capacity = (old_capacity * (1 - alpha)) + (measured_deg_per_h * alpha)
             
             self._max_capacity_cool = new_capacity
             self._max_capacity_cool_last_update = self.now
             _LOGGER.info(
-                "%s - New Max Cooling Capacity detected: %.3f °C/cycle (was: %.3f, measured: %.3f)",
-                self, self._max_capacity_cool, old_capacity, temp_change_abs
+                "%s - New Max Cooling Capacity detected: %.3f °C/h (was: %.3f, measured: %.3f)",
+                self, self._max_capacity_cool, old_capacity, measured_deg_per_h
             )
         else:
             # For heating
             old_capacity = self._max_capacity_heat
             if old_capacity == 0.0:
-                new_capacity = temp_change_abs
+                new_capacity = measured_deg_per_h
             else:
-                new_capacity = (old_capacity * (1 - alpha)) + (temp_change_abs * alpha)
+                new_capacity = (old_capacity * (1 - alpha)) + (measured_deg_per_h * alpha)
             
             self._max_capacity_heat = new_capacity
             self._max_capacity_heat_last_update = self.now
             _LOGGER.info(
-                "%s - New Max Heating Capacity detected: %.3f °C/cycle (was: %.3f, measured: %.3f)",
-                self, self._max_capacity_heat, old_capacity, temp_change_abs
+                "%s - New Max Heating Capacity detected: %.3f °C/h (was: %.3f, measured: %.3f)",
+                self, self._max_capacity_heat, old_capacity, measured_deg_per_h
             )
 
     def recalculate(self, force=False):
