@@ -1310,20 +1310,6 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
             return None
 
     @property
-    def max_capacity_heat(self) -> float:
-        """Get the current max_capacity_heat value."""
-        if self._auto_tpi_manager:
-            return self._auto_tpi_manager.state.max_capacity_heat
-        return 0.0
-
-    @property
-    def max_capacity_cool(self) -> float:
-        """Get the current max_capacity_cool value."""
-        if self._auto_tpi_manager:
-            return self._auto_tpi_manager.state.max_capacity_cool
-        return 0.0
-
-    @property
     def vtherm_type(self) -> str | None:
         """Return the type of thermostat"""
         return None
@@ -1923,8 +1909,6 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
                     if self._auto_tpi_manager
                     else None
                 ),
-                "max_capacity_heat": self.max_capacity_heat,
-                "max_capacity_cool": self.max_capacity_cool,
             },
             "configuration": {
                 "ac_mode": self._ac_mode,
