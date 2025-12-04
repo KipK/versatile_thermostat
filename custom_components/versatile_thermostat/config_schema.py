@@ -458,5 +458,27 @@ STEP_AUTO_TPI_LEARNING_DATA_SCHEMA = vol.Schema(
                 min=0.0, max=1.0, step=0.01, mode=selector.NumberSelectorMode.BOX
             )
         ),
+        vol.Optional(
+            CONF_AUTO_TPI_COOLING_RATE, default=0.1
+        ): selector.NumberSelector(
+            selector.NumberSelectorConfig(
+                min=0.0, max=1.0, step=0.01, mode=selector.NumberSelectorMode.BOX
+            )
+        ),
+        vol.Required(CONF_AUTO_MAX_CAPACITY, default=True): cv.boolean,
+        vol.Optional(
+            CONF_MAX_CAPACITY_HEAT, default=0.0
+        ): selector.NumberSelector(
+            selector.NumberSelectorConfig(
+                min=0.0, max=10.0, step=0.01, mode=selector.NumberSelectorMode.BOX
+            )
+        ),
+        vol.Optional(
+            CONF_MAX_CAPACITY_COOL, default=0.0
+        ): selector.NumberSelector(
+            selector.NumberSelectorConfig(
+                min=0.0, max=10.0, step=0.01, mode=selector.NumberSelectorMode.BOX
+            )
+        ),
     }
 )

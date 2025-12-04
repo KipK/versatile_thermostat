@@ -219,6 +219,15 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
         self._tpi_threshold_low: float = 0
         self._tpi_threshold_high: float = 0
 
+        # Max capacity tracking (physical heating/cooling speed limits)
+        self._max_capacity_heat: float = 0.0
+        self._max_capacity_cool: float = 0.0
+        self._auto_max_capacity: bool = True
+        self._max_capacity_heat_last_update: datetime | None = None
+        self._max_capacity_cool_last_update: datetime | None = None
+        self._cooling_rate: float = 0.1
+        self._cycle_start_temp: float | None = None
+
         self.post_init(entry_infos)
 
     def register_manager(self, manager: BaseFeatureManager):
@@ -339,6 +348,16 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
         self._auto_tpi_enable_update_config = entry_infos.get(CONF_AUTO_TPI_ENABLE_UPDATE_CONFIG, False)
         _LOGGER.info("DEBUG: auto_tpi_enable_update_config: %s", self._auto_tpi_enable_update_config)
 
+        # Initialize max_capacity settings
+        self._auto_max_capacity = entry_infos.get(CONF_AUTO_MAX_CAPACITY, True)
+        
+        if not self._auto_max_capacity:
+            # User provided manual values
+            self._max_capacity_heat = entry_infos.get(CONF_MAX_CAPACITY_HEAT, 0.0)
+            self._max_capacity_cool = entry_infos.get(CONF_MAX_CAPACITY_COOL, 0.0)
+            _LOGGER.info("%s - Using manual max capacities: heat=%.3f, cool=%.3f", 
+                        self, self._max_capacity_heat, self._max_capacity_cool)
+
         self.set_hvac_list()
 
         self._unit = self._hass.config.units.temperature_unit
@@ -434,6 +453,7 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
         avg_initial_weight = entry_infos.get(CONF_AUTO_TPI_AVG_INITIAL_WEIGHT, 1)
         max_coef_int = entry_infos.get(CONF_AUTO_TPI_MAX_COEF_INT, 0.6)
         heating_rate = entry_infos.get(CONF_AUTO_TPI_HEATING_RATE, 0.1)
+        cooling_rate = entry_infos.get(CONF_AUTO_TPI_COOLING_RATE, 0.1)
 
         _LOGGER.info("%s - DEBUG: TPI coefficients from entry_infos: int=%.3f, ext=%.3f",
                      self, self._tpi_coef_int, self._tpi_coef_ext)
@@ -453,6 +473,7 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
             avg_initial_weight=avg_initial_weight,
             max_coef_int=max_coef_int,
             heating_rate=heating_rate,
+            cooling_rate=cooling_rate,
         )
         _LOGGER.info("%s - DEBUG: AutoTpiManager initialized with defaults: int=%.3f, ext=%.3f",
                      self, self._auto_tpi_manager._default_coef_int, self._auto_tpi_manager._default_coef_ext)
@@ -713,10 +734,15 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
         """Initialize all underlyings. Should be overridden if necessary"""
 
     def restore_specific_previous_state(self, old_state: State):
-        """Should be overridden in each specific thermostat
-        if a specific previous state or attribute should be
-        restored
-        """
+        """Restore max_capacity specific state attributes"""
+        # Restore max_capacity values if they exist
+        if max_capacity_heat := old_state.attributes.get("max_capacity_heat"):
+            self._max_capacity_heat = float(max_capacity_heat)
+            _LOGGER.debug("%s - Restored max_capacity_heat: %.3f", self, self._max_capacity_heat)
+        
+        if max_capacity_cool := old_state.attributes.get("max_capacity_cool"):
+            self._max_capacity_cool = float(max_capacity_cool)
+            _LOGGER.debug("%s - Restored max_capacity_cool: %.3f", self, self._max_capacity_cool)
 
     async def get_my_previous_state(self):
         """Try to get my previous state"""
@@ -1307,6 +1333,21 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
             return None
 
     @property
+    def max_capacity_heat(self) -> float:
+        """Get the current max_capacity_heat value."""
+        return self._max_capacity_heat
+
+    @property
+    def max_capacity_cool(self) -> float:
+        """Get the current max_capacity_cool value."""
+        return self._max_capacity_cool
+
+    @property
+    def cooling_rate(self) -> float:
+        """Get the cooling rate for TPI algorithm."""
+        return self._cooling_rate
+
+    @property
     def vtherm_type(self) -> str | None:
         """Return the type of thermostat"""
         return None
@@ -1507,6 +1548,16 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
 
     async def _on_tpi_cycle_start(self, params: dict[str, Any]):
         """Called by AutoTpiManager when a new cycle starts."""
+        # Store temperature for capacity detection at cycle start
+        self._cycle_start_temp = self._cur_temp
+        
+        # Call capacity detection with temperature change from last cycle
+        if self._cycle_start_temp is not None and self._cur_temp is not None:
+            temp_change = self._cur_temp - self._cycle_start_temp  
+            is_cooling = (params.get("hvac_mode") == "cool")
+            power_pct = self.power_percent if self.power_percent is not None else 0.0
+            self._update_max_capacity_if_needed(power_pct, temp_change, is_cooling)
+        
         await self._fire_cycle_start_callbacks(
             params.get("on_time_sec", 0),
             params.get("off_time_sec", 0),
@@ -1619,6 +1670,8 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
                 self.hvac_action,
                 str(self.vtherm_hvac_mode),
                 self.current_humidity,
+                max_capacity_heat=self._max_capacity_heat,
+                max_capacity_cool=self._max_capacity_cool,
             )
             
             # Check if we have new parameters
@@ -1834,6 +1887,34 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
         await self.update_states()
         return
 
+    def _update_max_capacity_if_needed(self, power_percent: float, temp_change: float, is_cooling: bool) -> None:
+        """Update max_capacity if we detect a new peak at 100% power."""
+        if not self._auto_max_capacity or power_percent < 99.0:
+            return
+        
+        temp_change_abs = abs(temp_change)
+        if temp_change_abs <= 0.01:
+            return
+        
+        if is_cooling:
+            if temp_change_abs > self._max_capacity_cool:
+                old_capacity = self._max_capacity_cool
+                self._max_capacity_cool = temp_change_abs
+                self._max_capacity_cool_last_update = self.now
+                _LOGGER.info(
+                    "%s - New Max Cooling Capacity: %.3f °C/cycle (was: %.3f)",
+                    self, self._max_capacity_cool, old_capacity
+                )
+        else:
+            if temp_change_abs > self._max_capacity_heat:
+                old_capacity = self._max_capacity_heat
+                self._max_capacity_heat = temp_change_abs
+                self._max_capacity_heat_last_update = self.now
+                _LOGGER.info(
+                    "%s - New Max Heating Capacity: %.3f °C/cycle (was: %.3f)",
+                    self, self._max_capacity_heat, old_capacity
+                )
+
     def recalculate(self, force=False):
         """A utility function to force the calculation of a the algo and
         update the custom attributes and write the state.
@@ -1922,6 +2003,8 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
                 "max_on_percent": self._max_on_percent,
                 "have_valve_regulation": self.have_valve_regulation,
                 "cycle_min": self._cycle_min,
+                "auto_max_capacity": self._auto_max_capacity,
+                "cooling_rate": self._cooling_rate,
             },
             "preset_temperatures": {
                 "frost_temp": self._presets.get(VThermPreset.FROST, 0),

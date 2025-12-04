@@ -163,6 +163,10 @@ CONF_AUTO_TPI_EMA_ALPHA = "auto_tpi_ema_alpha"
 CONF_AUTO_TPI_AVG_INITIAL_WEIGHT = "auto_tpi_avg_initial_weight"
 CONF_AUTO_TPI_MAX_COEF_INT = "auto_tpi_max_coef_int"
 CONF_AUTO_TPI_HEATING_RATE = "auto_tpi_heating_rate"
+CONF_AUTO_MAX_CAPACITY = "auto_max_capacity"
+CONF_MAX_CAPACITY_HEAT = "max_capacity_heat"
+CONF_MAX_CAPACITY_COOL = "max_capacity_cool"
+CONF_AUTO_TPI_COOLING_RATE = "auto_tpi_cooling_rate"
 
 
 # Global params into configuration.yaml
@@ -360,6 +364,10 @@ ALL_CONF = (
         CONF_AUTO_TPI_AVG_INITIAL_WEIGHT,
         CONF_AUTO_TPI_MAX_COEF_INT,
         CONF_AUTO_TPI_HEATING_RATE,
+        CONF_AUTO_MAX_CAPACITY,
+        CONF_MAX_CAPACITY_HEAT,
+        CONF_MAX_CAPACITY_COOL,
+        CONF_AUTO_TPI_COOLING_RATE,
     ]
     + CONF_PRESETS_VALUES
     + CONF_PRESETS_AWAY_VALUES
