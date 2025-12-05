@@ -284,7 +284,8 @@
           "auto_tpi_max_coef_int": "Plafond Coefficient Intérieur",
           "auto_tpi_heating_rate": "Puissance de chauffe (°C/h)",
           "auto_tpi_cooling_rate": "Puissance de refroidissement (°C/h)",
-          "use_capacity_as_rate": "Utiliser la capacité auto-détectée"
+          "use_capacity_as_rate": "Utiliser la capacité auto-détectée",
+          "auto_tpi_ema_decay_rate": "Taux de décroissance EMA (k)"
         },
         "data_description": {
           "heater_heating_time": "Temps en mn après lequel le radiateur est considéré comme chaud.",
@@ -295,7 +296,8 @@
           "auto_tpi_max_coef_int": "Valeur maximale autorisée pour le coefficient intérieur (Kp). Évite les oscillations trop fortes.",
           "auto_tpi_heating_rate": "Capacité de chauffe en °C/h. Utilisé si la capacité auto-détectée est désactivée ou indisponible.",
           "auto_tpi_cooling_rate": "Capacité de refroidissement en °C/h. Utilisé si la capacité auto-détectée est désactivée ou indisponible.",
-          "use_capacity_as_rate": "Utiliser la capacité de chauffe détectée automatiquement (si disponible) au lieu des taux manuels."
+          "use_capacity_as_rate": "Utiliser la capacité de chauffe détectée automatiquement (si disponible) au lieu des taux manuels.",
+          "auto_tpi_ema_decay_rate": "Contrôle la décroissance de l'apprentissage EMA au fil du temps. Formule : alpha = alpha_initial / (1 + k * n). Recommandé : 0.1."
         }
       }
     },

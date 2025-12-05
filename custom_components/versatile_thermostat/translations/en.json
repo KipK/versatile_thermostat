@@ -284,7 +284,8 @@
           "auto_tpi_max_coef_int": "Indoor Coefficient Cap",
           "auto_tpi_heating_rate": "Heating rate (°C/h)",
           "auto_tpi_cooling_rate": "Cooling rate (°C/h)",
-          "use_capacity_as_rate": "Use auto-detected capacity"
+          "use_capacity_as_rate": "Use auto-detected capacity",
+          "auto_tpi_ema_decay_rate": "EMA decay rate (k)"
         },
         "data_description": {
           "heater_heating_time": "Time in minutes after which the heater is considered hot.",
@@ -295,7 +296,8 @@
           "auto_tpi_max_coef_int": "Maximum value allowed for the indoor coefficient (Kp). Prevents excessive oscillations.",
           "auto_tpi_heating_rate": "Heating capacity in °C/h. Used if auto-detected capacity is disabled or not available.",
           "auto_tpi_cooling_rate": "Cooling capacity in °C/h. Used if auto-detected capacity is disabled or not available.",
-          "use_capacity_as_rate": "Use the automatically detected heating capacity (if available) instead of manual rates."
+          "use_capacity_as_rate": "Use the automatically detected heating capacity (if available) instead of manual rates.",
+          "auto_tpi_ema_decay_rate": "Controls the decay of EMA learning over time. Formula: alpha = alpha_initial / (1 + k * n). Recommended: 0.1."
         }
       }
     },

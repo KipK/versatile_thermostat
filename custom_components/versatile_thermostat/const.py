@@ -165,6 +165,7 @@ CONF_AUTO_TPI_MAX_COEF_INT = "auto_tpi_max_coef_int"
 CONF_AUTO_TPI_HEATING_RATE = "auto_tpi_heating_rate"
 CONF_AUTO_TPI_COOLING_RATE = "auto_tpi_cooling_rate"
 CONF_USE_CAPACITY_AS_RATE = "use_capacity_as_rate"
+CONF_AUTO_TPI_EMA_DECAY_RATE = "auto_tpi_ema_decay_rate"
 
 
 # Global params into configuration.yaml
@@ -363,6 +364,7 @@ ALL_CONF = (
         CONF_AUTO_TPI_MAX_COEF_INT,
         CONF_AUTO_TPI_HEATING_RATE,
         CONF_AUTO_TPI_COOLING_RATE,
+        CONF_AUTO_TPI_EMA_DECAY_RATE,
         CONF_USE_CAPACITY_AS_RATE,
     ]
     + CONF_PRESETS_VALUES

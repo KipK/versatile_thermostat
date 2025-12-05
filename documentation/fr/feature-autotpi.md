@@ -109,3 +109,46 @@ data:
 ```
 
 Ou via l'interface des outils de développement.
+## Méthode de calcul EMA Adaptatif
+
+La méthode EMA (Exponential Moving Average) utilise un coefficient **alpha** qui détermine 
+l'influence de chaque nouveau cycle sur les coefficients appris.
+
+### Comportement
+
+Au fil des cycles, **alpha décroît progressivement** pour stabiliser l'apprentissage :
+
+| Cycles | Alpha (avec α₀=0.2, k=0.1) | Influence du nouveau cycle |
+|--------|----------------------------|---------------------------|
+| 0 | 0.20 | 20% |
+| 10 | 0.10 | 10% |
+| 50 | 0.033 | 3.3% |
+| 100 | 0.018 | 1.8% |
+
+### Paramètres
+
+| Paramètre | Description | Défaut |
+|-----------|-------------|--------|
+| **Alpha initial** (`ema_alpha`) | Influence au démarrage | 0.2 (20%) |
+| **Taux de décroissance** (`ema_decay_rate`) | Vitesse de stabilisation | 0.1 |
+
+### Formule
+
+```
+alpha(n) = alpha_initial / (1 + decay_rate × n)
+```
+
+Où `n` est le nombre de cycles d'apprentissage.
+
+### Cas particuliers
+
+- **decay_rate = 0** : Alpha reste fixe (comportement EMA classique)
+- **decay_rate = 1, alpha = 1** : Équivalent à la méthode "Moyenne Pondérée"
+
+### Recommandations
+
+| Situation | Configuration suggérée |
+|-----------|----------------------|
+| Démarrage, coefficients inconnus | `alpha=0.3`, `decay=0.1` |
+| Affinement, coefficients déjà bons | `alpha=0.1`, `decay=0.05` |
+| Apprentissage continu permanent | `alpha=0.2`, `decay=0` (fixe) |

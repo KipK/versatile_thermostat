@@ -442,6 +442,13 @@ STEP_AUTO_TPI_LEARNING_DATA_SCHEMA = vol.Schema(
             )
         ),
         vol.Optional(
+            CONF_AUTO_TPI_EMA_DECAY_RATE, default=0.1
+        ): selector.NumberSelector(
+            selector.NumberSelectorConfig(
+                min=0.0, max=1.0, step=0.01, mode=selector.NumberSelectorMode.BOX
+            )
+        ),
+        vol.Optional(
             CONF_AUTO_TPI_AVG_INITIAL_WEIGHT, default=1
         ): cv.positive_int,
         vol.Optional(

@@ -104,7 +104,7 @@ class AutoTpiManager:
                  calculation_method: str = "ema", ema_alpha: float = 0.2,
                  avg_initial_weight: int = 1, max_coef_int: float = 0.6,
                  heating_rate: float = 1.0, cooling_rate: float = 1.0,
-                 use_capacity_as_rate: bool = False):
+                 use_capacity_as_rate: bool = False, ema_decay_rate: float = 0.1):
         self._hass = hass
         self._unique_id = unique_id
         self._name = name
@@ -121,6 +121,7 @@ class AutoTpiManager:
         self._heating_rate = heating_rate
         self._cooling_rate = cooling_rate
         self._use_capacity_as_rate = use_capacity_as_rate
+        self._ema_decay_rate = ema_decay_rate
 
         self._storage_path = hass.config.path(
             f".storage/versatile_thermostat_{unique_id}_auto_tpi_v2.json"
@@ -297,6 +298,12 @@ class AutoTpiManager:
             
         self._calculated_params = params
         return params
+
+    def _get_adaptive_alpha(self, cycle_count: int) -> float:
+        """Calculate adaptive alpha for EMA."""
+        # α(n) = α₀ / (1 + k·n)
+        alpha = self._ema_alpha / (1 + self._ema_decay_rate * cycle_count)
+        return alpha
 
     def _should_learn(self) -> bool:
         """Check if learning should be performed."""
@@ -562,10 +569,10 @@ class AutoTpiManager:
         else: # EMA
             # EMA Smoothing (20% weight by default)
             # new_avg = (old_avg * (1 - alpha)) + (new_sample * alpha)
-            alpha = self._ema_alpha
+            alpha = self._get_adaptive_alpha(count)
             avg_coeff = (old_coeff * (1.0 - alpha)) + (coeff_new * alpha)
-            _LOGGER.debug("%s - Auto TPI: EMA: old=%.3f, new=%.3f, alpha=%.2f, result=%.3f",
-                          self._name, old_coeff, coeff_new, alpha, avg_coeff)
+            _LOGGER.debug("%s - Auto TPI: EMA: old=%.3f, new=%.3f, alpha=%.2f (count=%d), result=%.3f",
+                          self._name, old_coeff, coeff_new, alpha, count, avg_coeff)
 
         # Update counters
         new_count = min(count + 1, 50)
@@ -642,10 +649,10 @@ class AutoTpiManager:
 
         else: # EMA
             # EMA Smoothing
-            alpha = self._ema_alpha
+            alpha = self._get_adaptive_alpha(count)
             avg_coeff = (old_coeff * (1.0 - alpha)) + (coeff_new * alpha)
-            _LOGGER.debug("%s - Auto TPI: Outdoor EMA: old=%.3f, new=%.3f, alpha=%.2f, result=%.3f",
-                          self._name, old_coeff, coeff_new, alpha, avg_coeff)
+            _LOGGER.debug("%s - Auto TPI: Outdoor EMA: old=%.3f, new=%.3f, alpha=%.2f (count=%d), result=%.3f",
+                          self._name, old_coeff, coeff_new, alpha, count, avg_coeff)
         new_count = min(count + 1, 50)
         
         if is_cool:
