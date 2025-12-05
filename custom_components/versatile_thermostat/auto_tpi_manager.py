@@ -939,11 +939,11 @@ class AutoTpiManager:
     
     @property
     def int_cycles(self) -> int:
-        """Number of learning cycles completed for internal coefficient"""
+        """Number of ACTUAL learning cycles completed for internal coefficient"""
         is_cool_mode = self._current_hvac_mode == 'cool' or self._current_hvac_action == 'cool'
         if is_cool_mode:
-            return self.state.coeff_indoor_cool_autolearn
-        return self.state.coeff_indoor_autolearn
+            return max(0, self.state.coeff_indoor_cool_autolearn - self._avg_initial_weight)
+        return max(0, self.state.coeff_indoor_autolearn - self._avg_initial_weight)
 
     @property
     def ext_cycles(self) -> int:
@@ -992,12 +992,19 @@ class AutoTpiManager:
         _LOGGER.info("%s - Auto TPI: Starting learning with coef_int=%.3f, coef_ext=%.3f",
                     self._name, coef_int or self.state.coeff_indoor_heat, coef_ext or self.state.coeff_outdoor_heat)
         
+        # Update coefficients if provided
         if coef_int is not None:
             self.state.coeff_indoor_heat = coef_int
-            self.state.coeff_indoor_autolearn = self._avg_initial_weight
+            self.state.coeff_indoor_cool = coef_int  # Also reset cool coefficient
         if coef_ext is not None:
             self.state.coeff_outdoor_heat = coef_ext
-            self.state.coeff_outdoor_autolearn = 0
+            self.state.coeff_outdoor_cool = coef_ext  # Also reset cool coefficient
+        
+        # ALWAYS reset ALL counters (moved outside the if blocks)
+        self.state.coeff_indoor_autolearn = self._avg_initial_weight
+        self.state.coeff_outdoor_autolearn = 0
+        self.state.coeff_indoor_cool_autolearn = self._avg_initial_weight
+        self.state.coeff_outdoor_cool_autolearn = 0
         
         # Reset all learning data for fresh start
         self.state.last_power = 0.0
