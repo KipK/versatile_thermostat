@@ -13,6 +13,7 @@ from typing import Callable
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.event import async_call_later
+from homeassistant.helpers.storage import Store
 
 from .const import (
     CONF_TPI_COEF_INT,
@@ -22,6 +23,7 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 STORAGE_VERSION = 8  # Restore max_capacity into AutoTpiState
+STORAGE_KEY_PREFIX = "versatile_thermostat.auto_tpi"
 
 
 @dataclass
@@ -123,9 +125,8 @@ class AutoTpiManager:
         self._use_capacity_as_rate = use_capacity_as_rate
         self._ema_decay_rate = ema_decay_rate
 
-        self._storage_path = hass.config.path(
-            f".storage/versatile_thermostat_{unique_id}_auto_tpi_v2.json"
-        )
+        storage_key = f"{STORAGE_KEY_PREFIX}.{unique_id.replace('.', '_')}"
+        self._store = Store(hass, STORAGE_VERSION, storage_key)
         self._default_coef_int = coef_int if coef_int is not None else 0.6
         self._default_coef_ext = coef_ext if coef_ext is not None else 0.04
 
@@ -157,89 +158,55 @@ class AutoTpiManager:
 
     async def async_save_data(self):
         """Save data."""
-        async with self._save_lock:
-            _LOGGER.debug("%s - Auto TPI: requesting save data", self._name)
-            await self._hass.async_add_executor_job(self._save_data_sync)
-
-    def _save_data_sync(self):
-        """Sync save."""
-        _LOGGER.debug("%s - Auto TPI: starting sync save", self._name)
-        tmp_path = f"{self._storage_path}.tmp"
-        try:
-            # Helper for datetime serialization
-            def json_serial(obj):
-                if isinstance(obj, datetime):
-                    return obj.isoformat()
-                raise TypeError ("Type %s not serializable" % type(obj))
-
-            data = {
-                "version": STORAGE_VERSION,
-                "state": self.state.to_dict()
-            }
-            
-            os.makedirs(os.path.dirname(self._storage_path), exist_ok=True)
-            with open(tmp_path, 'w') as f:
-                json.dump(data, f, indent=2, default=json_serial)
-            
-            # Atomic replace
-            os.replace(tmp_path, self._storage_path)
-            _LOGGER.debug("%s - Auto TPI: sync save completed successfully", self._name)
-
-        except Exception as e:
-            _LOGGER.error("%s - Auto TPI: Save error: %s", self._name, e)
-            if os.path.exists(tmp_path):
-                try:
-                    os.remove(tmp_path)
-                except Exception:
-                    pass
+        await self._store.async_save(self.state.to_dict())
 
     async def async_load_data(self):
         """Load data."""
-        await self._hass.async_add_executor_job(self._load_data_sync)
-        await self.calculate()
+        data = await self._store.async_load()
 
-    def _load_data_sync(self):
-        """Sync load."""
-        if not os.path.exists(self._storage_path):
-            return
+        if not data:
+            # Try to migrate from old JSON file
+            old_storage_key = f"versatile_thermostat_{self._unique_id}_auto_tpi_v2.json"
+            old_path = self._hass.config.path(f".storage/{old_storage_key}")
+            if os.path.exists(old_path):
+                _LOGGER.debug("%s - Auto TPI: Migrating from old storage %s", self._name, old_path)
+                try:
+                    with open(old_path, "r") as f:
+                        old_json = json.load(f)
+                    # Extract state from old format
+                    data = old_json.get("state", old_json)
+                    await self._store.async_save(data)  # Save to new format
+                    os.remove(old_path)  # Clean up old file
+                except Exception as e:
+                     _LOGGER.error("%s - Auto TPI: Migration error: %s", self._name, e)
 
-        try:
-            with open(self._storage_path, 'r') as f:
-                data = json.load(f)
-                
-            version = data.get("version", 0)
-            if version >= STORAGE_VERSION:
-                state_data = data.get("state", {})
-                self.state = AutoTpiState.from_dict(state_data)
-                
-                # If no learning has been done yet, force the configured defaults
-                if self.state.total_cycles == 0:
-                     _LOGGER.info("%s - Auto TPI: No learning cycles yet. Enforcing configured coefficients.", self._name)
-                     self.state.coeff_indoor_heat = self._default_coef_int
-                     self.state.coeff_outdoor_heat = self._default_coef_ext
-                     self.state.coeff_indoor_cool = self._default_coef_int
-                     self.state.coeff_outdoor_cool = self._default_coef_ext
-                     # Initialize counters with the configured weight
-                     self.state.coeff_indoor_autolearn = self._avg_initial_weight
-                     self.state.coeff_indoor_cool_autolearn = self._avg_initial_weight
-                     self.state.coeff_outdoor_autolearn = 0
-                     self.state.coeff_outdoor_cool_autolearn = 0
-                     
-                _LOGGER.info("%s - Auto TPI: State loaded. Cycles: %d, Indoor learn count: %d",
-                            self._name, self.state.total_cycles, self.state.coeff_indoor_autolearn)
-            else:
-                _LOGGER.info("%s - Auto TPI: Old storage version %d. Resetting to new structure.",
-                             self._unique_id, version)
-                self.state = AutoTpiState()
+        if data:
+            self.state = AutoTpiState.from_dict(data)
+            
+            # If no learning has been done yet, force the configured defaults
+            if self.state.total_cycles == 0:
+                 _LOGGER.info("%s - Auto TPI: No learning cycles yet. Enforcing configured coefficients.", self._name)
+                 self.state.coeff_indoor_heat = self._default_coef_int
+                 self.state.coeff_outdoor_heat = self._default_coef_ext
+                 self.state.coeff_indoor_cool = self._default_coef_int
+                 self.state.coeff_outdoor_cool = self._default_coef_ext
+                 # Initialize counters with the configured weight
+                 self.state.coeff_indoor_autolearn = self._avg_initial_weight
+                 self.state.coeff_indoor_cool_autolearn = self._avg_initial_weight
+                 self.state.coeff_outdoor_autolearn = 0
+                 self.state.coeff_outdoor_cool_autolearn = 0
 
-        except Exception as e:
-            _LOGGER.error("%s - Auto TPI: Load error: %s. Resetting.", self._name, e)
+            _LOGGER.info("%s - Auto TPI: State loaded. Cycles: %d, Indoor learn count: %d",
+                        self._name, self.state.total_cycles, self.state.coeff_indoor_autolearn)
+        else:
             self.state = AutoTpiState(
                 coeff_indoor_heat=self._default_coef_int,
                 coeff_outdoor_heat=self._default_coef_ext,
                 coeff_indoor_cool=self._default_coef_int,
                 coeff_outdoor_cool=self._default_coef_ext
             )
+
+        await self.calculate()
 
     async def update(self, room_temp: float, ext_temp: float,
                     power_percent: float, target_temp: float, hvac_action: str,
