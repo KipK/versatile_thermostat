@@ -277,11 +277,25 @@
           "auto_tpi_enable_update_config": "Update configuration with calculated TPI coefficients",
           "auto_tpi_enable_notification": "Send notification when TPI coefficients change",
           "heater_heating_time": "Heater heating time (mn)",
-          "heater_cooling_time": "Heater cooling down time (mn)"
+          "heater_cooling_time": "Heater cooling down time (mn)",
+          "auto_tpi_calculation_method": "Calculation method",
+          "auto_tpi_ema_alpha": "EMA alpha (0-1)",
+          "auto_tpi_avg_initial_weight": "Average initial weight",
+          "auto_tpi_max_coef_int": "Indoor Coefficient Cap",
+          "auto_tpi_heating_rate": "Heating rate (°C/h)",
+          "auto_tpi_cooling_rate": "Cooling rate (°C/h)",
+          "use_capacity_as_rate": "Use auto-detected capacity"
         },
         "data_description": {
           "heater_heating_time": "Time in minutes after which the heater is considered hot.",
-          "heater_cooling_time": "Time in minutes after which the heater is considered cold (after a stop)."
+          "heater_cooling_time": "Time in minutes after which the heater is considered cold (after a stop).",
+          "auto_tpi_calculation_method": "Method used to average the calculated TPI coefficients",
+          "auto_tpi_ema_alpha": "Alpha coefficient for EMA method (0.1 to 1.0). Higher value means faster adaptation but less stability.",
+          "auto_tpi_avg_initial_weight": "Initial weight for the average method. Higher value means slower adaptation.",
+          "auto_tpi_max_coef_int": "Maximum value allowed for the indoor coefficient (Kp). Prevents excessive oscillations.",
+          "auto_tpi_heating_rate": "Heating capacity in °C/h. Used if auto-detected capacity is disabled or not available.",
+          "auto_tpi_cooling_rate": "Cooling capacity in °C/h. Used if auto-detected capacity is disabled or not available.",
+          "use_capacity_as_rate": "Use the automatically detected heating capacity (if available) instead of manual rates."
         }
       }
     },
@@ -573,7 +587,27 @@
         "description": "Configure how the Auto TPI algorithm interacts with your configuration.",
         "data": {
           "auto_tpi_enable_update_config": "Update configuration with calculated TPI coefficients",
-          "auto_tpi_enable_notification": "Send notification when TPI coefficients change"
+          "auto_tpi_enable_notification": "Send notification when TPI coefficients change",
+          "heater_heating_time": "Heater heating time (mn)",
+          "heater_cooling_time": "Heater cooling down time (mn)",
+          "auto_tpi_calculation_method": "Calculation method",
+          "auto_tpi_ema_alpha": "EMA alpha (0-1)",
+          "auto_tpi_avg_initial_weight": "Average initial weight",
+          "auto_tpi_max_coef_int": "Indoor Coefficient Cap",
+          "auto_tpi_heating_rate": "Heating rate (°C/h)",
+          "auto_tpi_cooling_rate": "Cooling rate (°C/h)",
+          "use_capacity_as_rate": "Use auto-detected capacity"
+        },
+        "data_description": {
+          "heater_heating_time": "Time in minutes after which the heater is considered hot.",
+          "heater_cooling_time": "Time in minutes after which the heater is considered cold (after a stop).",
+          "auto_tpi_calculation_method": "Method used to average the calculated TPI coefficients",
+          "auto_tpi_ema_alpha": "Alpha coefficient for EMA method (0.1 to 1.0). Higher value means faster adaptation but less stability.",
+          "auto_tpi_avg_initial_weight": "Initial weight for the average method. Higher value means slower adaptation.",
+          "auto_tpi_max_coef_int": "Maximum value allowed for the indoor coefficient (Kp). Prevents excessive oscillations.",
+          "auto_tpi_heating_rate": "Heating capacity in °C/h. Used if auto-detected capacity is disabled or not available.",
+          "auto_tpi_cooling_rate": "Cooling capacity in °C/h. Used if auto-detected capacity is disabled or not available.",
+          "use_capacity_as_rate": "Use the automatically detected heating capacity (if available) instead of manual rates."
         }
       }
     },
@@ -642,6 +676,12 @@
         "auto_start_stop_slow": "Slow detection",
         "auto_start_stop_medium": "Medium detection",
         "auto_start_stop_fast": "Fast detection"
+      }
+    },
+    "auto_tpi_calculation_method": {
+      "options": {
+        "average": "Average",
+        "ema": "Exponential Moving Average (EMA)"
       }
     }
   },

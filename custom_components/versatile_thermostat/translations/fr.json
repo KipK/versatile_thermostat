@@ -277,11 +277,25 @@
           "auto_tpi_enable_update_config": "Mettre à jour la config avec les coefficients calculés",
           "auto_tpi_enable_notification": "Envoyer une notification lors du changement de coefficients",
           "heater_heating_time": "Temps de chauffe du radiateur (mn)",
-          "heater_cooling_time": "Temps de refroidissement du radiateur (mn)"
+          "heater_cooling_time": "Temps de refroidissement du radiateur (mn)",
+          "auto_tpi_calculation_method": "Méthode de calcul",
+          "auto_tpi_ema_alpha": "EMA alpha (0-1)",
+          "auto_tpi_avg_initial_weight": "Poids initial pour la moyenne",
+          "auto_tpi_max_coef_int": "Plafond Coefficient Intérieur",
+          "auto_tpi_heating_rate": "Puissance de chauffe (°C/h)",
+          "auto_tpi_cooling_rate": "Puissance de refroidissement (°C/h)",
+          "use_capacity_as_rate": "Utiliser la capacité auto-détectée"
         },
         "data_description": {
           "heater_heating_time": "Temps en mn après lequel le radiateur est considéré comme chaud.",
-          "heater_cooling_time": "Temps en mn après lequel le radiateur est considéré comme froid (après un arrêt)."
+          "heater_cooling_time": "Temps en mn après lequel le radiateur est considéré comme froid (après un arrêt).",
+          "auto_tpi_calculation_method": "Méthode utilisée pour moyenner les coefficients TPI calculés",
+          "auto_tpi_ema_alpha": "Coefficient Alpha pour la méthode EMA (0.1 à 1.0). Une valeur plus élevée signifie une adaptation plus rapide mais moins de stabilité.",
+          "auto_tpi_avg_initial_weight": "Poids initial pour la méthode Moyenne. Une valeur plus élevée signifie une adaptation plus lente.",
+          "auto_tpi_max_coef_int": "Valeur maximale autorisée pour le coefficient intérieur (Kp). Évite les oscillations trop fortes.",
+          "auto_tpi_heating_rate": "Capacité de chauffe en °C/h. Utilisé si la capacité auto-détectée est désactivée ou indisponible.",
+          "auto_tpi_cooling_rate": "Capacité de refroidissement en °C/h. Utilisé si la capacité auto-détectée est désactivée ou indisponible.",
+          "use_capacity_as_rate": "Utiliser la capacité de chauffe détectée automatiquement (si disponible) au lieu des taux manuels."
         }
       }
     },
@@ -574,7 +588,27 @@
         "description": "Configurer comment l'algorithme Auto TPI interagit avec votre configuration.",
         "data": {
           "auto_tpi_enable_update_config": "Mettre à jour la config avec les coefficients calculés",
-          "auto_tpi_enable_notification": "Envoyer une notification lors du changement de coefficients"
+          "auto_tpi_enable_notification": "Envoyer une notification lors du changement de coefficients",
+          "heater_heating_time": "Temps de chauffe du radiateur (mn)",
+          "heater_cooling_time": "Temps de refroidissement du radiateur (mn)",
+          "auto_tpi_calculation_method": "Méthode de calcul",
+          "auto_tpi_ema_alpha": "EMA alpha (0-1)",
+          "auto_tpi_avg_initial_weight": "Poids initial pour la moyenne",
+          "auto_tpi_max_coef_int": "Plafond Coefficient Intérieur",
+          "auto_tpi_heating_rate": "Puissance de chauffe (°C/h)",
+          "auto_tpi_cooling_rate": "Puissance de refroidissement (°C/h)",
+          "use_capacity_as_rate": "Utiliser la capacité auto-détectée"
+        },
+        "data_description": {
+          "heater_heating_time": "Temps en mn après lequel le radiateur est considéré comme chaud.",
+          "heater_cooling_time": "Temps en mn après lequel le radiateur est considéré comme froid (après un arrêt).",
+          "auto_tpi_calculation_method": "Méthode utilisée pour moyenner les coefficients TPI calculés",
+          "auto_tpi_ema_alpha": "Coefficient Alpha pour la méthode EMA (0.1 à 1.0). Une valeur plus élevée signifie une adaptation plus rapide mais moins de stabilité.",
+          "auto_tpi_avg_initial_weight": "Poids initial pour la méthode Moyenne. Une valeur plus élevée signifie une adaptation plus lente.",
+          "auto_tpi_max_coef_int": "Valeur maximale autorisée pour le coefficient intérieur (Kp). Évite les oscillations trop fortes.",
+          "auto_tpi_heating_rate": "Capacité de chauffe en °C/h. Utilisé si la capacité auto-détectée est désactivée ou indisponible.",
+          "auto_tpi_cooling_rate": "Capacité de refroidissement en °C/h. Utilisé si la capacité auto-détectée est désactivée ou indisponible.",
+          "use_capacity_as_rate": "Utiliser la capacité de chauffe détectée automatiquement (si disponible) au lieu des taux manuels."
         }
       }
     },
@@ -644,6 +678,12 @@
         "auto_start_stop_slow": "Lente",
         "auto_start_stop_medium": "Medium",
         "auto_start_stop_fast": "Rapide"
+      }
+    },
+    "auto_tpi_calculation_method": {
+      "options": {
+        "average": "Moyenne",
+        "ema": "Moyenne Mobile Exponentielle (EMA)"
       }
     }
   },
