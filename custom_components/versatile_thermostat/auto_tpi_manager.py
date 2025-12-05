@@ -327,6 +327,21 @@ class AutoTpiManager:
              _LOGGER.debug("%s - Auto TPI: Not learning - Delta out too small (< 2.0)", self._name)
              return False
 
+        # NEW: Natural drift exclusion - check temperature at CYCLE START
+        # If temp was already past setpoint at cycle START, this is passive drift, not active regulation
+        is_heat = self.state.last_state == 'heat'
+        is_cool = self.state.last_state == 'cool'
+
+        if is_heat and self.state.last_temp_in > self.state.last_order:
+            _LOGGER.debug("%s - Auto TPI: Not learning - Passive cooling at cycle start (T_in %.2f > Target %.2f)",
+                        self._name, self.state.last_temp_in, self.state.last_order)
+            return False
+
+        if is_cool and self.state.last_temp_in < self.state.last_order:
+            _LOGGER.debug("%s - Auto TPI: Not learning - Passive heating at cycle start (T_in %.2f < Target %.2f)",
+                        self._name, self.state.last_temp_in, self.state.last_order)
+            return False
+
         return True
 
     def _get_no_learn_reason(self) -> str:
@@ -337,6 +352,15 @@ class AutoTpiManager:
             return f"power_out_of_range({self.state.last_power * 100:.1f}%)"
         if self.state.consecutive_failures >= 3:
             return f"too_many_failures({self.state.consecutive_failures})"
+        
+        # NEW: Check passive drift conditions
+        is_heat = self.state.last_state == 'heat'
+        is_cool = self.state.last_state == 'cool'
+        if is_heat and self.state.last_temp_in > self.state.last_order:
+            return f"passive_cooling(T_in={self.state.last_temp_in:.1f}>Target={self.state.last_order:.1f})"
+        if is_cool and self.state.last_temp_in < self.state.last_order:
+            return f"passive_heating(T_in={self.state.last_temp_in:.1f}<Target={self.state.last_order:.1f})"
+            
         return "unknown"
 
     async def _perform_learning(self, current_temp_in: float, current_temp_out: float):
@@ -567,6 +591,22 @@ class AutoTpiManager:
         if gap_out == 0:
             _LOGGER.debug("%s - Auto TPI: Cannot learn outdoor - gap_out is 0", self._name)
             self.state.last_learning_status = "gap_out_is_zero"
+            return False
+
+        # NEW: Validate gap_in sign matches expected regulation direction
+        # In heat mode, gap_in should be >= 0 (T_in <= Target, meaning we need to heat)
+        # In cool mode, gap_in should be <= 0 (T_in >= Target, meaning we need to cool)
+        # If sign is wrong, we're in overshoot/undershoot territory - skip outdoor learning
+        if is_cool and gap_in > 0:
+            _LOGGER.debug("%s - Auto TPI: Cannot learn outdoor - Overcooled state (gap_in=%.2f > 0)",
+                        self._name, gap_in)
+            self.state.last_learning_status = "overcooled_gap"
+            return False
+
+        if not is_cool and gap_in < 0:
+            _LOGGER.debug("%s - Auto TPI: Cannot learn outdoor - Overheated state (gap_in=%.2f < 0)",
+                        self._name, gap_in)
+            self.state.last_learning_status = "overheated_gap"
             return False
 
         ratio_influence = gap_in / gap_out
