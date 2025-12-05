@@ -2337,6 +2337,13 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
                 coef_int=self._tpi_coef_int,
                 coef_ext=self._tpi_coef_ext
             )
+
+            # Sync PropAlgorithm with the configured coefficients
+            if self._prop_algorithm:
+                self._prop_algorithm.update_tpi_coef(self._tpi_coef_int, self._tpi_coef_ext)
+                _LOGGER.info("%s - PropAlgorithm synced with config: Kint=%.3f, Kext=%.3f",
+                             self, self._tpi_coef_int, self._tpi_coef_ext)
+
             # If we enable auto_tpi, we must disable central config for TPI
             # to avoid overriding the calculated values
             if self._entry_infos:
