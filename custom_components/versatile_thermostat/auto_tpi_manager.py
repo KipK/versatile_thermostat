@@ -301,7 +301,7 @@ class AutoTpiManager:
              _LOGGER.debug("%s - Auto TPI: Not learning - Delta out too small (< 2.0)", self._name)
              return False
 
-        # NEW: Natural drift exclusion - check temperature at CYCLE START
+        # Natural drift exclusion - check temperature at CYCLE START
         # If temp was already past setpoint at cycle START, this is passive drift, not active regulation
         is_heat = self.state.last_state == 'heat'
         is_cool = self.state.last_state == 'cool'
@@ -400,6 +400,12 @@ class AutoTpiManager:
              _LOGGER.debug("%s - Auto TPI: Skipping indoor coeff learning because power is saturated (%.1f%%)",
                            self._name, self.state.last_power * 100)
             
+        # Detect underpowered situation before falling back to outdoor
+        if not learned and self._is_underpowered(temp_progress, is_heat):
+            self._boost_indoor_coeff(is_heat)
+            self.state.last_learning_status = "boosted_indoor_underpowered"
+            learned = True
+
         # Priority 2: Outdoor Coefficient
         # Fallback if Priority 1 failed (e.g., real_rise too small) or wasn't applicable
         if not learned and outdoor_condition:
@@ -567,7 +573,7 @@ class AutoTpiManager:
             self.state.last_learning_status = "gap_out_is_zero"
             return False
 
-        # NEW: Validate gap_in sign matches expected regulation direction
+        # Validate gap_in sign matches expected regulation direction
         # In heat mode, gap_in should be >= 0 (T_in <= Target, meaning we need to heat)
         # In cool mode, gap_in should be <= 0 (T_in >= Target, meaning we need to cool)
         # If sign is wrong, we're in overshoot/undershoot territory - skip outdoor learning
@@ -634,6 +640,52 @@ class AutoTpiManager:
             self._name, 'cool' if is_cool else 'heat', old_coeff, coeff_new, avg_coeff, new_count
         )
         return True
+
+    def _is_underpowered(self, temp_progress: float, is_heat: bool) -> bool:
+        """Detect if system is underpowered by comparing actual vs expected rise."""
+        max_capacity = self.state.max_capacity_heat if is_heat else self.state.max_capacity_cool
+        
+        # Need max_capacity to calculate expected rise
+        if max_capacity <= 0:
+            return False
+        
+        # Need some power demand to compare
+        if self.state.last_power <= 0:
+            return False
+        
+        # Calculate expected temperature rise
+        cycle_hours = self._cycle_min / 60.0
+        expected_rise = self.state.last_power * max_capacity * cycle_hours
+        
+        # Compare to actual
+        # temp_progress is already the magnitude of change in the correct direction (always positive if working)
+        actual_rise = temp_progress
+        
+        # If actual rise is less than 30% of expected, we're underpowered
+        THRESHOLD = 0.3
+        if expected_rise > 0.05 and actual_rise < expected_rise * THRESHOLD:
+            _LOGGER.info(
+                "%s - Underpowered detected: expected %.3f°C rise, got %.3f°C (%.0f%%)",
+                self._name, expected_rise, actual_rise, (actual_rise / expected_rise) * 100
+            )
+            return True
+        
+        return False
+
+    def _boost_indoor_coeff(self, is_heat: bool):
+        """Boost indoor coefficient when system is underpowered."""
+        BOOST_FACTOR = 1.5  # Increase by 50%
+        
+        if is_heat:
+            old = self.state.coeff_indoor_heat
+            self.state.coeff_indoor_heat = min(old * BOOST_FACTOR, self._max_coef_int)
+            _LOGGER.info("%s - Boosting Kint heat: %.3f → %.3f",
+                        self._name, old, self.state.coeff_indoor_heat)
+        else:
+            old = self.state.coeff_indoor_cool
+            self.state.coeff_indoor_cool = min(old * BOOST_FACTOR, self._max_coef_int)
+            _LOGGER.info("%s - Boosting Kint cool: %.3f → %.3f",
+                        self._name, old, self.state.coeff_indoor_cool)
 
     def _detect_failures(self, current_temp_in: float):
         """Detect system failures."""
