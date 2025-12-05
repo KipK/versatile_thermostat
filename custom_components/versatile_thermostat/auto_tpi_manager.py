@@ -395,34 +395,7 @@ class AutoTpiManager:
         # But here we stick to standard range for coeff learning to avoid windup at 100%.
         if 0 < self.state.last_power < 0.99:
             if temp_progress > 0 and target_diff > 0:
-                # Pass the appropriate max capacity based on mode
-                # Capacity stored is Reference Capacity (Adiabatic).
-                # We need Effective Capacity for current conditions: Eff = Ref * (1 - Loss)
-                
-                ref_capacity = self.state.max_capacity_cool if is_cool else self.state.max_capacity_heat
-                current_max_capacity = 0.0
-                
-                if ref_capacity > 0:
-                    if is_cool:
-                        k_ext = self.state.coeff_outdoor_cool
-                        delta_t = current_temp_out - current_temp_in
-                    else:
-                        k_ext = self.state.coeff_outdoor_heat
-                        delta_t = current_temp_in - current_temp_out
-                        
-                    loss_factor = k_ext * max(0.0, delta_t)
-                    loss_factor = min(loss_factor, 0.95) # Allow effective capacity to drop low but not negative
-                    
-                    effective_capacity_h = ref_capacity * (1.0 - loss_factor)
-                    
-                    # Convert to °C/cycle
-                    cycle_duration_h = self._cycle_min / 60.0
-                    current_max_capacity = effective_capacity_h * cycle_duration_h
-                    
-                    _LOGGER.debug("%s - Auto TPI: Est. Effective Capacity: Ref=%.3f, Loss=%.2f (dT=%.1f), Eff=%.3f/h",
-                                  self._name, ref_capacity, loss_factor, delta_t, effective_capacity_h)
-
-                if self._learn_indoor(target_diff, temp_progress, self._last_cycle_power_efficiency, is_cool, current_max_capacity):
+                if self._learn_indoor(target_diff, temp_progress, self._last_cycle_power_efficiency, is_cool):
                     self.state.last_learning_status = f"learned_indoor_{'cool' if is_cool else 'heat'}"
                     learned = True
         else:
@@ -449,12 +422,8 @@ class AutoTpiManager:
             _LOGGER.info("%s - Auto TPI: Learning successful - %s",
                         self._name, self.state.last_learning_status)
 
-    def _learn_indoor(self, delta_theoretical: float, delta_real: float, efficiency: float = 1.0, is_cool: bool = False, max_capacity: float = 0.0) -> bool:
-        """Learn indoor coefficient.
-        
-        Args:
-            max_capacity: Physical heating/cooling limit from thermostat (°C/cycle)
-        """
+    def _learn_indoor(self, delta_theoretical: float, delta_real: float, efficiency: float = 1.0, is_cool: bool = False) -> bool:
+        """Learn indoor coefficient."""
         
         # 3. Correct Delta Calculation
         # We want to use the rise during the ON period, not the full cycle drift.
