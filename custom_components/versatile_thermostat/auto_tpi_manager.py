@@ -103,7 +103,7 @@ class AutoTpiManager:
                  heater_heating_time: int = 0, heater_cooling_time: int = 0,
                  calculation_method: str = "ema", ema_alpha: float = 0.2,
                  avg_initial_weight: int = 1, max_coef_int: float = 0.6,
-                 heating_rate: float = 0.1, cooling_rate: float = 0.1,
+                 heating_rate: float = 1.0, cooling_rate: float = 1.0,
                  use_capacity_as_rate: bool = False):
         self._hass = hass
         self._unique_id = unique_id
@@ -478,32 +478,57 @@ class AutoTpiManager:
             self.state.last_learning_status = "real_rise_too_small"
             return False
 
-        # Adjust theoretical delta by the efficiency of the power delivered
-        # If efficiency was 50% (due to rampup time), we expect only 50% of the result.
-        # So we compare real progress against (theoretical * efficiency)
-        # Apply the appropriate rate based on mode
-        # Apply the appropriate rate based on mode
-        # We don't aim to correct the full error in one cycle but only a fraction of it
-        # (e.g. 10% for heating or cooling) to ensure stability and avoid saturation.
-        if self._use_capacity_as_rate and max_capacity > 0:
-            rate = max_capacity
-        else:
-            rate = self._cooling_rate if is_cool else self._heating_rate
-        adjusted_theoretical = delta_theoretical * efficiency * rate
+        # Capacity-Based Learning Logic
+        # We aim to close the full temperature gap (delta_theoretical),
+        # but capped by the physical capacity of the system.
         
-        # Clamp to Max Capacity if known (passed from thermostat)
-        # If the system can physically only rise by 0.2°C/cycle, asking for 0.5°C will just windup the gain.
-        if max_capacity > 0:
-            original_target = adjusted_theoretical
-            adjusted_theoretical = min(adjusted_theoretical, max_capacity)
-            if adjusted_theoretical < original_target:
-                 mode_str = "cooling" if is_cool else "heating"
-                 _LOGGER.debug("%s - Auto TPI: Target rise clamped from %.3f to %.3f (Max %s Capacity)",
-                               self._name, original_target, max_capacity, mode_str)
+        # 1. Define Reference Capacity (in °C/h)
+        if self._use_capacity_as_rate:
+            # Use auto-detected capacity (stored as Reference Capacity in °C/h)
+            ref_capacity_h = self.state.max_capacity_cool if is_cool else self.state.max_capacity_heat
+        else:
+            # Use manual capacity from config (now in °C/h)
+            ref_capacity_h = self._cooling_rate if is_cool else self._heating_rate
+
+        # If no capacity defined, skip learning for this cycle
+        if ref_capacity_h <= 0:
+            _LOGGER.debug("%s - Auto TPI: Cannot learn indoor - no capacity defined (use_capacity_as_rate=%s, manual_rate=%.2f)",
+                          self._name, self._use_capacity_as_rate,
+                          self._cooling_rate if is_cool else self._heating_rate)
+            self.state.last_learning_status = "no_capacity_defined"
+            return False
+
+        # 2. Calculate Effective Capacity with thermal losses (same logic as auto-detected)
+        if is_cool:
+            k_ext = self.state.coeff_outdoor_cool
+            delta_t = self._current_temp_out - self._current_temp_in
+        else:
+            k_ext = self.state.coeff_outdoor_heat
+            delta_t = self._current_temp_in - self._current_temp_out
+
+        loss_factor = k_ext * max(0.0, delta_t)
+        loss_factor = min(loss_factor, 0.95)  # Prevent going negative
+
+        effective_capacity_h = ref_capacity_h * (1.0 - loss_factor)
+        
+        # 3. Calculate Max Achievable Rise in this cycle (°C)
+        cycle_duration_h = self._cycle_min / 60.0
+        max_achievable_rise = effective_capacity_h * cycle_duration_h * efficiency
+        
+        _LOGGER.debug("%s - Auto TPI: Capacity calc: ref=%.3f °C/h, loss=%.2f, eff=%.3f °C/h, max_rise=%.3f °C (cycle=%.1f min, eff=%.2f)",
+                      self._name, ref_capacity_h, loss_factor, effective_capacity_h, max_achievable_rise, self._cycle_min, efficiency)
+
+        # 4. Calculate adjusted_theoretical: aim for full gap, capped by capacity
+        adjusted_theoretical = min(delta_theoretical, max_achievable_rise)
+        
+        if max_achievable_rise < delta_theoretical:
+            mode_str = "cooling" if is_cool else "heating"
+            _LOGGER.debug("%s - Auto TPI: Target rise clamped from %.3f to %.3f (Max %s Capacity)",
+                          self._name, delta_theoretical, max_achievable_rise, mode_str)
 
         if adjusted_theoretical <= 0:
-             _LOGGER.warning("%s - Auto TPI: Cannot learn indoor - adjusted_theoretical <= 0 (eff=%.2f)",
-                             self._name, efficiency)
+             _LOGGER.warning("%s - Auto TPI: Cannot learn indoor - adjusted_theoretical <= 0 (max_rise=%.3f, target_diff=%.3f)",
+                             self._name, max_achievable_rise, delta_theoretical)
              self.state.last_learning_status = "adjusted_theoretical_lte_0"
              return False
 

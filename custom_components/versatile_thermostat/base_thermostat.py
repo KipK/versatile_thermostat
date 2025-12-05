@@ -433,8 +433,8 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
         ema_alpha = entry_infos.get(CONF_AUTO_TPI_EMA_ALPHA, 0.2)
         avg_initial_weight = entry_infos.get(CONF_AUTO_TPI_AVG_INITIAL_WEIGHT, 1)
         max_coef_int = entry_infos.get(CONF_AUTO_TPI_MAX_COEF_INT, 0.6)
-        heating_rate = entry_infos.get(CONF_AUTO_TPI_HEATING_RATE, 0.1)
-        cooling_rate = entry_infos.get(CONF_AUTO_TPI_COOLING_RATE, 0.1)
+        heating_rate = entry_infos.get(CONF_AUTO_TPI_HEATING_RATE, 1.0)
+        cooling_rate = entry_infos.get(CONF_AUTO_TPI_COOLING_RATE, 1.0)
         use_capacity_as_rate = entry_infos.get(CONF_USE_CAPACITY_AS_RATE, False)
 
         _LOGGER.info("%s - DEBUG: TPI coefficients from entry_infos: int=%.3f, ext=%.3f",
