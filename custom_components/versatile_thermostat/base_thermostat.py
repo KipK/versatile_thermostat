@@ -1492,7 +1492,19 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
         """Calculate and return TPI cycle parameters.
         Called by AutoTpiManager at the start of each cycle.
         """
-        # Force recalculation to have fresh values
+        # Sync coefficients from AutoTpiManager before calculating
+        if self._auto_tpi_manager and self._auto_tpi_manager.learning_active:
+            new_params = await self._auto_tpi_manager.calculate()
+            if new_params:
+                new_coef_int = new_params.get(CONF_TPI_COEF_INT)
+                new_coef_ext = new_params.get(CONF_TPI_COEF_EXT)
+                if new_coef_int != self._prop_algorithm.tpi_coef_int or \
+                   new_coef_ext != self._prop_algorithm.tpi_coef_ext:
+                    self._prop_algorithm.update_tpi_coef(new_coef_int, new_coef_ext)
+                    _LOGGER.debug("%s - Synced TPI coeffs before cycle: int=%.3f, ext=%.3f",
+                                  self, new_coef_int, new_coef_ext)
+
+        # Force recalculation with potentially updated coefficients
         self._prop_algorithm.calculate(
             self.target_temperature,
             self._cur_temp,
