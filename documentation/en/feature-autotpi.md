@@ -109,6 +109,22 @@ data:
 ```
 
 Or via the Developer Tools interface.
+
+### Stop Learning
+
+When learning is stopped via the `versatile_thermostat.set_auto_tpi_mode` service with `auto_tpi_mode: false`:
+
+- Learning is **disabled** but learned data is **preserved**
+- Regulation uses **configuration** coefficients (not learned coefficients)
+- Data can be reused if learning is reactivated later
+
+```yaml
+service: versatile_thermostat.set_auto_tpi_mode
+target:
+  entity_id: climate.my_thermostat
+data:
+  auto_tpi_mode: false
+```
 ## Adaptive EMA Calculation Method
 
 The EMA (Exponential Moving Average) method uses an **alpha** coefficient that determines 

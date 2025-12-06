@@ -2365,6 +2365,15 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
         else:
             await self._auto_tpi_manager.stop_learning()
             self._auto_tpi_manager.stop_cycle_loop()
+            
+            # Apply configured coefficients to PropAlgorithm to ensure
+            # learned values are not kept in the regulation loop
+            if self._prop_algorithm:
+                self._prop_algorithm.update_tpi_coef(self._tpi_coef_int, self._tpi_coef_ext)
+                _LOGGER.info(
+                    "%s - PropAlgorithm reset to config values: Kint=%.3f, Kext=%.3f",
+                    self, self._tpi_coef_int, self._tpi_coef_ext
+                )
 
         # Fire event to notify potential listeners (like the switch if it existed, or UI)
         self.hass.bus.async_fire(
