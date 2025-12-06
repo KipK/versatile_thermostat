@@ -1015,16 +1015,18 @@ class AutoTpiManager:
 
     async def start_learning(self, coef_int: float = None, coef_ext: float = None):
         """Start learning, optionally resetting coefficients to configured values."""
+        # Use provided values, or fallback to default (configured) values
+        # This allows resetting to the original configuration when starting a new learning session
+        target_int = coef_int if coef_int is not None else self._default_coef_int
+        target_ext = coef_ext if coef_ext is not None else self._default_coef_ext
+
         _LOGGER.info("%s - Auto TPI: Starting learning with coef_int=%.3f, coef_ext=%.3f",
-                    self._name, coef_int or self.state.coeff_indoor_heat, coef_ext or self.state.coeff_outdoor_heat)
+                    self._name, target_int, target_ext)
         
-        # Update coefficients if provided
-        if coef_int is not None:
-            self.state.coeff_indoor_heat = coef_int
-            self.state.coeff_indoor_cool = coef_int  # Also reset cool coefficient
-        if coef_ext is not None:
-            self.state.coeff_outdoor_heat = coef_ext
-            self.state.coeff_outdoor_cool = coef_ext  # Also reset cool coefficient
+        self.state.coeff_indoor_heat = target_int
+        self.state.coeff_indoor_cool = target_int
+        self.state.coeff_outdoor_heat = target_ext
+        self.state.coeff_outdoor_cool = target_ext
         
         # ALWAYS reset ALL counters (moved outside the if blocks)
         self.state.coeff_indoor_autolearn = self._avg_initial_weight
