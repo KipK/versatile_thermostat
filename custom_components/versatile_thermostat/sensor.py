@@ -342,10 +342,6 @@ class AutoTpiSensor(VersatileThermostatBaseEntity, SensorEntity):
 
         self.async_write_ha_state()
 
-    @property
-    def state_class(self) -> SensorStateClass | None:
-        return SensorStateClass.MEASUREMENT
-
 
 class ValveOpenPercentSensor(VersatileThermostatBaseEntity, SensorEntity):
     """Representation of a on percent sensor which exposes the on_percent in a cycle"""
