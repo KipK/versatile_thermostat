@@ -523,9 +523,32 @@ STEP_AUTO_TPI_1_SCHEMA = vol.Schema(
 )
 
 # AutoPI specific configuration (visible only when AutoPI algorithm is selected)
+# First step: checkbox for central config
 STEP_AUTO_PI_SCHEMA = vol.Schema(
     {
         vol.Optional(CONF_USE_AUTO_PI_CENTRAL_CONFIG, default=False): cv.boolean,
+    }
+)
+
+# Second step: specific AutoPI parameters (if not using central config)
+STEP_AUTO_PI_PARAMS_SCHEMA = vol.Schema(
+    {
+        vol.Optional(CONF_AUTO_PI_DEADBAND, default=0.05): selector.NumberSelector(
+            selector.NumberSelectorConfig(
+                min=0.0, max=1.0, step=0.01, mode=selector.NumberSelectorMode.BOX
+            )
+        ),
+        vol.Optional(CONF_AUTO_PI_AGGRESSIVENESS, default=0.5): selector.NumberSelector(
+            selector.NumberSelectorConfig(
+                min=0.1, max=2.0, step=0.1, mode=selector.NumberSelectorMode.BOX
+            )
+        ),
+    }
+)
+
+# Central AutoPI configuration schema (for central config thermostat)
+STEP_AUTO_PI_CENTRAL_SCHEMA = vol.Schema(
+    {
         vol.Optional(CONF_AUTO_PI_DEADBAND, default=0.05): selector.NumberSelector(
             selector.NumberSelectorConfig(
                 min=0.0, max=1.0, step=0.01, mode=selector.NumberSelectorMode.BOX
