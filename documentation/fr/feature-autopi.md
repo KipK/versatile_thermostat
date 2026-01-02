@@ -71,22 +71,33 @@ Pour activer AutoPI :
 
 ## Fonctionnement détaillé de l'algorithme "Robuste"
 
-Cette version d'AutoPI utilise plusieurs mécanismes avancés pour garantir confort et stabilité :
+Le fonctionnement d'AutoPI peut se découper en 4 étapes cycliques :
 
-### 1. L'Estimateur Robuste (Le cerveau)
-Contrairement aux algorithmes simples qui moyenne bêtement toutes les mesures, AutoPI utilise des statistiques robustes (Médiane et Huber).
-- **En clair** : Si vous ouvrez une fenêtre en hiver, la température chute brutalement. AutoPI va détecter que cette chute est anormale ("outlier") et l'ignorer pour ne pas fausser son apprentissage. Il ne retient que le comportement "normal" de la pièce.
+### 1. Mesure et Observation
+À chaque cycle, l'algorithme collecte :
+- La température actuelle ($T_{int}$)
+- La température extérieure ($T_{ext}$)
+- La puissance qui a été envoyée au radiateur ($u$)
 
-### 2. Gestion du "Dead Time" (L'anticipation)
-Tous les systèmes de chauffage ont un délai entre le moment où on allume et le moment où ça chauffe vraiment (inertie des résistances, circulation d'eau...).
-- **Le problème** : Si on ignore ce délai, le thermostat "s'énerve" et surchauffe car il ne voit pas la température monter tout de suite.
-- **La solution** : AutoPI mesure ce délai (`deadtime_s`) et "attend" patiemment avant de corriger, évitant ainsi les oscillations inutiles.
+### 2. Modélisation (Robust Estimator)
+Il met à jour son modèle interne de la pièce défini par deux paramètres :
+- **a** (Efficacité) : Combien de degrés je gagne par minute si je chauffe à 100%.
+- **b** (Déperdition) : Combien de degrés je perds par minute par degré d'écart avec l'extérieur.
 
-### 3. Gain Scheduling (La douceur)
-C'est la capacité à changer de comportement selon la situation :
-- **Loin de la consigne** : Le thermostat réagit fort pour monter vite en température.
-- **Proche de la consigne** : Il devient très doux pour "atterrir" sur la température cible sans la dépasser.
-Cela permet d'avoir à la fois une montée rapide ET une grande stabilité une fois à température.
+C'est ici que l'approche "Robuste" intervient en filtrant les anomalies (ex: chute brutale de température) pour ne pas fausser ces paramètres $a$ et $b$.
+
+### 3. Calcul des Gains (PI Tuning)
+Une fois qu'il connaît la pièce ($a$, $b$) et son inertie (Dead time), il calcule les coefficients idéaux pour le régulateur PI :
+- **Kp** (Proportionnel) : Calculé pour réagir vite mais sans dépasser.
+- **Ki** (Intégral) : Calculé pour annuler l'erreur résiduelle.
+
+*Le "Gain Scheduling" réduit ces gains quand on est proche de la consigne pour un atterrissage en douceur.*
+
+### 4. Application de la commande
+Enfin, il calcule la puissance à envoyer au radiateur :
+$$ u = u_{ff} + u_{pi} $$
+- **$u_{ff}$ (Feed-forward)** : La puissance juste nécessaire pour maintenir la température (basé sur $T_{ext}$ et les déperditions $b$).
+- **$u_{pi}$ (Correction)** : Le surplus pour corriger l'écart actuel par rapport à la consigne.
 
 ## Cas d'utilisation recommandés
 
