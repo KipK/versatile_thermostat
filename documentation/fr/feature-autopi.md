@@ -69,6 +69,25 @@ Pour activer AutoPI :
 - **0.5** : Équilibré. Bon point de départ pour la plupart des installations
 - **1.0 - 2.0** : Réponse lente. Pour des systèmes à forte inertie (plancher chauffant, radiateurs à eau)
 
+## Fonctionnement détaillé de l'algorithme "Robuste"
+
+Cette version d'AutoPI utilise plusieurs mécanismes avancés pour garantir confort et stabilité :
+
+### 1. L'Estimateur Robuste (Le cerveau)
+Contrairement aux algorithmes simples qui moyenne bêtement toutes les mesures, AutoPI utilise des statistiques robustes (Médiane et Huber).
+- **En clair** : Si vous ouvrez une fenêtre en hiver, la température chute brutalement. AutoPI va détecter que cette chute est anormale ("outlier") et l'ignorer pour ne pas fausser son apprentissage. Il ne retient que le comportement "normal" de la pièce.
+
+### 2. Gestion du "Dead Time" (L'anticipation)
+Tous les systèmes de chauffage ont un délai entre le moment où on allume et le moment où ça chauffe vraiment (inertie des résistances, circulation d'eau...).
+- **Le problème** : Si on ignore ce délai, le thermostat "s'énerve" et surchauffe car il ne voit pas la température monter tout de suite.
+- **La solution** : AutoPI mesure ce délai (`deadtime_s`) et "attend" patiemment avant de corriger, évitant ainsi les oscillations inutiles.
+
+### 3. Gain Scheduling (La douceur)
+C'est la capacité à changer de comportement selon la situation :
+- **Loin de la consigne** : Le thermostat réagit fort pour monter vite en température.
+- **Proche de la consigne** : Il devient très doux pour "atterrir" sur la température cible sans la dépasser.
+Cela permet d'avoir à la fois une montée rapide ET une grande stabilité une fois à température.
+
 ## Cas d'utilisation recommandés
 
 AutoPI est particulièrement adapté pour :
