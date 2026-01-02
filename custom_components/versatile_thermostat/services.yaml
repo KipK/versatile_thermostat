@@ -356,6 +356,8 @@ reset_auto_pi_learning:
     target:
         entity:
             integration: versatile_thermostat
+            domain:
+                - climate
 
 set_timed_preset:
     name: Set Timed Preset
