@@ -20,6 +20,7 @@ from .const import (
     CONF_UNDERLYING_LIST,
     PROPORTIONAL_FUNCTION_TPI,
     PROPORTIONAL_FUNCTION_AUTO_PI,
+    overrides,
 )
 from .commons import write_event_log
 
