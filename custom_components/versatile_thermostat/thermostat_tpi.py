@@ -424,6 +424,7 @@ class ThermostatTPI(BaseThermostat[T], Generic[T]):
                 self._cur_ext_temp,
                 self.last_temperature_slope,
                 self.vtherm_hvac_mode or VThermHvacMode_OFF,
+                hvac_action=self.hvac_action,
             )
 
     async def update_states(self, force=False):
