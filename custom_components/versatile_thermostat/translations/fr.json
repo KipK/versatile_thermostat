@@ -344,10 +344,12 @@
         "title": "Paramètres du contrôleur AutoPI",
         "description": "Configuration des paramètres du contrôleur AutoPI adaptatif.",
         "data": {
+          "use_auto_pi_central_config": "Utiliser la configuration AutoPI centrale",
           "auto_pi_deadband": "Bande morte (°C)",
           "auto_pi_aggressiveness": "Agressivité"
         },
         "data_description": {
+          "use_auto_pi_central_config": "Cochez pour utiliser la configuration AutoPI centrale. Décochez pour utiliser une configuration AutoPI spécifique pour ce VTherm",
           "auto_pi_deadband": "Bande morte autour de la consigne. Aucune action de régulation dans cette plage. Évite les oscillations près de la cible.",
           "auto_pi_aggressiveness": "Vitesse de réponse du contrôleur (0.1=très rapide, 0.5=équilibré, 1.0=lent, 2.0=très lent)"
         }
@@ -727,10 +729,12 @@
         "title": "Paramètres du contrôleur AutoPI - {name}",
         "description": "Configuration des paramètres du contrôleur AutoPI adaptatif.",
         "data": {
+          "use_auto_pi_central_config": "Utiliser la configuration AutoPI centrale",
           "auto_pi_deadband": "Bande morte (°C)",
           "auto_pi_aggressiveness": "Agressivité"
         },
         "data_description": {
+          "use_auto_pi_central_config": "Cochez pour utiliser la configuration AutoPI centrale. Décochez pour utiliser une configuration AutoPI spécifique pour ce VTherm",
           "auto_pi_deadband": "Bande morte autour de la consigne. Aucune action de régulation dans cette plage. Évite les oscillations près de la cible.",
           "auto_pi_aggressiveness": "Vitesse de réponse du contrôleur (0.1=très rapide, 0.5=équilibré, 1.0=lent, 2.0=très lent)"
         }

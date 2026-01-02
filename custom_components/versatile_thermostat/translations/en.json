@@ -343,10 +343,12 @@
         "title": "AutoPI Controller Parameters",
         "description": "Configure the AutoPI adaptive controller parameters.",
         "data": {
+          "use_auto_pi_central_config": "Use central AutoPI configuration",
           "auto_pi_deadband": "Deadband (°C)",
           "auto_pi_aggressiveness": "Aggressiveness"
         },
         "data_description": {
+          "use_auto_pi_central_config": "Check to use the central AutoPI configuration. Uncheck to use a specific AutoPI configuration for this VTherm",
           "auto_pi_deadband": "Deadband around setpoint. No regulation action within this range. Prevents oscillations near target.",
           "auto_pi_aggressiveness": "Controller response speed (0.1=very fast, 0.5=balanced, 1.0=slow, 2.0=very slow)"
         }
@@ -737,10 +739,12 @@
         "title": "AutoPI Controller Parameters - {name}",
         "description": "Configure the AutoPI adaptive controller parameters.",
         "data": {
+          "use_auto_pi_central_config": "Use central AutoPI configuration",
           "auto_pi_deadband": "Deadband (°C)",
           "auto_pi_aggressiveness": "Aggressiveness"
         },
         "data_description": {
+          "use_auto_pi_central_config": "Check to use the central AutoPI configuration. Uncheck to use a specific AutoPI configuration for this VTherm",
           "auto_pi_deadband": "Deadband around setpoint. No regulation action within this range. Prevents oscillations near target.",
           "auto_pi_aggressiveness": "Controller response speed (0.1=very fast, 0.5=balanced, 1.0=slow, 2.0=very slow)"
         }
