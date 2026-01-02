@@ -101,6 +101,13 @@ class RLS2:
         self.P11 = (self.P11 - k1 * phi1 * self.P11) / self.lmbda
         self.P22 = (self.P22 - k2 * phi2 * self.P22) / self.lmbda
 
+    def reset(self):
+        """Reset parameters to initial conservative values."""
+        self.theta_a = 0.0005
+        self.theta_b = 0.0010
+        self.P11 = 1000.0
+        self.P22 = 1000.0
+
 
 class AutoPI:
     """
@@ -139,6 +146,8 @@ class AutoPI:
         saved_state: Optional[Dict[str, Any]] = None
     ):
         self._name = name
+
+
         self._cycle_min = cycle_min
         self._minimal_activation_delay = minimal_activation_delay
         self._minimal_deactivation_delay = minimal_deactivation_delay
@@ -174,7 +183,20 @@ class AutoPI:
         if saved_state:
             self.load_state(saved_state)
 
+
         _LOGGER.debug("%s - AutoPI initialized", self._name)
+
+    def reset_learning(self):
+        """Reset learning to default values."""
+        self.rls.reset()
+        self.integral = 0.0
+        self.u_prev = 0.0
+        self._prev_error = 0.0
+        self.Kp = 0.8
+        self.Ki = 0.05
+        self.a = 0.0
+        self.b = 0.0
+        _LOGGER.info("%s - AutoPI learning reset to defaults", self._name)
 
     def load_state(self, state: Dict[str, Any]):
         """Load persistent state"""

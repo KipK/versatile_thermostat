@@ -601,6 +601,28 @@ class ThermostatTPI(BaseThermostat[T], Generic[T]):
 
         return result
 
+    async def service_reset_auto_pi_learning(self):
+        """Called by a service call:
+        service: versatile_thermostat.reset_auto_pi_learning
+        target:
+            entity_id: climate.thermostat_1
+        """
+        write_event_log(_LOGGER, self, "Calling SERVICE_RESET_AUTO_PI_LEARNING")
+
+        if self._proportional_function != PROPORTIONAL_FUNCTION_AUTO_PI:
+             raise ServiceValidationError(f"{self} - This service is only available for AutoPI algorithm.")
+
+        if self._prop_algorithm:
+             self._prop_algorithm.reset_learning()
+             # Force save
+             if self._auto_pi_storage:
+                  data = self._prop_algorithm.save_state()
+                  await self._auto_pi_storage.async_save(data)
+                  _LOGGER.info("%s - AutoPI state reset and saved.", self)
+
+        self.update_custom_attributes()
+        self.async_write_ha_state()
+
     async def async_set_auto_tpi_mode(
         self,
         auto_tpi_mode: bool,

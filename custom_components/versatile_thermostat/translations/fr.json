@@ -940,6 +940,10 @@
         }
       }
     },
+    "reset_auto_pi_learning": {
+      "name": "Réinitialiser l'apprentissage AutoPI",
+      "description": "Réinitialiser l'apprentissage de l'algorithme AutoPI aux valeurs par défaut."
+    },
     "set_tpi_parameters": {
       "name": "Définir les paramètres TPI",
       "description": "Modifier les paramètres TPI",

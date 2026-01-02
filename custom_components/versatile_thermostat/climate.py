@@ -197,3 +197,9 @@ async def async_setup_entry(
         supports_response=SupportsResponse.OPTIONAL,
     )
 
+    platform.async_register_entity_service(
+        SERVICE_RESET_AUTO_PI_LEARNING,
+        {},
+        "service_reset_auto_pi_learning",
+    )
+

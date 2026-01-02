@@ -363,3 +363,10 @@ auto_tpi_calibrate_capacity:
             example: true
             selector:
                 boolean:
+
+reset_auto_pi_learning:
+    name: Reset AutoPI learning
+    description: Reset the learning of the AutoPI algorithm to default values.
+    target:
+        entity:
+            integration: versatile_thermostat
