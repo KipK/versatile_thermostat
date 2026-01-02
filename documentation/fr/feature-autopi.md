@@ -40,10 +40,13 @@ L'algorithme **AutoPI** est un régulateur adaptatif qui apprend automatiquement
 - **Après quelques jours** : Le modèle est affiné et la régulation devient optimale
 
 ### Avantages
-
-✅ **Pas de réglage manuel** : Pas besoin de trouver les bons coefficients Kint/Kext  
-✅ **S'adapte aux changements** : Si vous changez de radiateur ou isolez, il se ré-adapte  
-✅ **Évite les oscillations** : La bande morte intégrée empêche les régulations inutiles près de la consigne  
+ 
+ ✅ **Pas de réglage manuel** : Pas besoin de trouver les bons coefficients Kint/Kext  
+ ✅ **S'adapte aux changements** : Si vous changez de radiateur ou isolez, il se ré-adapte  
+ ✅ **Évite les oscillations** : La bande morte intégrée empêche les régulations inutiles près de la consigne  
+ ✅ **Robuste aux perturbations** : L'algo ignore les variations brutales (ex: ouverture de fenêtre) pour ne pas fausser le modèle.
+ ✅ **Gestion de l'inertie** : Prend en compte le temps de réaction ("Dead time") de votre chauffage pour éviter de chauffer trop tôt ou trop tard.
+ ✅ **Gain Scheduling** : Ajuste la douceur de la régulation en fonction de la distance à la consigne (plus doux à l'approche du but).
 
 ## Configuration
 
