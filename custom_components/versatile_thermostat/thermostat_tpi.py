@@ -20,7 +20,7 @@ from .auto_tpi_manager import AutoTpiManager
 from .const import *  # pylint: disable=wildcard-import, unused-wildcard-import
 from .vtherm_hvac_mode import VThermHvacMode_OFF, VThermHvacMode_HEAT, VThermHvacMode_COOL
 from .commons import write_event_log
-from .pid_controller import AutoPI, PROPORTIONAL_FUNCTION_AUTO_PI
+from .autopi_algorithm import AutoPI
 from homeassistant.helpers.storage import Store
 
 
