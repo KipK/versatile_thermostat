@@ -93,7 +93,17 @@ Une fois qu'il connaît la pièce ($a$, $b$) et son inertie (Dead time), il calc
 
 *Le "Gain Scheduling" réduit ces gains quand on est proche de la consigne pour un atterrissage en douceur.*
 
-### 4. Application de la commande
+### 4. Apprentissage du temps de réponse (Dead Time)
+
+AutoPI apprend automatiquement le **temps de réponse** de votre système de chauffage :
+- Il observe le délai entre l'activation du radiateur et le début de la montée en température
+- Cette information est utilisée pour :
+  - **Geler l'intégrateur** : Pendant le dead time, l'intégrale ne s'accumule pas (évite les oscillations)
+  - **Ajuster les gains** : Un dead time plus long entraîne des gains plus conservateurs
+
+L'algorithme collecte plusieurs échantillons et utilise la médiane pour une estimation robuste.
+
+### 5. Application de la commande
 Enfin, il calcule la puissance à envoyer au radiateur :
 $$ u = u_{ff} + u_{pi} $$
 - **$u_{ff}$ (Feed-forward)** : La puissance juste nécessaire pour maintenir la température (basé sur $T_{ext}$ et les déperditions $b$).

@@ -11,6 +11,7 @@ Based on regul6.py:
 import logging
 import math
 import statistics
+import time
 from collections import deque
 from dataclasses import dataclass, field
 from typing import Dict, Any, Optional, Tuple, Deque, List
@@ -59,6 +60,16 @@ AW_BACKCALC_ENABLE = True
 AW_BACKCALC_GAIN = 0.40
 INTEGRAL_LEAK = 0.985
 SETPOINT_BUMPLESS_MAX_DU = 0.12
+
+# Dead time learning constants
+DEADTIME_INIT_S = 180
+DEADTIME_MIN_S = 60
+DEADTIME_MAX_S = 1800  # 30 minutes max
+DEADTIME_SAMPLES_MAX = 40
+DEAD_DT_MIN_C = 0.02  # Minimum temperature change for deadtime detection
+DEAD_DTPM_TH = 0.003  # Slope threshold (°C/min) to consider heating response started
+DEADTIME_LEARN_E_MIN_C = 0.20  # Minimum |filtered error| to allow learning
+DEADTIME_LEARN_U_MIN = 0.25  # Minimum u_cycle for significant heating
 
 
 def clamp(x: float, lo: float, hi: float) -> float:
@@ -152,6 +163,29 @@ class UHistory:
             if t < target and best_dt < 1.0:
                  break
         return float(best_u)
+
+
+@dataclass
+class DeadtimeEstimator:
+    """Estimates thermal dead time using robust median of samples."""
+    samples: Deque[int] = field(default_factory=lambda: deque(maxlen=DEADTIME_SAMPLES_MAX))
+    current_estimate: int = DEADTIME_INIT_S
+    
+    def add_sample(self, delay_s: int) -> None:
+        """Add a new dead time sample."""
+        if DEADTIME_MIN_S <= delay_s <= DEADTIME_MAX_S:
+            self.samples.append(delay_s)
+            self._update_estimate()
+            
+    def _update_estimate(self) -> None:
+        """Update the estimate using median of samples."""
+        if len(self.samples) >= 1:
+            self.current_estimate = int(statistics.median(self.samples))
+            self.current_estimate = clamp(self.current_estimate, DEADTIME_MIN_S, DEADTIME_MAX_S)
+            
+    def get_estimate(self) -> int:
+        """Return current dead time estimate in seconds."""
+        return self.current_estimate
 
 
 @dataclass
@@ -327,7 +361,22 @@ class AutoPI:
         
         # Dead time management
         self.u_history = UHistory()
-        self.deadtime_s = 180  # Default initial dead time
+        self.deadtime_estimator = DeadtimeEstimator()
+        
+        # Actuator tracking for dead time learning and integrator hold
+        self._pending_on_front_ts: Optional[float] = None
+        self._last_actuator_change_ts: float = 0.0
+        self._actuator_is_on: bool = False
+        self._last_u_cycle: float = 0.0  # u_cycle at last ON front
+        
+        # Time tracking for dt_min calculation
+        self._last_calculate_ts: float = 0.0
+        self._boot_ts: float = time.time()
+        self._last_setpoint_change_ts: float = 0.0
+        
+        # Temperature tracking for dead time learning
+        self._prev_temp: Optional[float] = None
+        self._prev_temp_ts: Optional[float] = None
         
         # PI State
         self.integral: float = 0.0
@@ -339,6 +388,9 @@ class AutoPI:
         # Current gains
         self.Kp: float = 0.8  # Will be smoothed
         self.Ki: float = 0.05
+        
+        # Integrator hold state
+        self._integrator_hold: bool = False
         
         # Outputs
         self._on_percent: float = 0.0
@@ -353,15 +405,24 @@ class AutoPI:
 
         _LOGGER.debug("%s - Robust AutoPI initialized", self._name)
 
+    @property
+    def deadtime_s(self) -> int:
+        """Return current dead time estimate."""
+        return self.deadtime_estimator.get_estimate()
+
     def reset_learning(self):
         """Reset learning to default values."""
         self.est = ABEstimator()
+        self.deadtime_estimator = DeadtimeEstimator()
         self.integral = 0.0
         self.u_prev = 0.0
         self._prev_error = 0.0
         self.e_filt = None
         self.Kp = 0.8
         self.Ki = 0.05
+        self._pending_on_front_ts = None
+        self._prev_temp = None
+        self._prev_temp_ts = None
         _LOGGER.info("%s - AutoPI learning reset to defaults", self._name)
 
     def load_state(self, state: Dict[str, Any]):
@@ -377,12 +438,24 @@ class AutoPI:
              
         self.integral = state.get('integral', 0.0)
         self.u_prev = state.get('u_prev', 0.0)
-        self.deadtime_s = int(state.get('deadtime_s', 180))
+        
+        # Load dead time estimator state
+        deadtime_samples = state.get('deadtime_samples', [])
+        if deadtime_samples:
+            self.deadtime_estimator.samples = deque(deadtime_samples, maxlen=DEADTIME_SAMPLES_MAX)
+            self.deadtime_estimator._update_estimate()
+        else:
+            # Fallback to old format
+            self.deadtime_estimator.current_estimate = int(state.get('deadtime_s', DEADTIME_INIT_S))
+            
         # Keep existing gains as starting point
         self.Kp = state.get('Kp', 0.8)
         self.Ki = state.get('Ki', 0.05)
         
-        _LOGGER.debug("%s - AutoPI state loaded: a=%.6f, b=%.6f, dt=%ds", self._name, self.est.a, self.est.b, self.deadtime_s)
+        _LOGGER.debug(
+            "%s - AutoPI state loaded: a=%.6f, b=%.6f, dt=%ds, samples=%d", 
+            self._name, self.est.a, self.est.b, self.deadtime_s, len(self.deadtime_estimator.samples)
+        )
 
     def save_state(self) -> Dict[str, Any]:
         """Return state for persistence"""
@@ -394,9 +467,32 @@ class AutoPI:
             'integral': self.integral,
             'u_prev': self.u_prev,
             'deadtime_s': self.deadtime_s,
+            'deadtime_samples': list(self.deadtime_estimator.samples),
             'Kp': self.Kp,
             'Ki': self.Ki,
         }
+    
+    def notify_setpoint_change(self, t_set_old: float, t_set_new: float, t_in: float, is_major: bool = False):
+        """
+        Handle setpoint changes.
+        
+        Args:
+            t_set_old: Previous setpoint
+            t_set_new: New setpoint
+            t_in: Current temperature
+            is_major: If True, reset integral completely (mode change like eco->comfort)
+        """
+        self._last_setpoint_change_ts = time.time()
+        
+        if is_major:
+            # Major change: reset integral and filter
+            self.integral = 0.0
+            self.e_filt = None
+            _LOGGER.debug("%s - Major setpoint change detected, integral reset", self._name)
+        else:
+            # Minor change: bumpless transfer
+            self.bump_integral_for_setpoint_change(t_set_old, t_set_new, t_in)
+            _LOGGER.debug("%s - Minor setpoint change, bumpless transfer applied", self._name)
         
     def bump_integral_for_setpoint_change(self, t_set_old: float, t_set_new: float, t_in: float):
         """Bumpless transfer logic."""
@@ -408,6 +504,26 @@ class AutoPI:
         dI = clamp(dI, -dI_max, dI_max)
         self.integral += dI
         
+    def notify_actuator_state(self, is_on: bool, u_cycle: float = 0.0):
+        """
+        Notify the controller of actuator state changes for dead time learning.
+        
+        Args:
+            is_on: True if actuator just turned ON
+            u_cycle: Current u_cycle value (for guard conditions)
+        """
+        now = time.time()
+        was_on = self._actuator_is_on
+        
+        if is_on and not was_on:
+            # Rising edge: actuator turned ON
+            self._pending_on_front_ts = now
+            self._last_u_cycle = u_cycle
+            _LOGGER.debug("%s - Actuator ON front detected at %.0f", self._name, now)
+            
+        self._actuator_is_on = is_on
+        self._last_actuator_change_ts = now
+        
     def update_learning(
         self,
         current_temp: float,
@@ -415,12 +531,10 @@ class AutoPI:
         previous_temp: float,
         previous_power: float,
         hvac_mode: VThermHvacMode,
-        # Additional params usually not in standard signature but needed if we were strictly following regul6
-        # Here we adapt to standard VTherm flow. VTherm calls this ONCE per cycle.
-        # But robust estimator needs 'dT_min'. VTherm cycle is typically self._cycle_min.
     ):
         """
         Update model. Called once per cycle with data from valid previous cycle.
+        Also handles dead time learning.
         """
         if previous_temp is None or previous_power is None or current_temp is None:
             return
@@ -428,17 +542,17 @@ class AutoPI:
         if hvac_mode != VThermHvacMode_HEAT:
             return
             
+        now = time.time()
+        
+        # Dead time learning: detect response to ON front
+        self._learn_deadtime(current_temp, now)
+        
+        # Update temperature tracking
+        self._prev_temp = current_temp
+        self._prev_temp_ts = now
+            
         # We assume 1 cycle elapsed
         dt_min = float(self._cycle_min)
-        
-        # In VTherm, previous_power is the average power over the cycle [0..1] check ??
-        # No, update_learning receives `previous_power` which is typically the fractional power if passed correctly.
-        # But wait, typically VTherm passes `self._on_percent` as `previous_power`.
-        # Regul6 uses `u_eff` (delayed).
-        
-        # For this integration, we'll use `previous_power` as `u_eff` approx 
-        # (ignoring deadtime delay for learning purely here, or we could use history buffer if we had timestamps).
-        # Since this is called retrospectively, `previous_power` IS what was applied.
         
         t_ext = ext_current_temp if ext_current_temp is not None else current_temp
         
@@ -450,8 +564,65 @@ class AutoPI:
              dt_min=dt_min
         )
         
-        # Note: Gains are updated in `calculate` step in regul6, but here we can do it too or let calculate do it.
-        # We'll let calculate do it to be responsive to aggressiveness changes immediately.
+    def _learn_deadtime(self, current_temp: float, now: float):
+        """Learn dead time from temperature response after ON front."""
+        # Skip if no pending ON front
+        if self._pending_on_front_ts is None:
+            return
+            
+        # Skip if not enough data
+        if self._prev_temp is None or self._prev_temp_ts is None:
+            return
+            
+        # Calculate temperature slope
+        dt_s = now - self._prev_temp_ts
+        if dt_s < 60:  # Need at least 60s between samples
+            return
+            
+        dT = current_temp - self._prev_temp
+        dTpm = (dT / dt_s) * 60  # Convert to °C/min
+        
+        # Check if slope is positive enough to indicate heating response
+        if dTpm > DEAD_DTPM_TH:
+            # Guard conditions to avoid learning in inadequate situations
+            time_since_setpoint_change = now - self._last_setpoint_change_ts
+            time_since_boot = now - self._boot_ts
+            
+            # Skip if too close to setpoint change or boot
+            if time_since_setpoint_change < 1200:  # 20 min
+                _LOGGER.debug("%s - Deadtime learning skipped: too close to setpoint change", self._name)
+                self._pending_on_front_ts = None
+                return
+                
+            if time_since_boot < 600:  # 10 min
+                _LOGGER.debug("%s - Deadtime learning skipped: too close to boot", self._name)
+                self._pending_on_front_ts = None
+                return
+            
+            # Check error is significant (not in maintenance mode near setpoint)
+            if self.e_filt is not None and abs(self.e_filt) < DEADTIME_LEARN_E_MIN_C:
+                _LOGGER.debug("%s - Deadtime learning skipped: error too small (%.2f)", self._name, self.e_filt)
+                self._pending_on_front_ts = None
+                return
+                
+            # Check u_cycle was significant
+            if self._last_u_cycle < DEADTIME_LEARN_U_MIN:
+                _LOGGER.debug("%s - Deadtime learning skipped: u_cycle too low (%.2f)", self._name, self._last_u_cycle)
+                self._pending_on_front_ts = None
+                return
+                
+            # Calculate and record delay
+            delay_s = int(now - self._pending_on_front_ts)
+            if 30 <= delay_s <= DEADTIME_MAX_S:
+                old_estimate = self.deadtime_s
+                self.deadtime_estimator.add_sample(delay_s)
+                _LOGGER.info(
+                    "%s - Dead time sample: %ds (estimate: %ds -> %ds, samples: %d)",
+                    self._name, delay_s, old_estimate, self.deadtime_s, len(self.deadtime_estimator.samples)
+                )
+            
+            # Consume the pending front
+            self._pending_on_front_ts = None
 
     def calculate(
         self,
@@ -469,6 +640,20 @@ class AutoPI:
             self._on_percent = 0
             self.u_prev = 0
             return
+        
+        now = time.time()
+        
+        # Calculate actual dt_min based on time since last calculate
+        if self._last_calculate_ts > 0:
+            elapsed_min = (now - self._last_calculate_ts) / 60.0
+            dt_min = clamp(elapsed_min, 0.2, 8.0)  # Clamp to reasonable range
+        else:
+            dt_min = 1.0  # Default for first call
+        self._last_calculate_ts = now
+        
+        # Determine integrator hold based on dead time after actuator change
+        time_since_change = now - self._last_actuator_change_ts
+        self._integrator_hold = time_since_change < self.deadtime_s
         
         # 1. Update Gains (Gain Scheduling + IMC)
         a = self.est.a
@@ -555,40 +740,15 @@ class AutoPI:
             
         # PI calculation
         i_max = 2.0 / max(ki, KI_MIN)
-        dt_min = 1.0 # Standard integration step per minute if called per minute, but VTherm calls per cycle
-        # Wait: VTherm calls calculate once every 'cycle_min'.
-        # regul6 loops every minute or event.
-        # If VTherm uses a long cycle (e.g. 10m) and calculate() sets the duty cycle for that 10m,
-        # then dt_min should be 'cycle_min' conceptually for the integral accumulation?
-        # NO, 'integral' in PI is usually Time-integral.
-        # If we update once per 10min, we add e * 10min.
-        
-        # IMPORTANT: 'calculate' in VTherm is called when needed.
-        # If we follow regul6, it renders 'u_now' continuously.
-        # Assuming calculate is called reasonably often (e.g. on temp change).
-        # We will use dt_min = 1.0 as a normalized step or estimate actual time passed?
-        # For stability with variable calling, simpler is to assume we are setting 'u' for the moment.
-        # But 'integral' needs strict time base.
-        # Let's assume standard 1 min step for integral logic to avoid huge jumps if called rarely,
-        # OR better, since VTherm might call it irregularly, we should rely on Kp mostly?
-        # The regul6 logic uses 'dt_min' which is (now - last_t_in_change) clamped.
-        # We don't track time inside calculate easily without storing last timestamp.
-        # For now, let's stick to dt_min = 1.0 as a normalized update "per calculation event" assuming typical event rate,
-        # OR assume VTherm cycle.
-        # In `thermostat_tpi.py`, `calculate` is called periodically.
-        # To be safe and consistent with previous code (RLS version used dt_min = 1.0 hardcoded), we reuse 1.0.
-        
-        dt_min = 1.0 
-        
-        integrator_hold = False # TODO: pass Actuator state implies knowing when heater switched. 
-        # For now, we assume FALSE as we don't strictly track the switch transitions inside this class yet.
-        # Improvements: Pass context to calculate.
         
         u_pi = 0.0
         sat_state = "NO_SAT"
         
         if abs(e) < self.deadband_c:
              self.integral *= INTEGRAL_LEAK
+        elif self._integrator_hold:
+            # Hold integrator during dead time
+            u_pi = kp * e + ki * self.integral
         else:
              u_pi_pre = kp * e + ki * self.integral
              u_raw_pre = u_ff + u_pi_pre
@@ -608,7 +768,7 @@ class AutoPI:
         u_sat = clamp(u_raw, 0.0, 1.0)
         
         # Anti-windup back-calculation
-        if AW_BACKCALC_ENABLE and sat_state != "NO_SAT":
+        if AW_BACKCALC_ENABLE and sat_state != "NO_SAT" and not self._integrator_hold:
             sat_err = u_sat - u_raw
             self.integral += AW_BACKCALC_GAIN * (sat_err / max(ki, KI_MIN))
             self.integral = clamp(self.integral, -i_max, i_max)
@@ -629,7 +789,8 @@ class AutoPI:
         # Capture diag
         self._last_diag = {
             "a": a, "b": b, "Kp": kp, "Ki": ki, "integral": self.integral,
-            "u_bg": self.u_prev, "u_ff": u_ff, "error": e
+            "u_bg": self.u_prev, "u_ff": u_ff, "error": e, 
+            "integrator_hold": self._integrator_hold, "dt_min": dt_min
         }
         
     def _calculate_times(self):
@@ -653,10 +814,12 @@ class AutoPI:
             "integral_error": self.integral,
             "error": self.prev_error,
             "deadtime_s": self.deadtime_s,
+            "deadtime_samples": len(self.deadtime_estimator.samples),
             "learn_ok_count": self.est.learn_ok_count,
             "tau_reliable": self.est.tau_reliability().reliable,
             "last_learn_reason": self.est.learn_last_reason,
             "outliers_count": self.est.outliers_a + self.est.outliers_b,
+            "integrator_hold": self._integrator_hold,
         })
         return diag 
 
@@ -694,3 +857,7 @@ class AutoPI:
         """Return 'b' parameter for compatibility."""
         return self.est.b
 
+    @property
+    def u_ff(self):
+        """Return last u_ff value for diagnostics."""
+        return self._last_diag.get('u_ff', 0.0)
