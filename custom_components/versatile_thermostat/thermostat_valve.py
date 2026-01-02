@@ -14,7 +14,13 @@ from homeassistant.core import Event, HomeAssistant, callback
 from .base_thermostat import BaseThermostat, ConfigData
 from .thermostat_tpi import ThermostatTPI
 
-from .const import *  # pylint: disable=wildcard-import, unused-wildcard-import
+from .const import (
+    CONF_AUTO_REGULATION_DTEMP,
+    CONF_AUTO_REGULATION_PERIOD_MIN,
+    CONF_UNDERLYING_LIST,
+    PROPORTIONAL_FUNCTION_TPI,
+    PROPORTIONAL_FUNCTION_AUTO_PI,
+)
 from .commons import write_event_log
 
 from .underlyings import UnderlyingValve
