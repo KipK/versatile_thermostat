@@ -101,6 +101,7 @@ class PropAlgorithm:
         ext_current_temp: float | None,
         slope: float | None,
         hvac_mode: VThermHvacMode,
+        hvac_action: str | None = None,  # Unused by TPI, for AutoPI compatibility
     ):
         """Do the calculation of the duration"""
         if target_temp is None or current_temp is None:

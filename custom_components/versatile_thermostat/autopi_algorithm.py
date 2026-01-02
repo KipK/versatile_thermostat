@@ -363,11 +363,13 @@ class AutoPI:
         self.u_history = UHistory()
         self.deadtime_estimator = DeadtimeEstimator()
         
-        # Actuator tracking for dead time learning and integrator hold
+        # HVAC action tracking for dead time learning and integrator hold
+        self._prev_hvac_action: Optional[str] = None
         self._pending_on_front_ts: Optional[float] = None
-        self._last_actuator_change_ts: float = 0.0
-        self._actuator_is_on: bool = False
-        self._last_u_cycle: float = 0.0  # u_cycle at last ON front
+        self._last_u_cycle: float = 0.0  # u_cycle at last heating start
+        
+        # Significant heating start: when hvac_action transitions to "heating"
+        self._last_heating_start_ts: float = 0.0
         
         # Time tracking for dt_min calculation
         self._last_calculate_ts: float = 0.0
@@ -488,6 +490,8 @@ class AutoPI:
             # Major change: reset integral and filter
             self.integral = 0.0
             self.e_filt = None
+            # Also trigger integrator hold since this is a significant change
+            self._last_heating_start_ts = time.time()
             _LOGGER.debug("%s - Major setpoint change detected, integral reset", self._name)
         else:
             # Minor change: bumpless transfer
@@ -506,23 +510,11 @@ class AutoPI:
         
     def notify_actuator_state(self, is_on: bool, u_cycle: float = 0.0):
         """
-        Notify the controller of actuator state changes for dead time learning.
-        
-        Args:
-            is_on: True if actuator just turned ON
-            u_cycle: Current u_cycle value (for guard conditions)
+        DEPRECATED: This method is no longer used.
+        Heating state transitions are now tracked via the hvac_action parameter in calculate().
+        Kept for backward compatibility but does nothing.
         """
-        now = time.time()
-        was_on = self._actuator_is_on
-        
-        if is_on and not was_on:
-            # Rising edge: actuator turned ON
-            self._pending_on_front_ts = now
-            self._last_u_cycle = u_cycle
-            _LOGGER.debug("%s - Actuator ON front detected at %.0f", self._name, now)
-            
-        self._actuator_is_on = is_on
-        self._last_actuator_change_ts = now
+        pass
         
     def update_learning(
         self,
@@ -631,6 +623,7 @@ class AutoPI:
         ext_current_temp: float | None,
         slope: float | None,
         hvac_mode: VThermHvacMode,
+        hvac_action: str | None = None,
     ):
         if target_temp is None or current_temp is None:
             self._on_percent = 0
@@ -643,6 +636,19 @@ class AutoPI:
         
         now = time.time()
         
+        # Track hvac_action transitions for dead time learning and integrator hold
+        is_heating = hvac_action == "heating"
+        was_heating = self._prev_hvac_action == "heating"
+        
+        if is_heating and not was_heating:
+            # Transition to heating: start dead time learning window
+            self._pending_on_front_ts = now
+            self._last_heating_start_ts = now
+            self._last_u_cycle = self._on_percent
+            _LOGGER.debug("%s - Heating started (hvac_action transition)", self._name)
+        
+        self._prev_hvac_action = hvac_action
+        
         # Calculate actual dt_min based on time since last calculate
         if self._last_calculate_ts > 0:
             elapsed_min = (now - self._last_calculate_ts) / 60.0
@@ -651,9 +657,10 @@ class AutoPI:
             dt_min = 1.0  # Default for first call
         self._last_calculate_ts = now
         
-        # Determine integrator hold based on dead time after actuator change
-        time_since_change = now - self._last_actuator_change_ts
-        self._integrator_hold = time_since_change < self.deadtime_s
+        # Determine integrator hold based on dead time after SIGNIFICANT heating start
+        # (not every PWM switch, only when heating demand starts from 0)
+        time_since_heating_start = now - self._last_heating_start_ts
+        self._integrator_hold = time_since_heating_start < self.deadtime_s
         
         # 1. Update Gains (Gain Scheduling + IMC)
         a = self.est.a
@@ -737,6 +744,13 @@ class AutoPI:
         if a > 2e-4:
             kff = clamp(b / a, 0.0, 3.0)
             u_ff = clamp(kff * (target_temp - t_ext), 0.0, 1.0)
+            
+            # Scale down feedforward during overshoot (error < 0)
+            # When temp is above setpoint, we don't need maintenance power
+            # Linearly reduce u_ff to 0 as error goes from 0 to -0.5°C
+            if e < 0:
+                overshoot_scale = clamp(1.0 + e / 0.5, 0.0, 1.0)
+                u_ff *= overshoot_scale
             
         # PI calculation
         i_max = 2.0 / max(ki, KI_MIN)
