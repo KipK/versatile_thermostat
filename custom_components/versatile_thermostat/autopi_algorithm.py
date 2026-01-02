@@ -644,7 +644,21 @@ class AutoPI:
 
     def get_diagnostics(self) -> Dict[str, Any]:
         """Return diagnostic information for attributes"""
-        return self._last_diag 
+        diag = self._last_diag.copy()
+        diag.update({
+            "a": self.est.a,
+            "b": self.est.b,
+            "Kp": self.Kp,
+            "Ki": self.Ki,
+            "integral_error": self.integral,
+            "error": self.prev_error,
+            "deadtime_s": self.deadtime_s,
+            "learn_ok_count": self.est.learn_ok_count,
+            "tau_reliable": self.est.tau_reliability().reliable,
+            "last_learn_reason": self.est.learn_last_reason,
+            "outliers_count": self.est.outliers_a + self.est.outliers_b,
+        })
+        return diag 
 
     @property
     def on_percent(self):
