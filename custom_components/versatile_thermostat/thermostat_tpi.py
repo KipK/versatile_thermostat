@@ -109,7 +109,14 @@ class ThermostatTPI(BaseThermostat[T], Generic[T]):
                 self.name,
                 max_on_percent=self._max_on_percent,
             )
-            self._auto_pi_storage = Store(self.hass, 1, f"versatile_thermostat_{self.unique_id}_autopi")
+            self._prop_algorithm = AutoPI(
+                self._cycle_min,
+                self._minimal_activation_delay,
+                self._minimal_deactivation_delay,
+                self.name,
+                max_on_percent=self._max_on_percent,
+            )
+            # Storage will be initialized in async_added_to_hass because self.hass is not ready here
         else:
             self._prop_algorithm = PropAlgorithm(
                 self._proportional_function,
@@ -202,7 +209,10 @@ class ThermostatTPI(BaseThermostat[T], Generic[T]):
                     _LOGGER.info("%s - Auto TPI learning is active (restored from storage)", self)
 
         # Load data for AutoPI (new block)
-        if self._proportional_function == PROPORTIONAL_FUNCTION_AUTO_PI and self._auto_pi_storage:
+        if self._proportional_function == PROPORTIONAL_FUNCTION_AUTO_PI:
+             if not self._auto_pi_storage:
+                 self._auto_pi_storage = Store(self.hass, 1, f"versatile_thermostat_{self.unique_id}_autopi")
+
              state = await self._auto_pi_storage.async_load()
              if state:
                  self._prop_algorithm.load_state(state)

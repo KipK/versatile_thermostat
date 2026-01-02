@@ -319,6 +319,11 @@ class AutoPI:
         return self._on_percent
 
     @property
+    def calculated_on_percent(self):
+        """Required compatibility property"""
+        return self._on_percent
+
+    @property
     def on_time_sec(self):
         return self._on_time_sec
 
