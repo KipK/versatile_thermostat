@@ -370,3 +370,5 @@ reset_auto_pi_learning:
     target:
         entity:
             integration: versatile_thermostat
+            domain:
+                - climate
