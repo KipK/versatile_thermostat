@@ -33,6 +33,7 @@
           "sync_device_internal_temp": "Synchronize device temperature",
           "lock": "Lock",
           "heating_failure_detection": "Heating failure detection",
+          "auto_pi": "AutoPI",
           "auto_tpi_1": "Auto TPI - General",
           "auto_tpi_2": "Auto TPI - Method",
           "auto_tpi_3_avg": "Auto TPI - Average",
@@ -295,7 +296,9 @@
           "heater_heating_time": "Heater warm-up time (min)",
           "heater_cooling_time": "Heater cool-down time (min)",
           "auto_tpi_max_coef_int": "Max Internal Coefficient",
-          "auto_tpi_heating_rate": "Heating rate ({unit}/h)"
+          "auto_tpi_heating_rate": "Heating rate ({unit}/h)",
+          "auto_pi_deadband": "Deadband (°C)",
+          "auto_pi_aggressiveness": "Aggressiveness"
         },
         "data_description": {
           "auto_tpi_enable_update_config": "Automatically update the configuration with learned coefficients",
@@ -337,6 +340,18 @@
         "data_description": {
           "auto_tpi_ema_alpha": "Smoothing factor (0-1). Higher = faster adaptation",
           "auto_tpi_ema_decay_rate": "Rate at which Alpha decreases over time (stabilization)"
+        }
+      },
+      "auto_pi": {
+        "title": "AutoPI Controller Parameters",
+        "description": "Configure the AutoPI adaptive controller parameters.",
+        "data": {
+          "auto_pi_deadband": "Deadband (°C)",
+          "auto_pi_aggressiveness": "Aggressiveness"
+        },
+        "data_description": {
+          "auto_pi_deadband": "Deadband around setpoint. No regulation action within this range. Prevents oscillations near target.",
+          "auto_pi_aggressiveness": "Controller response speed (0.1=very fast, 0.5=balanced, 1.0=slow, 2.0=very slow)"
         }
       },
       "sync_device_internal_temp": {
@@ -420,6 +435,7 @@
           "sync_device_internal_temp": "Synchronize device temperature",
           "lock": "Lock",
           "heating_failure_detection": "Heating failure detection",
+          "auto_pi": "AutoPI",
           "auto_tpi_1": "Auto TPI - General",
           "auto_tpi_2": "Auto TPI - Method",
           "auto_tpi_3_avg": "Auto TPI - Average",
@@ -699,7 +715,9 @@
           "heater_cooling_time": "Heater cool-down time (min)",
           "auto_tpi_max_coef_int": "Max Internal Coefficient",
           "auto_tpi_heating_rate": "Heating rate (°C/h)",
-          "auto_tpi_cooling_rate": "Cooling rate (°C/h)"
+          "auto_tpi_cooling_rate": "Cooling rate (°C/h)",
+          "auto_pi_deadband": "Deadband (°C)",
+          "auto_pi_aggressiveness": "Aggressiveness"
         },
         "data_description": {
           "auto_tpi_enable_update_config": "Automatically update the configuration with learned coefficients",
@@ -708,7 +726,9 @@
           "auto_tpi_continuous_learning": "If set, the system will continue calculating and applying new coefficients silently after learning is finished (EMA method recommended).",
           "heater_heating_time": "Time to reach full power (minutes)",
           "heater_cooling_time": "Time to cool down after stop (minutes)",
-          "auto_tpi_max_coef_int": "Maximum allowed value for the internal coefficient (Coeff Int)"
+          "auto_tpi_max_coef_int": "Maximum allowed value for the internal coefficient (Coeff Int)",
+          "auto_pi_deadband": "Deadband around setpoint (°C). No regulation within this range",
+          "auto_pi_aggressiveness": "Controller aggressiveness (0.1=very aggressive, 1.0=slow, 2.0=very slow)"
         }
       },
       "auto_tpi_2": {

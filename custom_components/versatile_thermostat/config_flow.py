@@ -523,6 +523,10 @@ class VersatileThermostatBaseConfigFlow(FlowHandler):
         ):
             menu_options.append("tpi")
 
+        # Auto-PI menu visible when AutoPI algorithm is selected OR in central config
+        if self._infos.get(CONF_PROP_FUNCTION) == PROPORTIONAL_FUNCTION_AUTO_PI or is_central_config:
+            menu_options.append("auto_pi")
+
         if self._infos.get(CONF_THERMOSTAT_TYPE) in [
             CONF_THERMOSTAT_SWITCH,
             CONF_THERMOSTAT_VALVE,
@@ -833,6 +837,15 @@ class VersatileThermostatBaseConfigFlow(FlowHandler):
         schema = STEP_AUTO_TPI_3_EMA_SCHEMA
         next_step = self.async_step_menu
         return await self.generic_step("auto_tpi_3_ema", schema, user_input, next_step)
+
+    async def async_step_auto_pi(self, user_input: dict | None = None) -> FlowResult:
+        """Handle the Auto-PI specific configuration step"""
+        _LOGGER.debug(
+            "Into ConfigFlow.async_step_auto_pi user_input=%s", user_input
+        )
+        schema = STEP_AUTO_PI_SCHEMA
+        next_step = self.async_step_menu
+        return await self.generic_step("auto_pi", schema, user_input, next_step)
 
     async def async_step_presets(self, user_input: dict | None = None) -> FlowResult:
         """Handle the presets flow steps"""

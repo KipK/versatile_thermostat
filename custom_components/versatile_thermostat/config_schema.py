@@ -522,6 +522,22 @@ STEP_AUTO_TPI_1_SCHEMA = vol.Schema(
     }
 )
 
+# AutoPI specific configuration (visible only when AutoPI algorithm is selected)
+STEP_AUTO_PI_SCHEMA = vol.Schema(
+    {
+        vol.Optional(CONF_AUTO_PI_DEADBAND, default=0.05): selector.NumberSelector(
+            selector.NumberSelectorConfig(
+                min=0.0, max=1.0, step=0.01, mode=selector.NumberSelectorMode.BOX
+            )
+        ),
+        vol.Optional(CONF_AUTO_PI_AGGRESSIVENESS, default=0.5): selector.NumberSelector(
+            selector.NumberSelectorConfig(
+                min=0.1, max=2.0, step=0.1, mode=selector.NumberSelectorMode.BOX
+            )
+        ),
+    }
+)
+
 STEP_AUTO_TPI_2_SCHEMA = vol.Schema(
     {
         vol.Required(

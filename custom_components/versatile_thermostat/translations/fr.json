@@ -33,6 +33,7 @@
           "sync_device_internal_temp": "Synchronisation de la température de l'appareil",
           "lock": "Gestion du verrouilage",
           "heating_failure_detection": "Détection de panne de chauffage",
+          "auto_pi": "AutoPI",
           "auto_tpi_1": "Auto TPI - Général",
           "auto_tpi_2": "Auto TPI - Méthode",
           "auto_tpi_3_avg": "Auto TPI - Moyenne",
@@ -343,6 +344,18 @@
           "auto_tpi_ema_decay_rate": "Taux auquel Alpha diminue avec le temps (stabilisation)"
         }
       },
+      "auto_pi": {
+        "title": "Paramètres du contrôleur AutoPI",
+        "description": "Configuration des paramètres du contrôleur AutoPI adaptatif.",
+        "data": {
+          "auto_pi_deadband": "Bande morte (°C)",
+          "auto_pi_aggressiveness": "Agressivité"
+        },
+        "data_description": {
+          "auto_pi_deadband": "Bande morte autour de la consigne. Aucune action de régulation dans cette plage. Évite les oscillations près de la cible.",
+          "auto_pi_aggressiveness": "Vitesse de réponse du contrôleur (0.1=très rapide, 0.5=équilibré, 1.0=lent, 2.0=très lent)"
+        }
+      },
       "sync_device_internal_temp": {
         "title": "Synchronisation de la température interne des sous-jacents",
         "description": "Configuration de la synchronisation des températures internes des sous-jacents&nbsp;[![?](https://img.icons8.com/color/18/help.png)](https://github.com/jmcollin78/versatile_thermostat/blob/main/documentation/fr/feature-sync_device_temp.md)",
@@ -424,6 +437,7 @@
           "sync_device_internal_temp": "Synchronisation de la température de l'appareil",
           "lock": "Verrouillage",
           "heating_failure_detection": "Détection de panne de chauffage",
+          "auto_pi": "AutoPI",
           "auto_tpi_1": "Auto TPI - Général",
           "auto_tpi_2": "Auto TPI - Méthode",
           "auto_tpi_3_avg": "Auto TPI - Moyenne",
@@ -735,6 +749,18 @@
         "data_description": {
           "auto_tpi_ema_alpha": "Facteur de lissage (0-1). Plus élevé = adaptation plus rapide",
           "auto_tpi_ema_decay_rate": "Taux auquel Alpha diminue avec le temps (stabilisation)"
+        }
+      },
+      "auto_pi": {
+        "title": "Paramètres du contrôleur AutoPI - {name}",
+        "description": "Configuration des paramètres du contrôleur AutoPI adaptatif.",
+        "data": {
+          "auto_pi_deadband": "Bande morte (°C)",
+          "auto_pi_aggressiveness": "Agressivité"
+        },
+        "data_description": {
+          "auto_pi_deadband": "Bande morte autour de la consigne. Aucune action de régulation dans cette plage. Évite les oscillations près de la cible.",
+          "auto_pi_aggressiveness": "Vitesse de réponse du contrôleur (0.1=très rapide, 0.5=équilibré, 1.0=lent, 2.0=très lent)"
         }
       },
       "sync_device_internal_temp": {
