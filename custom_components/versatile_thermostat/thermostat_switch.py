@@ -221,6 +221,14 @@ class ThermostatOverSwitch(ThermostatTPI[UnderlyingSwitch]):
         if old_state is None:
             self.hass.create_task(self._check_initial_state())
 
+        # Notify AutoPI of actuator state change for dead time learning
+        if (self._proportional_function == PROPORTIONAL_FUNCTION_AUTO_PI 
+            and self._prop_algorithm is not None
+            and hasattr(self._prop_algorithm, 'notify_actuator_state')):
+            is_on = new_state.state == "on"
+            u_cycle = self.safe_on_percent
+            self._prop_algorithm.notify_actuator_state(is_on, u_cycle)
+
         self.calculate_hvac_action()
         self.update_custom_attributes()
         self.async_write_ha_state()
