@@ -147,6 +147,7 @@ STEP_THERMOSTAT_SWITCH = vol.Schema(  # pylint: disable=invalid-name
         vol.Required(CONF_PROP_FUNCTION, default=PROPORTIONAL_FUNCTION_TPI): vol.In(
             [
                 PROPORTIONAL_FUNCTION_TPI,
+                PROPORTIONAL_FUNCTION_AUTO_PI,
             ]
         ),
         vol.Optional(CONF_AC_MODE, default=False): cv.boolean,
@@ -195,6 +196,7 @@ STEP_THERMOSTAT_VALVE = vol.Schema(  # pylint: disable=invalid-name
         vol.Required(CONF_PROP_FUNCTION, default=PROPORTIONAL_FUNCTION_TPI): vol.In(
             [
                 PROPORTIONAL_FUNCTION_TPI,
+                PROPORTIONAL_FUNCTION_AUTO_PI,
             ]
         ),
         vol.Optional(CONF_AC_MODE, default=False): cv.boolean,
@@ -228,6 +230,7 @@ STEP_VALVE_REGULATION = vol.Schema(  # pylint: disable=invalid-name
         vol.Required(CONF_PROP_FUNCTION, default=PROPORTIONAL_FUNCTION_TPI): vol.In(
             [
                 PROPORTIONAL_FUNCTION_TPI,
+                PROPORTIONAL_FUNCTION_AUTO_PI,
             ]
         ),
         vol.Optional(CONF_OPENING_THRESHOLD_DEGREE, default=0): cv.positive_int,

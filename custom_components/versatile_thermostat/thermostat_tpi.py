@@ -19,6 +19,9 @@ from .auto_tpi_manager import AutoTpiManager
 from .const import *  # pylint: disable=wildcard-import, unused-wildcard-import
 from .vtherm_hvac_mode import VThermHvacMode_OFF, VThermHvacMode_HEAT, VThermHvacMode_COOL
 from .commons import write_event_log
+from .pid_controller import AutoPI, PROPORTIONAL_FUNCTION_AUTO_PI
+from homeassistant.helpers.storage import Store
+
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -41,6 +44,9 @@ class ThermostatTPI(BaseThermostat[T], Generic[T]):
         self._auto_tpi_enable_update_config: bool = False
         self._auto_tpi_enable_notification: bool = False
         self._prop_algorithm = None
+        self._auto_pi_storage = None
+        self._last_cycle_start_temp = None
+        self._last_cycle_power = None
         self._auto_tpi_manager: AutoTpiManager | None = None
 
         super().__init__(hass, unique_id, name, entry_infos)
@@ -94,19 +100,29 @@ class ThermostatTPI(BaseThermostat[T], Generic[T]):
             )
             self._tpi_coef_ext = 0
 
-        # Initialize PropAlgorithm
-        self._prop_algorithm = PropAlgorithm(
-            self._proportional_function,
-            self._tpi_coef_int,
-            self._tpi_coef_ext,
-            self._cycle_min,
-            self._minimal_activation_delay,
-            self._minimal_deactivation_delay,
-            self.name,
-            max_on_percent=self._max_on_percent,
-            tpi_threshold_low=self._tpi_threshold_low,
-            tpi_threshold_high=self._tpi_threshold_high,
-        )
+        # Initialize PropAlgorithm or AutoPI
+        if self._proportional_function == PROPORTIONAL_FUNCTION_AUTO_PI:
+            self._prop_algorithm = AutoPI(
+                self._cycle_min,
+                self._minimal_activation_delay,
+                self._minimal_deactivation_delay,
+                self.name,
+                max_on_percent=self._max_on_percent,
+            )
+            self._auto_pi_storage = Store(self.hass, 1, f"versatile_thermostat_{self.unique_id}_autopi")
+        else:
+            self._prop_algorithm = PropAlgorithm(
+                self._proportional_function,
+                self._tpi_coef_int,
+                self._tpi_coef_ext,
+                self._cycle_min,
+                self._minimal_activation_delay,
+                self._minimal_deactivation_delay,
+                self.name,
+                max_on_percent=self._max_on_percent,
+                tpi_threshold_low=self._tpi_threshold_low,
+                tpi_threshold_high=self._tpi_threshold_high,
+            )
 
         # Initialize Auto TPI Manager from merged config
         heater_heating_time = self._entry_infos.get(CONF_AUTO_TPI_HEATER_HEATING_TIME, 5)
@@ -185,6 +201,13 @@ class ThermostatTPI(BaseThermostat[T], Generic[T]):
                 else:
                     _LOGGER.info("%s - Auto TPI learning is active (restored from storage)", self)
 
+        # Load data for AutoPI (new block)
+        if self._proportional_function == PROPORTIONAL_FUNCTION_AUTO_PI and self._auto_pi_storage:
+             state = await self._auto_pi_storage.async_load()
+             if state:
+                 self._prop_algorithm.load_state(state)
+                 _LOGGER.info("%s - Loaded AutoPI state", self)
+
         await super().async_added_to_hass()
 
     async def async_startup(self, central_configuration):
@@ -205,6 +228,11 @@ class ThermostatTPI(BaseThermostat[T], Generic[T]):
         if self._auto_tpi_manager:
             self._auto_tpi_manager.stop_cycle_loop()
             self.hass.async_create_task(self._auto_tpi_manager.async_save_data())
+        
+        if self._proportional_function == PROPORTIONAL_FUNCTION_AUTO_PI and self._auto_pi_storage:
+            data = self._prop_algorithm.save_state()
+            self.hass.async_create_task(self._auto_pi_storage.async_save(data))
+
         super().remove_thermostat()
 
     def _is_central_boiler_off(self) -> bool:
@@ -237,7 +265,7 @@ class ThermostatTPI(BaseThermostat[T], Generic[T]):
             )
 
         # Sync coefficients from AutoTpiManager before calculating
-        if self._auto_tpi_manager and self._auto_tpi_manager.learning_active:
+        if self._auto_tpi_manager and self._auto_tpi_manager.learning_active and self._proportional_function != PROPORTIONAL_FUNCTION_AUTO_PI:
             new_params = await self._auto_tpi_manager.calculate()
             if new_params:
                 new_coef_int = new_params.get(CONF_TPI_COEF_INT)
@@ -248,8 +276,27 @@ class ThermostatTPI(BaseThermostat[T], Generic[T]):
                     _LOGGER.debug("%s - Synced TPI coeffs before cycle: int=%.3f, ext=%.3f",
                                   self, new_coef_int, new_coef_ext)
 
+        # For AutoPI: Update learning (RLS) once per cycle
+        if self._proportional_function == PROPORTIONAL_FUNCTION_AUTO_PI:
+            # We need previous cycle start temp and power
+            if self._last_cycle_start_temp is not None and self._last_cycle_power is not None:
+                self._prop_algorithm.update_learning(
+                    current_temp=self._cur_temp,
+                    ext_current_temp=self._cur_ext_temp,
+                    previous_temp=self._last_cycle_start_temp,
+                    previous_power=self._last_cycle_power,
+                    hvac_mode=self.vtherm_hvac_mode
+                )
+            # Update trackers for next cycle
+            self._last_cycle_start_temp = self._cur_temp
+
+
         # Force recalculation with potentially updated coefficients
         self.recalculate()
+        
+        # Capture the power that will be applied this cycle
+        if self._proportional_function == PROPORTIONAL_FUNCTION_AUTO_PI:
+             self._last_cycle_power = self.safe_on_percent
 
         return {
             "on_time_sec": self._prop_algorithm.on_time_sec if self._prop_algorithm else 0,
