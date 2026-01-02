@@ -23,7 +23,7 @@ L'algorithme **AutoPI** est un régulateur adaptatif qui apprend automatiquement
 │                    AutoPI                           │
 │                                                     │
 │   Température ──► Apprentissage ──► Modèle pièce   │
-│   Puissance   ──►    (RLS)      ──► (a, b)         │
+│   Puissance   ──► (Robust Est.) ──► (a, b)         │
 │                         │                           │
 │                         ▼                           │
 │               Calcul des gains (Kp, Ki)             │
@@ -82,7 +82,7 @@ AutoPI est particulièrement adapté pour :
 | **Configuration** | Complexe (Kint, Kext) | Moyenne | Simple (2 paramètres) |
 | **Temps d'adaptation** | Immédiat | ~50 cycles | Continu |
 | **Apprentissage** | Aucun | Phase finie | Permanent |
-| **Type de modèle** | Proportionnel simple | Observation statistique | Modèle thermique (RLS) |
+| **Type de modèle** | Proportionnel simple | Observation statistique | Modèle thermique (Robust Estimator) |
 
 > **Note** : AutoPI est une approche complémentaire à TPI et Auto-TPI. Il convient particulièrement aux utilisateurs qui préfèrent une solution automatique sans configuration.
 
