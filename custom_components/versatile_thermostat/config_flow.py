@@ -831,12 +831,37 @@ class VersatileThermostatBaseConfigFlow(FlowHandler):
         return await self.generic_step("auto_tpi_3_ema", schema, user_input, next_step)
 
     async def async_step_auto_pi(self, user_input: dict | None = None) -> FlowResult:
-        """Handle the Auto-PI specific configuration step"""
+        """Handle the Auto-PI configuration step (checkbox for central config)"""
         _LOGGER.debug(
             "Into ConfigFlow.async_step_auto_pi user_input=%s", user_input
         )
-        schema = STEP_AUTO_PI_SCHEMA
+
         next_step = self.async_step_menu
+        if self._infos[CONF_THERMOSTAT_TYPE] == CONF_THERMOSTAT_CENTRAL_CONFIG:
+            # Central config: show parameters directly
+            schema = STEP_AUTO_PI_CENTRAL_SCHEMA
+        else:
+            # VTherm: show checkbox first
+            schema = STEP_AUTO_PI_SCHEMA
+
+            if user_input:
+                if user_input.get(CONF_USE_AUTO_PI_CENTRAL_CONFIG, False) is False:
+                    if self._infos.get(COMES_FROM) == "async_step_spec_auto_pi":
+                        schema = STEP_AUTO_PI_PARAMS_SCHEMA
+                        del self._infos[COMES_FROM]
+                    else:
+                        next_step = self.async_step_spec_auto_pi
+
+        return await self.generic_step("auto_pi", schema, user_input, next_step)
+
+    async def async_step_spec_auto_pi(self, user_input: dict | None = None) -> FlowResult:
+        """Handle the specific Auto-PI parameters step"""
+        _LOGGER.debug("Into ConfigFlow.async_step_spec_auto_pi user_input=%s", user_input)
+
+        schema = STEP_AUTO_PI_PARAMS_SCHEMA
+        self._infos[COMES_FROM] = "async_step_spec_auto_pi"
+        next_step = self.async_step_menu
+
         return await self.generic_step("auto_pi", schema, user_input, next_step)
 
     async def async_step_presets(self, user_input: dict | None = None) -> FlowResult:
