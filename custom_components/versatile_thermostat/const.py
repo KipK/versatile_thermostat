@@ -461,6 +461,8 @@ SERVICE_UNLOCK = "unlock"
 SERVICE_SET_TPI_PARAMETERS = "set_tpi_parameters"
 SERVICE_SET_AUTO_TPI_MODE = "set_auto_tpi_mode"
 SERVICE_AUTO_TPI_CALIBRATE_CAPACITY = "auto_tpi_calibrate_capacity"
+SERVICE_RESET_AUTO_PI_LEARNING = "reset_auto_pi_learning"
+
 SERVICE_SET_TIMED_PRESET = "set_timed_preset"
 SERVICE_CANCEL_TIMED_PRESET = "cancel_timed_preset"
 

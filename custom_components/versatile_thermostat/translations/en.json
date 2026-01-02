@@ -1007,6 +1007,10 @@
         }
       }
     },
+    "reset_auto_pi_learning": {
+      "name": "Reset AutoPI learning",
+      "description": "Reset the learning of the AutoPI algorithm to default values."
+    },
     "set_tpi_parameters": {
       "name": "Set TPI parameters",
       "description": "Change the TPI parameters",

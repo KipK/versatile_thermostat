@@ -85,3 +85,22 @@ AutoPI est particulièrement adapté pour :
 | **Type de modèle** | Proportionnel simple | Observation statistique | Modèle thermique (RLS) |
 
 > **Note** : AutoPI est une approche complémentaire à TPI et Auto-TPI. Il convient particulièrement aux utilisateurs qui préfèrent une solution automatique sans configuration.
+
+## Services
+
+### reset_auto_pi_learning
+
+Ce service permet de réinitialiser complètement l'apprentissage de l'algorithme AutoPI. Toutes les données apprises (modèle thermique, gains du régulateur) sont remises à leurs valeurs par défaut.
+
+Cela peut être utile si :
+- Vous avez effectué des travaux d'isolation importants
+- Vous avez changé le radiateur
+- Le comportement du thermostat ne semble plus optimal après un événement extérieur perturbateur
+
+L'apprentissage recommencera de zéro dès le prochain cycle de chauffe.
+
+```yaml
+service: versatile_thermostat.reset_auto_pi_learning
+target:
+  entity_id: climate.my_thermostat
+```
