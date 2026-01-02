@@ -6,7 +6,8 @@ import asyncio
 from datetime import datetime, timedelta
 from functools import partial
 
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import HomeAssistant, callback, Event
+from homeassistant.const import EVENT_HOMEASSISTANT_STOP
 from homeassistant.components.climate import HVACMode
 from homeassistant.components.recorder import history, get_instance
 from homeassistant.util import dt as dt_util
@@ -217,6 +218,16 @@ class ThermostatTPI(BaseThermostat[T], Generic[T]):
                  self._prop_algorithm.load_state(state)
                  _LOGGER.info("%s - Loaded AutoPI state", self)
 
+             # Register listener to save state when HA stops
+             async def save_autopi_on_stop(event: Event):
+                 """Save AutoPI state when Home Assistant stops."""
+                 if self._prop_algorithm and self._auto_pi_storage:
+                     data = self._prop_algorithm.save_state()
+                     await self._auto_pi_storage.async_save(data)
+                     _LOGGER.info("%s - Saved AutoPI state on HA stop", self)
+
+             self.hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, save_autopi_on_stop)
+
         await super().async_added_to_hass()
 
     async def async_startup(self, central_configuration):
@@ -296,6 +307,10 @@ class ThermostatTPI(BaseThermostat[T], Generic[T]):
                     previous_power=self._last_cycle_power,
                     hvac_mode=self.vtherm_hvac_mode
                 )
+                # Save state periodically after learning updates (survives reboots)
+                if self._auto_pi_storage:
+                    data = self._prop_algorithm.save_state()
+                    self.hass.async_create_task(self._auto_pi_storage.async_save(data))
             # Update trackers for next cycle
             self._last_cycle_start_temp = self._cur_temp
 
