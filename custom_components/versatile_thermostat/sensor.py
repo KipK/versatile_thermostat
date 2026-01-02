@@ -43,6 +43,7 @@ from .const import (
     CONF_DEVICE_POWER,
     CONF_PROP_FUNCTION,
     PROPORTIONAL_FUNCTION_TPI,
+    PROPORTIONAL_FUNCTION_SMART_PI,
     CONF_THERMOSTAT_SWITCH,
     CONF_THERMOSTAT_VALVE,
     CONF_THERMOSTAT_CLIMATE,
@@ -102,7 +103,7 @@ async def async_setup_entry(
             ]:
                 entities.append(MeanPowerSensor(hass, unique_id, name, entry.data))
 
-        if entry.data.get(CONF_PROP_FUNCTION) == PROPORTIONAL_FUNCTION_TPI:
+        if entry.data.get(CONF_PROP_FUNCTION) in [PROPORTIONAL_FUNCTION_TPI, PROPORTIONAL_FUNCTION_SMART_PI]:
             entities.append(OnPercentSensor(hass, unique_id, name, entry.data))
             entities.append(OnTimeSensor(hass, unique_id, name, entry.data))
             entities.append(OffTimeSensor(hass, unique_id, name, entry.data))
