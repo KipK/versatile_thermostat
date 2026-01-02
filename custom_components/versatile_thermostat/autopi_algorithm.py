@@ -13,7 +13,7 @@ import logging
 from typing import Dict, Any, Optional
 
 from .vtherm_hvac_mode import VThermHvacMode, VThermHvacMode_COOL, VThermHvacMode_OFF, VThermHvacMode_HEAT
-from .const import PROPORTIONAL_FUNCTION_AUTO_PI
+
 
 _LOGGER = logging.getLogger(__name__)
 
