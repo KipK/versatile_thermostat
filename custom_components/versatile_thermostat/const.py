@@ -17,6 +17,7 @@ from homeassistant.util import dt as dt_util
 
 from .prop_algorithm import (
     PROPORTIONAL_FUNCTION_TPI,
+    PROPORTIONAL_FUNCTION_AUTO_PI,
 )
 
 from .vtherm_preset import VThermPreset, VThermPresetWithAC, VThermPresetWithAway, VThermPresetWithACAway, PRESET_TEMP_SUFFIX, PRESET_AWAY_SUFFIX  # pylint: disable=unused-import
@@ -399,6 +400,7 @@ ALL_CONF = (
 
 CONF_FUNCTIONS = [
     PROPORTIONAL_FUNCTION_TPI,
+    PROPORTIONAL_FUNCTION_AUTO_PI,
 ]
 
 CONF_AUTO_REGULATION_MODES = [
