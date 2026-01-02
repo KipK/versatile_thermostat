@@ -33,6 +33,7 @@
           "sync_device_internal_temp": "Synchronize device temperature",
           "lock": "Lock",
           "heating_failure_detection": "Heating failure detection",
+          "smart_pi": "SmartPI",
           "auto_tpi_1": "Auto TPI - General",
           "auto_tpi_2": "Auto TPI - Method",
           "auto_tpi_3_avg": "Auto TPI - Average",
@@ -118,7 +119,7 @@
         "data_description": {
           "underlying_entity_ids": "The device(s) to be controlled - 1 is required",
           "heater_keep_alive": "Optional heater switch state refresh interval. Leave empty if not required.",
-          "proportional_function": "Algorithm to use (TPI is the only one for now)",
+          "proportional_function": "Algorithm to use (TPI or SmartPI)",
           "ac_mode": "Use the Air Conditioning (AC) mode",
           "sync_device_internal_temp": "Check to synchronize the internal temperature of the underlying device (fill the new menu item 'Synchronize device temperature' to configure it)",
           "auto_regulation_mode": "Auto adjustment of the target temperature",
@@ -278,7 +279,7 @@
           "offset_calibration_entity_ids": "The list of the 'offset calibration' entities. Set it if your TRV has the entity for better regulation. There should be one per underlying climate entities",
           "opening_degree_entity_ids": "The list of the 'opening degree' entities. There should be one per underlying climate entities",
           "closing_degree_entity_ids": "The list of the 'closing degree' entities. Set it if your TRV has the entity for better regulation. There should be one per underlying climate entities",
-          "proportional_function": "Algorithm to use (TPI is the only one for now)",
+          "proportional_function": "Algorithm to use (TPI or SmartPI)",
           "opening_threshold_degree": "Valve opening value under which the valve should be considered as closed (and then 'max_closing_degree' will apply)",
           "min_opening_degrees": "Opening degree minimum value for each underlying device when previous threshold is exceeded, comma separated. Default to 0. Example: 20, 25, 30",
           "max_closing_degree": "Closing degree maximum value. The valve will never be closed above this value. Set it to 100 to fully close the valve"
@@ -295,7 +296,9 @@
           "heater_heating_time": "Heater warm-up time (min)",
           "heater_cooling_time": "Heater cool-down time (min)",
           "auto_tpi_max_coef_int": "Max Internal Coefficient",
-          "auto_tpi_heating_rate": "Heating rate ({unit}/h)"
+          "auto_tpi_heating_rate": "Heating rate ({unit}/h)",
+          "smart_pi_deadband": "Deadband (°C)",
+          "smart_pi_aggressiveness": "Aggressiveness"
         },
         "data_description": {
           "auto_tpi_enable_update_config": "Automatically update the configuration with learned coefficients",
@@ -337,6 +340,20 @@
         "data_description": {
           "auto_tpi_ema_alpha": "Smoothing factor (0-1). Higher = faster adaptation",
           "auto_tpi_ema_decay_rate": "Rate at which Alpha decreases over time (stabilization)"
+        }
+      },
+      "smart_pi": {
+        "title": "SmartPI Controller Parameters",
+        "description": "Configure the SmartPI adaptive controller parameters.",
+        "data": {
+          "use_smart_pi_central_config": "Use central SmartPI configuration",
+          "smart_pi_deadband": "Deadband (°C)",
+          "smart_pi_aggressiveness": "Aggressiveness"
+        },
+        "data_description": {
+          "use_smart_pi_central_config": "Check to use the central SmartPI configuration. Uncheck to use a specific SmartPI configuration for this VTherm",
+          "smart_pi_deadband": "Deadband around setpoint. No regulation action within this range. Prevents oscillations near target.",
+          "smart_pi_aggressiveness": "Controller response speed (0.1=very fast, 0.5=balanced, 1.0=slow, 2.0=very slow)"
         }
       },
       "sync_device_internal_temp": {
@@ -420,6 +437,7 @@
           "sync_device_internal_temp": "Synchronize device temperature",
           "lock": "Lock",
           "heating_failure_detection": "Heating failure detection",
+          "smart_pi": "SmartPI",
           "auto_tpi_1": "Auto TPI - General",
           "auto_tpi_2": "Auto TPI - Method",
           "auto_tpi_3_avg": "Auto TPI - Average",
@@ -505,7 +523,7 @@
         "data_description": {
           "underlying_entity_ids": "The device(s) to be controlled - 1 is required",
           "heater_keep_alive": "Optional heater switch state refresh interval. Leave empty if not required.",
-          "proportional_function": "Algorithm to use (TPI is the only one for now)",
+          "proportional_function": "Algorithm to use (TPI or SmartPI)",
           "ac_mode": "Use the Air Conditioning (AC) mode",
           "sync_device_internal_temp": "Check to synchronize the internal temperature of the underlying device (fill the new menu item 'Synchronize device temperature' to configure it)",
           "auto_regulation_mode": "Auto adjustment of the target temperature",
@@ -669,7 +687,7 @@
           "offset_calibration_entity_ids": "The list of the 'offset calibration' entities. Set it if your TRV has the entity for better regulation. There should be one per underlying climate entities",
           "opening_degree_entity_ids": "The list of the 'opening degree' entities. There should be one per underlying climate entities",
           "closing_degree_entity_ids": "The list of the 'closing degree' entities. Set it if your TRV has the entity for better regulation. There should be one per underlying climate entities",
-          "proportional_function": "Algorithm to use (TPI is the only one for now)",
+          "proportional_function": "Algorithm to use (TPI or SmartPI)",
           "opening_threshold_degree": "Valve opening value under which the valve should be considered as closed (and then 'max_closing_degree' will apply)",
           "min_opening_degrees": "Opening degree minimum value for each underlying device when previous threshold is exceeded, comma separated. Default to 0. Example: 20, 25, 30",
           "max_closing_degree": "Closing degree maximum value. The valve will never be closed above this value. Set it to 100 to fully close the valve"
@@ -699,7 +717,9 @@
           "heater_cooling_time": "Heater cool-down time (min)",
           "auto_tpi_max_coef_int": "Max Internal Coefficient",
           "auto_tpi_heating_rate": "Heating rate (°C/h)",
-          "auto_tpi_cooling_rate": "Cooling rate (°C/h)"
+          "auto_tpi_cooling_rate": "Cooling rate (°C/h)",
+          "smart_pi_deadband": "Deadband (°C)",
+          "smart_pi_aggressiveness": "Aggressiveness"
         },
         "data_description": {
           "auto_tpi_enable_update_config": "Automatically update the configuration with learned coefficients",
@@ -708,7 +728,9 @@
           "auto_tpi_continuous_learning": "If set, the system will continue calculating and applying new coefficients silently after learning is finished (EMA method recommended).",
           "heater_heating_time": "Time to reach full power (minutes)",
           "heater_cooling_time": "Time to cool down after stop (minutes)",
-          "auto_tpi_max_coef_int": "Maximum allowed value for the internal coefficient (Coeff Int)"
+          "auto_tpi_max_coef_int": "Maximum allowed value for the internal coefficient (Coeff Int)",
+          "smart_pi_deadband": "Deadband around setpoint (°C). No regulation within this range",
+          "smart_pi_aggressiveness": "Controller aggressiveness (0.1=very aggressive, 1.0=slow, 2.0=very slow)"
         }
       },
       "auto_tpi_2": {

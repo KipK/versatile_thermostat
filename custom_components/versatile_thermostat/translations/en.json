@@ -32,6 +32,7 @@
           "valve_regulation": "Valve regulation configuration",
           "sync_device_internal_temp": "Synchronize device temperature",
           "lock": "Lock",
+          "smart_pi": "SmartPI",
           "auto_tpi_1": "Auto TPI - General",
           "auto_tpi_2": "Auto TPI - Method",
           "auto_tpi_3_avg": "Auto TPI - Average",
@@ -341,6 +342,20 @@
           "auto_tpi_ema_decay_rate": "Rate at which Alpha decreases over time (stabilization)"
         }
       },
+      "smart_pi": {
+        "title": "SmartPI Controller Parameters",
+        "description": "Configure the SmartPI adaptive controller parameters.",
+        "data": {
+          "use_smart_pi_central_config": "Use central SmartPI configuration",
+          "smart_pi_deadband": "Deadband (°C)",
+          "smart_pi_aggressiveness": "Aggressiveness"
+        },
+        "data_description": {
+          "use_smart_pi_central_config": "Check to use the central SmartPI configuration. Uncheck to use a specific SmartPI configuration for this VTherm",
+          "smart_pi_deadband": "Deadband around setpoint. No regulation action within this range. Prevents oscillations near target.",
+          "smart_pi_aggressiveness": "Controller response speed (0.1=very fast, 0.5=balanced, 1.0=slow, 2.0=very slow)"
+        }
+      },
       "sync_device_internal_temp": {
         "title": "Synchronize device internal temperature",
         "description": "Configuration to synchronize the internal temperature of the underlying devices with selected entities&nbsp;[![?](https://img.icons8.com/color/18/help.png)](https://github.com/jmcollin78/versatile_thermostat/blob/main/documentation/en/feature-sync_device_temp.md)",
@@ -422,6 +437,7 @@
           "sync_device_internal_temp": "Synchronize device temperature",
           "lock": "Lock",
           "heating_failure_detection": "Heating failure detection",
+          "smart_pi": "SmartPI",
           "auto_tpi_1": "Auto TPI - General",
           "auto_tpi_2": "Auto TPI - Method",
           "auto_tpi_3_avg": "Auto TPI - Average",
@@ -765,6 +781,20 @@
           "heating_failure_detection_delay": "Time in minutes to wait before checking if temperature has changed as expected",
           "temperature_change_tolerance": "Minimum temperature change in degrees to consider significant. Smaller changes are ignored to filter sensor noise (default: 0.5°C)"
         }
+      },
+      "smart_pi": {
+        "title": "SmartPI Controller Parameters - {name}",
+        "description": "Configure the SmartPI adaptive controller parameters.",
+        "data": {
+          "use_smart_pi_central_config": "Use central SmartPI configuration",
+          "smart_pi_deadband": "Deadband (°C)",
+          "smart_pi_aggressiveness": "Aggressiveness"
+        },
+        "data_description": {
+          "use_smart_pi_central_config": "Check to use the central SmartPI configuration. Uncheck to use a specific SmartPI configuration for this VTherm",
+          "smart_pi_deadband": "Deadband around setpoint. No regulation action within this range. Prevents oscillations near target.",
+          "smart_pi_aggressiveness": "Controller response speed (0.1=very fast, 0.5=balanced, 1.0=slow, 2.0=very slow)"
+        }
       }
     },
     "error": {
@@ -976,6 +1006,10 @@
           "description": "Minimum power percentage to consider a cycle as saturated (default 95%). Lower values will include more cycles but may be less accurate."
         }
       }
+    },
+    "reset_smart_pi_learning": {
+      "name": "Reset SmartPI learning",
+      "description": "Reset the learning of the SmartPI algorithm to default values."
     },
     "set_tpi_parameters": {
       "name": "Set TPI parameters",

@@ -350,6 +350,15 @@ auto_tpi_calibrate_capacity:
             selector:
                 boolean:
 
+reset_smart_pi_learning:
+    name: Reset SmartPI learning
+    description: Reset the learning of the SmartPI algorithm to default values.
+    target:
+        entity:
+            integration: versatile_thermostat
+            domain:
+                - climate
+
 set_timed_preset:
     name: Set Timed Preset
     description: Force a preset for a given duration. After the duration expires, the original preset will be restored.
