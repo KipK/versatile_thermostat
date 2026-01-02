@@ -32,6 +32,7 @@
           "valve_regulation": "Valve regulation configuration",
           "sync_device_internal_temp": "Synchronize device temperature",
           "lock": "Lock",
+          "auto_pi": "AutoPI",
           "auto_tpi_1": "Auto TPI - General",
           "auto_tpi_2": "Auto TPI - Method",
           "auto_tpi_3_avg": "Auto TPI - Average",
@@ -338,6 +339,18 @@
           "auto_tpi_ema_decay_rate": "Rate at which Alpha decreases over time (stabilization)"
         }
       },
+      "auto_pi": {
+        "title": "AutoPI Controller Parameters",
+        "description": "Configure the AutoPI adaptive controller parameters.",
+        "data": {
+          "auto_pi_deadband": "Deadband (°C)",
+          "auto_pi_aggressiveness": "Aggressiveness"
+        },
+        "data_description": {
+          "auto_pi_deadband": "Deadband around setpoint. No regulation action within this range. Prevents oscillations near target.",
+          "auto_pi_aggressiveness": "Controller response speed (0.1=very fast, 0.5=balanced, 1.0=slow, 2.0=very slow)"
+        }
+      },
       "sync_device_internal_temp": {
         "title": "Synchronize device internal temperature",
         "description": "Configuration to synchronize the internal temperature of the underlying devices with selected entities&nbsp;[![?](https://img.icons8.com/color/18/help.png)](https://github.com/jmcollin78/versatile_thermostat/blob/main/documentation/en/feature-sync_device_temp.md)",
@@ -398,6 +411,7 @@
           "valve_regulation": "Valve regulation configuration",
           "sync_device_internal_temp": "Synchronize device temperature",
           "lock": "Lock",
+          "auto_pi": "AutoPI",
           "auto_tpi_1": "Auto TPI - General",
           "auto_tpi_2": "Auto TPI - Method",
           "auto_tpi_3_avg": "Auto TPI - Average",
@@ -717,6 +731,18 @@
         "data_description": {
           "auto_tpi_ema_alpha": "Smoothing factor (0-1). Higher = faster adaptation",
           "auto_tpi_ema_decay_rate": "Rate at which Alpha decreases over time (stabilization)"
+        }
+      },
+      "auto_pi": {
+        "title": "AutoPI Controller Parameters - {name}",
+        "description": "Configure the AutoPI adaptive controller parameters.",
+        "data": {
+          "auto_pi_deadband": "Deadband (°C)",
+          "auto_pi_aggressiveness": "Aggressiveness"
+        },
+        "data_description": {
+          "auto_pi_deadband": "Deadband around setpoint. No regulation action within this range. Prevents oscillations near target.",
+          "auto_pi_aggressiveness": "Controller response speed (0.1=very fast, 0.5=balanced, 1.0=slow, 2.0=very slow)"
         }
       }
     },

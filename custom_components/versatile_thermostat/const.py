@@ -171,6 +171,9 @@ CONF_AUTO_TPI_HEATING_POWER = "auto_tpi_heating_rate"
 CONF_AUTO_TPI_COOLING_POWER = "auto_tpi_cooling_rate"
 CONF_AUTO_TPI_EMA_DECAY_RATE = "auto_tpi_ema_decay_rate"
 
+# AutoPI specific parameters
+CONF_AUTO_PI_DEADBAND = "auto_pi_deadband"
+CONF_AUTO_PI_AGGRESSIVENESS = "auto_pi_aggressiveness"
 
 # Global params into configuration.yaml
 CONF_SHORT_EMA_PARAMS = "short_ema_params"

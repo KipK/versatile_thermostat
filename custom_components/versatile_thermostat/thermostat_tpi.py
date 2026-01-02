@@ -102,19 +102,18 @@ class ThermostatTPI(BaseThermostat[T], Generic[T]):
 
         # Initialize PropAlgorithm or AutoPI
         if self._proportional_function == PROPORTIONAL_FUNCTION_AUTO_PI:
+            # Get AutoPI specific parameters from config
+            auto_pi_deadband = self._entry_infos.get(CONF_AUTO_PI_DEADBAND, 0.05)
+            auto_pi_aggressiveness = self._entry_infos.get(CONF_AUTO_PI_AGGRESSIVENESS, 0.5)
+
             self._prop_algorithm = AutoPI(
                 self._cycle_min,
                 self._minimal_activation_delay,
                 self._minimal_deactivation_delay,
                 self.name,
                 max_on_percent=self._max_on_percent,
-            )
-            self._prop_algorithm = AutoPI(
-                self._cycle_min,
-                self._minimal_activation_delay,
-                self._minimal_deactivation_delay,
-                self.name,
-                max_on_percent=self._max_on_percent,
+                deadband_c=auto_pi_deadband,
+                aggressiveness=auto_pi_aggressiveness,
             )
             # Storage will be initialized in async_added_to_hass because self.hass is not ready here
         else:
