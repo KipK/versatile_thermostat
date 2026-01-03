@@ -145,9 +145,6 @@ class AutoPI:
         self._on_time_sec: int = 0
         self._off_time_sec: int = 0
         
-        # Temperature tracking for learning
-        self._last_t_in: Optional[float] = None
-        
         # Last calculated values for diagnostics
         self._last_u_ff: float = 0.0
         self._last_error: float = 0.0
@@ -202,11 +199,6 @@ class AutoPI:
         """Last feed-forward value."""
         return self._last_u_ff
 
-    @property
-    def deadtime_s(self) -> int:
-        """Dead time (not used in simplified version, kept for API)."""
-        return 0
-
     def reset_learning(self) -> None:
         """Reset all learned parameters to defaults."""
         self.rls = RLS()
@@ -215,7 +207,6 @@ class AutoPI:
         self._prev_error = None
         self.Kp = 0.8
         self.Ki = 0.05
-        self._last_t_in = None
         _LOGGER.info("%s - AutoPI learning reset to defaults", self._name)
 
     def load_state(self, state: Dict[str, Any]) -> None:
@@ -268,10 +259,6 @@ class AutoPI:
                 d_integral = clamp(d_integral, -10.0, 10.0)
                 self.integral += d_integral
                 _LOGGER.debug("%s - Bumpless transfer applied", self._name)
-
-    def notify_actuator_state(self, is_on: bool, u_cycle: float = 0.0) -> None:
-        """Deprecated: kept for API compatibility."""
-        pass
 
     def update_learning(
         self,
