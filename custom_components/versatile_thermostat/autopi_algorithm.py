@@ -429,9 +429,22 @@ class AutoPI:
 
     def get_diagnostics(self) -> Dict[str, Any]:
         """Return diagnostic information for attributes."""
+        # Thermal time constant (minutes) - how fast the room responds
+        tau_min = 1.0 / max(self.rls.theta_b, 1e-6)
+
+        # Model confidence: 0-100% based on covariance reduction
+        # P starts at 1000, converges toward smaller values after learning
+        confidence_a = max(0.0, min(100.0, 100.0 * (1.0 - self.rls.P11 / 1000.0)))
+        confidence_b = max(0.0, min(100.0, 100.0 * (1.0 - self.rls.P22 / 1000.0)))
+        model_confidence = (confidence_a + confidence_b) / 2.0
+
         return {
             "a": self.rls.theta_a,
             "b": self.rls.theta_b,
+            "tau_min": round(tau_min, 1),
+            "confidence_a": round(confidence_a, 1),
+            "confidence_b": round(confidence_b, 1),
+            "model_confidence": round(model_confidence, 1),
             "Kp": self.Kp,
             "Ki": self.Ki,
             "integral_error": self.integral,
