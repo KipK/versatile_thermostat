@@ -745,13 +745,6 @@ class AutoPI:
             kff = clamp(b / a, 0.0, 3.0)
             u_ff = clamp(kff * (target_temp - t_ext), 0.0, 1.0)
             
-            # Scale down feedforward during overshoot (error < 0)
-            # When temp is above setpoint, we don't need maintenance power
-            # Linearly reduce u_ff to 0 as error goes from 0 to -0.5°C
-            if e < 0:
-                overshoot_scale = clamp(1.0 + e / 0.5, 0.0, 1.0)
-                u_ff *= overshoot_scale
-            
         # PI calculation
         i_max = 2.0 / max(ki, KI_MIN)
         
