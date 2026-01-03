@@ -47,6 +47,8 @@ def test_autopi_calculation():
     assert "u_ff" in diag
     assert "effective_Kp" in diag
     assert "effective_Ki" in diag
+    assert "learning_cycles" in diag
+    assert "model_confidence" in diag
 
 def test_overshoot_unwinding():
     """Test that integral is reduced when in overshoot."""
@@ -138,6 +140,7 @@ def test_reset_learning():
     autopi.rls.theta_a = 0.02
     autopi.rls.theta_b = 0.005
     autopi.integral = 10.0
+    autopi._learning_cycles = 25
     
     # Reset
     autopi.reset_learning()
@@ -146,6 +149,7 @@ def test_reset_learning():
     assert autopi.rls.theta_a == 0.0005  # A_INIT
     assert autopi.rls.theta_b == 0.0010  # B_INIT
     assert autopi.integral == 0.0
+    assert autopi._learning_cycles == 0
 
 
 def test_anti_windup():

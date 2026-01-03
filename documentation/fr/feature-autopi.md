@@ -122,16 +122,15 @@ L'algorithme expose plusieurs métriques dans les attributs de l'entité climate
 | **a** | Efficacité du chauffage (°C/min à 100% de puissance) |
 | **b** | Coefficient de déperdition (1/min) |
 | **tau_min** | Constante de temps thermique de la pièce (en minutes) |
-| **confidence_a** | Confiance dans le paramètre a (0-100%) |
-| **confidence_b** | Confiance dans le paramètre b (0-100%) |
-| **model_confidence** | Confiance globale dans le modèle (moyenne de a et b) |
+| **learning_cycles** | Nombre de cycles d'apprentissage effectués |
+| **model_confidence** | Confiance globale dans le modèle (0-100%, basée sur les cycles) |
 | **Kp**, **Ki** | Gains de base du régulateur PI calculés par SIMC |
 | **effective_Kp**, **effective_Ki** | Gains effectifs après gain scheduling |
 | **u_ff** | Composante feed-forward de la commande |
 | **error** | Écart entre la consigne et la température actuelle |
 | **integral_error** | Erreur intégrale accumulée |
 
-La métrique `model_confidence` est particulièrement utile : une valeur proche de 0% signifie que l'algorithme vient de démarrer, tandis qu'une valeur élevée (>80%) indique que le modèle thermique est bien établi.
+La métrique `model_confidence` est basée sur le nombre de cycles d'apprentissage : elle atteint 100% après 50 cycles de chauffe observés, ce qui reflète réellement la qualité des données apprises.
 
 ## Cas d'utilisation recommandés
 
