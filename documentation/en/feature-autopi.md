@@ -132,6 +132,33 @@ The algorithm exposes several metrics in the climate entity attributes:
 
 The `model_confidence` metric is based on the number of learning cycles: it reaches 100% after 50 observed heating cycles, which truly reflects the quality of learned data.
 
+## Tips for optimal learning
+
+For the algorithm to effectively learn the thermal behavior of your room, follow these recommendations:
+
+### ✅ Do
+
+- **Set a stable setpoint** for at least 2-3 days
+- **Moderate setpoint**: 1-2°C above current temperature (generates partial cycles, more informative)
+- **Keep the system in HEAT mode** (the algorithm only learns during heating)
+- **Wait for day/night cycles** (outdoor temperature variations help learn thermal losses)
+
+### ❌ Don't
+
+- **Change the setpoint frequently**: creates transients that disturb learning
+- **Set temperature too high**: causes 100% power cycles, less informative
+- **Open windows**: disrupts the thermal model being learned
+- **Manually turn off heating**: interrupts data collection
+
+### Recommended procedure
+
+1. Activate AutoPI and verify the thermostat is in HEAT mode
+2. Set the target to ~1-2°C above current temperature
+3. Let it run for 2-3 days without changing the setpoint
+4. Check in attributes that `learning_cycles` > 50
+5. The `model_confidence` should reach 100%
+
+> **Note**: The algorithm continues learning permanently. The initial phase establishes a baseline, then it continuously refines to adapt to changes (weather, insulation, etc.).
 
 ## Recommended use cases
 
