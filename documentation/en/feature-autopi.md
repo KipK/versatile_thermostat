@@ -15,19 +15,22 @@ The **AutoPI** algorithm is an adaptive controller that automatically learns the
 ### How does it work?
 
 1. **Continuous learning**: At each heating cycle, AutoPI observes how the temperature evolves based on the applied power
-2. **Thermal modeling**: It builds a mathematical model that represents your room (inertia, heat losses, heater power)
-3. **Gain adaptation**: The controller parameters are automatically adjusted using the SIMC (Skogestad IMC) method
+2. **Thermal modeling**: It builds a mathematical model that represents your room (inertia, heat losses, heater power) via conditional EWMA estimation
+3. **Gain adaptation**: The controller parameters are automatically adjusted using a heuristic based on the thermal time constant
 
 ```
 ┌─────────────────────────────────────────────────────┐
 │                    AutoPI                           │
 │                                                     │
 │   Temperature ──► Learning ──► Room model           │
-│   Power       ──► (Robust Est.) ──► (a, b)          │
+│   Power       ──► (EWMA cond.) ──► (a, b)          │
+│                         │                           │
+│                         ▼                           │
+│               Tau reliability check                 │
 │                         │                           │
 │                         ▼                           │
 │               Gain calculation (Kp, Ki)             │
-│               via SIMC method                       │
+│               via adaptive heuristic                │
 │                         │                           │
 │                         ▼                           │
 │               Power command (%)                     │
@@ -46,8 +49,9 @@ The **AutoPI** algorithm is an adaptive controller that automatically learns the
  ✅ **Adapts to changes**: If you change your heater or insulate, it re-adapts  
  ✅ **Avoids oscillations**: Built-in gain scheduling for smooth regulation near setpoint  
  ✅ **Robust to disturbances**: The algorithm ignores sudden variations to preserve model accuracy  
- ✅ **Inertia management**: Accounts for heating response time via SIMC method  
- ✅ **Anti-overshoot**: Multi-level protection (adaptive feedforward, proportional unwinding)
+ ✅ **Inertia management**: Accounts for the thermal time constant of your room  
+ ✅ **Anti-overshoot**: Protection via "conditional integration" anti-windup
+ ✅ **Model reliability**: Uses "safe" gains until the model is reliable
 
 ## Configuration
 
@@ -66,7 +70,7 @@ To enable AutoPI:
 
 ### Aggressiveness tuning
 
-Aggressiveness controls the closed-loop time constant (τc) used in SIMC gain calculation. A higher value gives lower gains and thus a slower but more stable response.
+Aggressiveness influences the heuristic gain calculation. A higher value gives lower gains and thus a slower but more stable response.
 
 - **0.3**: Reactive response, for well-insulated rooms with low inertia
 - **0.5**: Balance between performance and stability. Recommended starting point
@@ -82,36 +86,50 @@ At each cycle, the algorithm collects:
 - Outdoor temperature ($T_{ext}$)
 - Power sent to the heater ($u$)
 
-### 2. Modeling (RLS - Recursive Least Squares)
+### 2. Modeling (Conditional EWMA)
 It updates its internal room model defined by two parameters:
 - **a** (Efficiency): How many degrees gained per minute at 100% power
 - **b** (Heat loss): How many degrees lost per minute per degree of difference with outside
 
-The RLS algorithm learns these parameters continuously with a forgetting factor to adapt to changing conditions.
+The algorithm uses **conditional** EWMA (exponential moving average) estimation:
+- **b** is learned primarily during OFF phases (u < 5%), when cooling is observable
+- **a** is learned primarily during ON phases (u > 20%), when heating is significant
 
-### 3. Gain Calculation (SIMC Tuning)
-Once it knows the room ($a$, $b$), it calculates the ideal coefficients for the PI controller using the **SIMC (Skogestad IMC)** method:
+This approach avoids interference between the two parameters and ignores noisy measurements.
+
+### 3. Model Reliability Check
+Before using the learned model, the algorithm verifies its **reliability**:
+- At least 6 successful learning cycles
+- τ (time constant) in a plausible range (30 to 3000 minutes)
+- b is stable (coefficient of variation < 35%)
+
+If these criteria are not met, conservative **"safe" gains** are used (Kp=1.0, Ki=0.003).
+
+### 4. Gain Calculation (Heuristic)
+Once the model is reliable, gains are calculated via a simple heuristic:
 - **τ**: Thermal time constant = 1/b
-- **θ**: Estimated dead time (heating response delay)
-- **τc**: Closed-loop time constant (controlled by aggressiveness)
-- **Kp** = τ / (a × (τc + θ))
-- **Ki** = Kp / min(τ, 4×(τc + θ))
-
-### 4. Gain Scheduling
-When temperature approaches the setpoint (error < 1.5°C), effective gains are progressively reduced to prevent oscillations:
-- At 1.5°C from setpoint: 100% of gains
-- At 0°C from setpoint: 50% of gains
+- **Kp** = 0.35 + 0.9 × (τ / 200), bounded between 0.2 and 1.5
+- **Ki** = Kp / max(τ, 10), bounded between 0.0005 and 0.25
 
 ### 5. Command Application
 Finally, it calculates the power to send to the heater:
 $$ u = u_{ff} + u_{pi} $$
-- **$u_{ff}$ (Feed-forward)**: Power needed to compensate thermal losses. This term is limited during learning phase and reduced to zero during overshoot.
+- **$u_{ff}$ (Feed-forward)**: Power needed to compensate thermal losses. This term is disabled if parameter `a` is too low (unreliable model).
 - **$u_{pi}$ (Correction)**: The surplus to correct the current deviation from setpoint.
 
+### Anti-windup: Conditional Integration
+The algorithm uses an anti-windup technique called **conditional integration**:
+- If output is **saturated at 1.0** AND error is **positive** → integral is NOT updated (I:SKIP)
+- If output is **saturated at 0.0** AND error is **negative** → integral is NOT updated (I:SKIP)
+- Otherwise → normal integration (I:RUN)
+
+This prevents excessive accumulation of integral error ("windup") when the actuator cannot apply more power.
+
+### Integrator Hold (dead time)
+Additionally, if the integrator is in **HOLD** mode (during "dead time" periods after a switching), the integral is frozen to prevent pumping.
+
 ### Overshoot protection
-The algorithm integrates protections against temperature overshoot:
-- Integral is reduced proportionally to overshoot magnitude
-- Power change rate is limited, even more strictly near setpoint
+The power change rate is limited (12% per minute by default) to prevent sudden changes.
 
 ## Diagnostic metrics
 
@@ -122,15 +140,17 @@ The algorithm exposes several metrics in the climate entity attributes:
 | **a** | Heating efficiency (°C/min at 100% power) |
 | **b** | Heat loss coefficient (1/min) |
 | **tau_min** | Thermal time constant of the room (in minutes) |
-| **learning_cycles** | Number of learning cycles observed |
-| **model_confidence** | Overall model confidence (0-100%, based on cycles) |
-| **Kp**, **Ki** | Base PI controller gains calculated by SIMC |
-| **effective_Kp**, **effective_Ki** | Effective gains after gain scheduling |
+| **tau_reliable** | Indicates if the thermal model is considered reliable |
+| **learn_ok_count** | Number of successful learning cycles |
+| **learn_last_reason** | Reason for the last learning result |
+| **Kp**, **Ki** | PI controller gains (calculated or "safe") |
 | **u_ff** | Feed-forward component of the command |
+| **i_mode** | Integrator state (I:RUN, I:SKIP, I:HOLD, I:LEAK) |
 | **error** | Difference between setpoint and current temperature |
+| **error_filtered** | EMA-filtered error (smoothing for quantized sensors) |
 | **integral_error** | Accumulated integral error |
 
-The `model_confidence` metric is based on the number of learning cycles: it reaches 100% after 50 observed heating cycles, which truly reflects the quality of learned data.
+The `tau_reliable` metric becomes `true` when the model has accumulated enough reliable data (at least 6 successful learning cycles, τ in a plausible range, and stable b).
 
 ## Tips for optimal learning
 
@@ -155,8 +175,8 @@ For the algorithm to effectively learn the thermal behavior of your room, follow
 1. Activate AutoPI and verify the thermostat is in HEAT mode
 2. Set the target to ~1-2°C above current temperature
 3. Let it run for 2-3 days without changing the setpoint
-4. Check in attributes that `learning_cycles` > 50
-5. The `model_confidence` should reach 100%
+4. Check in attributes that `learn_ok_count` > 6
+5. The `tau_reliable` metric should become `true`
 
 > **Note**: The algorithm continues learning permanently. The initial phase establishes a baseline, then it continuously refines to adapt to changes (weather, insulation, etc.).
 
@@ -176,8 +196,8 @@ AutoPI is particularly suited for:
 | **Configuration** | Complex (Kint, Kext) | Medium | Simple (2 parameters) |
 | **Adaptation time** | Immediate | ~50 cycles | Continuous |
 | **Learning** | None | Finite phase | Permanent |
-| **Model type** | Simple proportional | Statistical observation | Thermal model (RLS) |
-| **Tuning method** | Manual | Heuristic | SIMC (industrial) |
+| **Model type** | Simple proportional | Statistical observation | Thermal model (EWMA) |
+| **Tuning method** | Manual | Heuristic | Adaptive heuristic |
 
 > **Note**: AutoPI is a complementary approach to TPI and Auto-TPI. It is particularly suited for users who prefer an automatic solution without configuration.
 

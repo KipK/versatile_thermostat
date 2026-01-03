@@ -15,19 +15,22 @@ L'algorithme **AutoPI** est un régulateur adaptatif qui apprend automatiquement
 ### Comment ça marche ?
 
 1. **Apprentissage continu** : À chaque cycle de chauffage, AutoPI observe comment la température évolue en fonction de la puissance appliquée
-2. **Modélisation thermique** : Il construit un modèle mathématique qui représente votre pièce (inertie, déperditions, puissance du radiateur)
-3. **Adaptation des gains** : Les paramètres du régulateur sont automatiquement ajustés selon la méthode SIMC (Skogestad IMC)
+2. **Modélisation thermique** : Il construit un modèle mathématique qui représente votre pièce (inertie, déperditions, puissance du radiateur) via une estimation EWMA conditionnelle
+3. **Adaptation des gains** : Les paramètres du régulateur sont automatiquement ajustés via une heuristique basée sur la constante de temps thermique
 
 ```
 ┌─────────────────────────────────────────────────────┐
 │                    AutoPI                           │
 │                                                     │
 │   Température ──► Apprentissage ──► Modèle pièce   │
-│   Puissance   ──► (Robust Est.) ──► (a, b)         │
+│   Puissance   ──► (EWMA cond.)  ──► (a, b)         │
+│                         │                           │
+│                         ▼                           │
+│               Vérification fiabilité tau            │
 │                         │                           │
 │                         ▼                           │
 │               Calcul des gains (Kp, Ki)             │
-│               via méthode SIMC                      │
+│               via heuristique adaptative            │
 │                         │                           │
 │                         ▼                           │
 │               Commande de puissance (%)             │
@@ -46,8 +49,9 @@ L'algorithme **AutoPI** est un régulateur adaptatif qui apprend automatiquement
  ✅ **S'adapte aux changements** : Si vous changez de radiateur ou isolez, il se ré-adapte  
  ✅ **Évite les oscillations** : Gain scheduling intégré pour une régulation douce près de la consigne  
  ✅ **Robuste aux perturbations** : L'algo ignore les variations brutales pour ne pas fausser le modèle  
- ✅ **Gestion de l'inertie** : Prend en compte le temps de réaction de votre chauffage via la méthode SIMC  
- ✅ **Anti-dépassement** : Protection multi-niveau contre l'overshoot (feedforward adaptatif, unwinding proportionnel)
+ ✅ **Gestion de l'inertie** : Prend en compte la constante de temps thermique de votre pièce  
+ ✅ **Anti-dépassement** : Protection par "conditional integration" anti-windup
+ ✅ **Fiabilité du modèle** : Utilise des gains "safe" tant que le modèle n'est pas fiable
 
 ## Configuration
 
@@ -66,7 +70,7 @@ Pour activer AutoPI :
 
 ### Réglage de l'agressivité
 
-L'agressivité contrôle la constante de temps en boucle fermée (τc) utilisée dans le calcul SIMC des gains. Une valeur plus haute donne des gains plus faibles et donc une réponse plus lente mais plus stable.
+L'agressivité influence le calcul heuristique des gains. Une valeur plus haute donne des gains plus faibles et donc une réponse plus lente mais plus stable.
 
 - **0.3** : Réponse réactive, pour des pièces bien isolées avec peu d'inertie
 - **0.5** : Équilibre performance/stabilité. Point de départ recommandé
@@ -82,36 +86,50 @@ Le fonctionnement d'AutoPI peut se découper en 5 étapes cycliques :
 - La température extérieure ($T_{ext}$)
 - La puissance qui a été envoyée au radiateur ($u$)
 
-### 2. Modélisation (RLS - Recursive Least Squares)
+### 2. Modélisation (EWMA conditionnelle)
 Il met à jour son modèle interne de la pièce défini par deux paramètres :
 - **a** (Efficacité) : Combien de degrés je gagne par minute si je chauffe à 100%
 - **b** (Déperdition) : Combien de degrés je perds par minute par degré d'écart avec l'extérieur
 
-L'algorithme RLS apprend ces paramètres en continu avec un facteur d'oubli pour s'adapter aux changements de conditions.
+L'algorithme utilise une estimation EWMA (moyenne mobile exponentielle) **conditionnelle** :
+- **b** est appris principalement pendant les phases OFF (u < 5%), quand le refroidissement est observable
+- **a** est appris principalement pendant les phases ON (u > 20%), quand le chauffage est significatif
 
-### 3. Calcul des Gains (SIMC Tuning)
-Une fois qu'il connaît la pièce ($a$, $b$), il calcule les coefficients idéaux pour le régulateur PI selon la méthode **SIMC (Skogestad IMC)** :
+Cette approche évite les interférences entre les deux paramètres et ignore les mesures bruitées.
+
+### 3. Vérification de la fiabilité du modèle
+Avant d'utiliser le modèle appris, l'algorithme vérifie sa **fiabilité** :
+- Au moins 6 cycles d'apprentissage réussis
+- τ (constante de temps) dans une plage plausible (30 à 3000 minutes)
+- b stable (coefficient de variation < 35%)
+
+Si ces critères ne sont pas remplis, des **gains "safe"** conservateurs sont utilisés (Kp=1.0, Ki=0.003).
+
+### 4. Calcul des Gains (Heuristique)
+Une fois le modèle fiable, les gains sont calculés via une heuristique simple :
 - **τ** : Constante de temps thermique = 1/b
-- **θ** : Dead time estimé (temps de réaction du chauffage)
-- **τc** : Constante de temps en boucle fermée (contrôlée par l'agressivité)
-- **Kp** = τ / (a × (τc + θ))
-- **Ki** = Kp / min(τ, 4×(τc + θ))
-
-### 4. Gain Scheduling
-Quand la température s'approche de la consigne (erreur < 1.5°C), les gains effectifs sont progressivement réduits pour éviter les oscillations :
-- À 1.5°C d'écart : 100% des gains
-- À 0°C d'écart : 50% des gains
+- **Kp** = 0.35 + 0.9 × (τ / 200), borné entre 0.2 et 1.5
+- **Ki** = Kp / max(τ, 10), borné entre 0.0005 et 0.25
 
 ### 5. Application de la commande
 Enfin, il calcule la puissance à envoyer au radiateur :
 $$ u = u_{ff} + u_{pi} $$
-- **$u_{ff}$ (Feed-forward)** : La puissance nécessaire pour compenser les pertes thermiques. Ce terme est limité pendant la phase d'apprentissage et réduit à zéro en cas de dépassement.
+- **$u_{ff}$ (Feed-forward)** : La puissance nécessaire pour compenser les pertes thermiques. Ce terme est désactivé si le paramètre `a` est trop faible (modèle non fiable).
 - **$u_{pi}$ (Correction)** : Le surplus pour corriger l'écart actuel par rapport à la consigne.
 
-### Protection contre le dépassement (overshoot)
-L'algorithme intègre des protections contre le dépassement de température :
-- L'intégrale est réduite proportionnellement à l'amplitude du dépassement
-- La vitesse de changement de puissance est limitée, encore plus strictement près de la consigne
+### Anti-windup : Conditional Integration
+L'algorithme utilise une technique d'anti-windup appelée **conditional integration** :
+- Si la sortie est **saturée à 1.0** ET que l'erreur est **positive** → l'intégrale n'est PAS mise à jour (I:SKIP)
+- Si la sortie est **saturée à 0.0** ET que l'erreur est **négative** → l'intégrale n'est PAS mise à jour (I:SKIP)
+- Sinon → intégration normale (I:RUN)
+
+Cela évite l'accumulation excessive d'erreur intégrale ("windup") quand l'actionneur ne peut pas appliquer plus de puissance.
+
+### Integrator Hold (temps mort)
+De plus, si l'intégrateur est en mode **HOLD** (pendant les périodes de "dead time" après une commutation), l'intégrale est gelée pour éviter le pompage.
+
+### Protection contre le dépassement
+La vitesse de changement de puissance est limitée (12% par minute par défaut) pour éviter les à-coups.
 
 ## Métriques de diagnostic
 
@@ -122,15 +140,17 @@ L'algorithme expose plusieurs métriques dans les attributs de l'entité climate
 | **a** | Efficacité du chauffage (°C/min à 100% de puissance) |
 | **b** | Coefficient de déperdition (1/min) |
 | **tau_min** | Constante de temps thermique de la pièce (en minutes) |
-| **learning_cycles** | Nombre de cycles d'apprentissage effectués |
-| **model_confidence** | Confiance globale dans le modèle (0-100%, basée sur les cycles) |
-| **Kp**, **Ki** | Gains de base du régulateur PI calculés par SIMC |
-| **effective_Kp**, **effective_Ki** | Gains effectifs après gain scheduling |
+| **tau_reliable** | Indique si le modèle thermique est considéré fiable |
+| **learn_ok_count** | Nombre de cycles d'apprentissage réussis |
+| **learn_last_reason** | Raison du dernier résultat d'apprentissage |
+| **Kp**, **Ki** | Gains du régulateur PI (calculés ou "safe") |
 | **u_ff** | Composante feed-forward de la commande |
+| **i_mode** | État de l'intégrateur (I:RUN, I:SKIP, I:HOLD, I:LEAK) |
 | **error** | Écart entre la consigne et la température actuelle |
+| **error_filtered** | Erreur filtrée par EMA (lissage des capteurs quantifiés) |
 | **integral_error** | Erreur intégrale accumulée |
 
-La métrique `model_confidence` est basée sur le nombre de cycles d'apprentissage : elle atteint 100% après 50 cycles de chauffe observés, ce qui reflète réellement la qualité des données apprises.
+La métrique `tau_reliable` devient `true` quand le modèle a accumulé suffisamment de données fiables (au moins 6 apprentissages réussis, τ dans une plage plausible, et b stable).
 
 ## Conseils pour un apprentissage optimal
 
@@ -155,8 +175,8 @@ Pour que l'algorithme apprenne efficacement le comportement thermique de votre p
 1. Activer AutoPI et vérifier que le thermostat est en mode HEAT
 2. Fixer la consigne à ~1-2°C au-dessus de la température actuelle
 3. Laisser fonctionner pendant 2-3 jours sans modifier la consigne
-4. Vérifier dans les attributs que `learning_cycles` > 50
-5. La `model_confidence` devrait atteindre 100%
+4. Vérifier dans les attributs que `learn_ok_count` > 6
+5. La métrique `tau_reliable` devrait passer à `true`
 
 > **Note** : L'algorithme continue d'apprendre en permanence. La phase initiale établit une base, puis il s'affine continuellement pour s'adapter aux changements (météo, isolation, etc.).
 
@@ -176,8 +196,8 @@ AutoPI est particulièrement adapté pour :
 | **Configuration** | Complexe (Kint, Kext) | Moyenne | Simple (2 paramètres) |
 | **Temps d'adaptation** | Immédiat | ~50 cycles | Continu |
 | **Apprentissage** | Aucun | Phase finie | Permanent |
-| **Type de modèle** | Proportionnel simple | Observation statistique | Modèle thermique (RLS) |
-| **Méthode de tuning** | Manuel | Heuristique | SIMC (industriel) |
+| **Type de modèle** | Proportionnel simple | Observation statistique | Modèle thermique (EWMA) |
+| **Méthode de tuning** | Manuel | Heuristique | Heuristique adaptative |
 
 > **Note** : AutoPI est une approche complémentaire à TPI et Auto-TPI. Il convient particulièrement aux utilisateurs qui préfèrent une solution automatique sans configuration.
 
