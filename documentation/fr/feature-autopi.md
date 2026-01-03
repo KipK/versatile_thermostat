@@ -61,15 +61,17 @@ Pour activer AutoPI :
 | Paramètre | Description | Valeur par défaut | Recommandation |
 |-----------|-------------|-------------------|----------------|
 | **Bande morte (°C)** | Zone autour de la consigne où aucune action n'est effectuée. Évite les micro-régulations | 0.05°C | 0.05 - 0.1°C |
-| **Agressivité** | Vitesse de réponse du régulateur. Plus bas = plus rapide | 0.5 | 0.3 (rapide) à 1.0 (lent) |
+| **Agressivité** | Facteur de réponse du régulateur. Plus bas = plus agressif (gains plus élevés) | 0.5 | 0.25 (agressif) à 1.0 (doux) |
 
 ### Réglage de l'agressivité
 
-- **0.1 - 0.3** : Réponse très rapide. Pour des pièces avec faible inertie (petites pièces, chauffage électrique direct)
-- **0.5** : Équilibré. Bon point de départ pour la plupart des installations
-- **1.0 - 2.0** : Réponse lente. Pour des systèmes à forte inertie (plancher chauffant, radiateurs à eau)
+L'agressivité contrôle les gains du régulateur PI (Kp et Ki). Une valeur plus basse donne des gains plus élevés et donc une réponse plus rapide. La valeur par défaut (0.5) donne les gains de base calculés par l'algorithme.
 
-## Fonctionnement détaillé de l'algorithme "Robuste"
+- **0.25** : Gains doublés. Réponse très agressive, pour des pièces qui répondent lentement
+- **0.5** : Gains de base. Point de départ recommandé pour la plupart des installations
+- **1.0** : Gains divisés par 2. Réponse plus douce, pour éviter les oscillations
+
+## Fonctionnement détaillé de l'algorithme
 
 Le fonctionnement d'AutoPI peut se découper en 4 étapes cycliques :
 
@@ -79,35 +81,28 @@ Le fonctionnement d'AutoPI peut se découper en 4 étapes cycliques :
 - La température extérieure ($T_{ext}$)
 - La puissance qui a été envoyée au radiateur ($u$)
 
-### 2. Modélisation (Robust Estimator)
+### 2. Modélisation (RLS - Recursive Least Squares)
 Il met à jour son modèle interne de la pièce défini par deux paramètres :
 - **a** (Efficacité) : Combien de degrés je gagne par minute si je chauffe à 100%.
 - **b** (Déperdition) : Combien de degrés je perds par minute par degré d'écart avec l'extérieur.
 
-C'est ici que l'approche "Robuste" intervient en filtrant les anomalies (ex: chute brutale de température) pour ne pas fausser ces paramètres $a$ et $b$.
+L'algorithme RLS apprend ces paramètres en continu avec un facteur d'oubli pour s'adapter aux changements de conditions.
 
 ### 3. Calcul des Gains (PI Tuning)
-Une fois qu'il connaît la pièce ($a$, $b$) et son inertie (Dead time), il calcule les coefficients idéaux pour le régulateur PI :
-- **Kp** (Proportionnel) : Calculé pour réagir vite mais sans dépasser.
+Une fois qu'il connaît la pièce ($a$, $b$), il calcule les coefficients idéaux pour le régulateur PI :
+- **Kp** (Proportionnel) : Calculé en fonction de la constante de temps thermique.
 - **Ki** (Intégral) : Calculé pour annuler l'erreur résiduelle.
 
-*Le "Gain Scheduling" réduit ces gains quand on est proche de la consigne pour un atterrissage en douceur.*
-
-### 4. Apprentissage du temps de réponse (Dead Time)
-
-AutoPI apprend automatiquement le **temps de réponse** de votre système de chauffage :
-- Il observe le délai entre l'activation du radiateur et le début de la montée en température
-- Cette information est utilisée pour :
-  - **Geler l'intégrateur** : Pendant le dead time, l'intégrale ne s'accumule pas (évite les oscillations)
-  - **Ajuster les gains** : Un dead time plus long entraîne des gains plus conservateurs
-
-L'algorithme collecte plusieurs échantillons et utilise la médiane pour une estimation robuste.
-
-### 5. Application de la commande
+### 4. Application de la commande
 Enfin, il calcule la puissance à envoyer au radiateur :
 $$ u = u_{ff} + u_{pi} $$
-- **$u_{ff}$ (Feed-forward)** : La puissance juste nécessaire pour maintenir la température (basé sur $T_{ext}$ et les déperditions $b$).
+- **$u_{ff}$ (Feed-forward)** : La puissance juste nécessaire pour maintenir la température (basé sur $T_{ext}$ et les déperditions $b$). Ce terme est automatiquement réduit en cas de dépassement de la consigne.
 - **$u_{pi}$ (Correction)** : Le surplus pour corriger l'écart actuel par rapport à la consigne.
+
+### Protection contre le dépassement (overshoot)
+L'algorithme intègre des protections contre le dépassement de température :
+- Le feed-forward est progressivement réduit à zéro quand la température dépasse la consigne
+- L'intégrale est réduite automatiquement lors d'un dépassement
 
 ## Cas d'utilisation recommandés
 
@@ -125,7 +120,7 @@ AutoPI est particulièrement adapté pour :
 | **Configuration** | Complexe (Kint, Kext) | Moyenne | Simple (2 paramètres) |
 | **Temps d'adaptation** | Immédiat | ~50 cycles | Continu |
 | **Apprentissage** | Aucun | Phase finie | Permanent |
-| **Type de modèle** | Proportionnel simple | Observation statistique | Modèle thermique (Robust Estimator) |
+| **Type de modèle** | Proportionnel simple | Observation statistique | Modèle thermique (RLS) |
 
 > **Note** : AutoPI est une approche complémentaire à TPI et Auto-TPI. Il convient particulièrement aux utilisateurs qui préfèrent une solution automatique sans configuration.
 

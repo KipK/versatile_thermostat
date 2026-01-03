@@ -61,13 +61,15 @@ To enable AutoPI:
 | Parameter | Description | Default value | Recommendation |
 |-----------|-------------|---------------|----------------|
 | **Deadband (°C)** | Zone around the setpoint where no action is taken. Avoids micro-regulations | 0.05°C | 0.05 - 0.1°C |
-| **Aggressiveness** | Response speed of the controller. Lower = faster | 0.5 | 0.3 (fast) to 1.0 (slow) |
+| **Aggressiveness** | Response factor of the controller. Lower = more aggressive (higher gains) | 0.5 | 0.25 (aggressive) to 1.0 (smooth) |
 
 ### Aggressiveness tuning
 
-- **0.1 - 0.3**: Very fast response. For rooms with low inertia (small rooms, direct electric heating)
-- **0.5**: Balanced. Good starting point for most installations
-- **1.0 - 2.0**: Slow response. For high inertia systems (underfloor heating, water radiators)
+Aggressiveness controls the PI controller gains (Kp and Ki). A lower value gives higher gains and thus a faster response. The default value (0.5) gives the base gains calculated by the algorithm.
+
+- **0.25**: Doubled gains. Very aggressive response, for rooms that respond slowly
+- **0.5**: Base gains. Recommended starting point for most installations
+- **1.0**: Gains halved. Smoother response, to avoid oscillations
 
 ## Detailed operation of the "Robust" algorithm
 
