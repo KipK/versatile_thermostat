@@ -638,6 +638,8 @@ class ThermostatTPI(BaseThermostat[T], Generic[T]):
 
         if self._prop_algorithm:
              self._prop_algorithm.reset_learning()
+             # Force recalculate with new parameters
+             self.recalculate()
              # Force save
              if self._auto_pi_storage:
                   data = self._prop_algorithm.save_state()
