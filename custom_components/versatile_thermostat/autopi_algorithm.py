@@ -3,14 +3,16 @@ AutoPI Algorithm - Simplified auto-adaptive PI controller for Versatile Thermost
 
 This module implements a PI controller with:
 - Online model learning (RLS): dT_int (°C/min) ≈ a * u - b * (T_int - T_ext)
+- SIMC-based PI tuning with dead time estimation
 - Feed-forward compensation for thermal losses
+- Gain scheduling near setpoint for stability
 - Overshoot protection with FF scaling and integral unwinding
 - Anti-windup protection
 
 The output is a power command between 0 and 1 (0-100%), to be applied as duty-cycle.
 """
 import logging
-import time
+import math
 from dataclasses import dataclass, field
 from typing import Dict, Any, Optional
 
@@ -25,12 +27,18 @@ A_MIN, A_MAX = 1e-6, 0.05
 B_MIN, B_MAX = 1e-6, 0.05
 RLS_LAMBDA = 0.995  # Forgetting factor
 
-# PI tuning parameters
-KP_MIN, KP_MAX = 0.2, 2.0
-KI_MIN, KI_MAX = 0.001, 0.2
+# PI tuning bounds
+KP_MIN, KP_MAX = 0.1, 2.0
+KI_MIN, KI_MAX = 0.001, 0.15
+
+# Gain scheduling: reduce gains when error is below this threshold
+GAIN_SCHEDULE_THRESHOLD = 1.5  # °C
 
 # Overshoot scaling: FF scales to 0 when error reaches this value
-OVERSHOOT_SCALE_RANGE = 0.5  # °C
+OVERSHOOT_SCALE_RANGE = 0.3  # °C
+
+# Anti-windup: maximum allowed integral value
+MAX_INTEGRAL = 50.0
 
 
 def clamp(x: float, lo: float, hi: float) -> float:
@@ -98,6 +106,8 @@ class AutoPI:
     
     Features:
     - Online model learning via RLS
+    - SIMC-based PI tuning
+    - Gain scheduling near setpoint
     - Feed-forward based on outdoor temperature
     - Overshoot protection (FF scaling + integral unwinding)
     - Anti-windup protection
@@ -136,18 +146,20 @@ class AutoPI:
         self.u_prev: float = 0.0
         self._prev_error: Optional[float] = None
         
-        # Current gains
-        self.Kp: float = 0.8
-        self.Ki: float = 0.05
+        # Current gains (will be recalculated)
+        self.Kp: float = 0.5
+        self.Ki: float = 0.02
 
         # Outputs
         self._on_percent: float = 0.0
         self._on_time_sec: int = 0
         self._off_time_sec: int = 0
         
-        # Last calculated values for diagnostics
+        # Diagnostics
         self._last_u_ff: float = 0.0
         self._last_error: float = 0.0
+        self._effective_kp: float = 0.0
+        self._effective_ki: float = 0.0
 
         if saved_state:
             self.load_state(saved_state)
@@ -205,8 +217,8 @@ class AutoPI:
         self.integral = 0.0
         self.u_prev = 0.0
         self._prev_error = None
-        self.Kp = 0.8
-        self.Ki = 0.05
+        self.Kp = 0.5
+        self.Ki = 0.02
         _LOGGER.info("%s - AutoPI learning reset to defaults", self._name)
 
     def load_state(self, state: Dict[str, Any]) -> None:
@@ -215,10 +227,12 @@ class AutoPI:
             return
         self.rls.theta_a = state.get('a', A_INIT)
         self.rls.theta_b = state.get('b', B_INIT)
+        self.rls.P11 = state.get('P11', 1000.0)
+        self.rls.P22 = state.get('P22', 1000.0)
         self.integral = state.get('integral', 0.0)
         self.u_prev = state.get('u_prev', 0.0)
-        self.Kp = state.get('Kp', 0.8)
-        self.Ki = state.get('Ki', 0.05)
+        self.Kp = state.get('Kp', 0.5)
+        self.Ki = state.get('Ki', 0.02)
         _LOGGER.debug(
             "%s - AutoPI state loaded: a=%.6f, b=%.6f",
             self._name, self.rls.theta_a, self.rls.theta_b
@@ -229,6 +243,8 @@ class AutoPI:
         return {
             'a': self.rls.theta_a,
             'b': self.rls.theta_b,
+            'P11': self.rls.P11,
+            'P22': self.rls.P22,
             'integral': self.integral,
             'u_prev': self.u_prev,
             'Kp': self.Kp,
@@ -305,6 +321,44 @@ class AutoPI:
             dt_int=dt_int
         )
 
+    def _calculate_simc_gains(self, tau_min: float, a: float) -> tuple:
+        """
+        Calculate PI gains using SIMC (Skogestad IMC) method.
+        
+        For a first-order plus dead-time system:
+        - Kp = tau / (K * (tau_c + theta))
+        - Ti = min(tau, 4 * (tau_c + theta))
+        - Ki = Kp / Ti
+        
+        Args:
+            tau_min: Time constant in minutes
+            a: Process gain (heating efficiency)
+            
+        Returns:
+            Tuple of (Kp, Ki)
+        """
+        # Estimate dead time as fraction of tau (typical for thermal systems)
+        theta = min(tau_min * 0.25, 5.0)
+        
+        # Closed-loop time constant: larger = more robust, less aggressive
+        # aggressiveness=0.5 → tau_c=theta (SIMC default for "tight" control)
+        # aggressiveness=1.0 → tau_c=2*theta (more robust)
+        tau_c = theta * (0.5 + self.aggressiveness)
+        
+        # SIMC tuning formulas
+        # K is the process gain: for our model, it's 'a' (°C/min per unit power)
+        K = max(a, 1e-6)
+        
+        kp = tau_min / (K * (tau_c + theta))
+        ti = min(tau_min, 4.0 * (tau_c + theta))
+        ki = kp / max(ti, 1.0)
+        
+        # Apply bounds
+        kp = clamp(kp, KP_MIN, KP_MAX)
+        ki = clamp(ki, KI_MIN, KI_MAX)
+        
+        return kp, ki
+
     def calculate(
         self,
         target_temp: float | None,
@@ -338,16 +392,11 @@ class AutoPI:
         a = self.rls.theta_a
         b = self.rls.theta_b
 
-        # Adapt Kp/Ki based on thermal time constant
-        tau_min = 1.0 / max(b, 1e-6)  # Time constant in minutes
-        kp_base = clamp(0.3 + 0.5 * (tau_min / 100.0), KP_MIN, KP_MAX)
-        ki_base = clamp(kp_base / max(tau_min, 5.0), KI_MIN, KI_MAX)
+        # Thermal time constant (minutes)
+        tau_min = 1.0 / max(b, 1e-6)
 
-        # Apply aggressiveness scaling: lower = more aggressive (higher gains)
-        # aggressiveness=0.5 → scale=1.0, aggressiveness=1.0 → scale=0.5
-        gain_scale = 0.5 / max(self.aggressiveness, 0.1)
-        self.Kp = clamp(kp_base * gain_scale, KP_MIN, KP_MAX)
-        self.Ki = clamp(ki_base * gain_scale, KI_MIN, KI_MAX)
+        # Calculate base gains using SIMC method
+        self.Kp, self.Ki = self._calculate_simc_gains(tau_min, a)
 
         # Calculate error
         e = target_temp - current_temp
@@ -355,11 +404,35 @@ class AutoPI:
             e = -e
         self._last_error = e
 
-        # Feed-forward with overshoot scaling
+        # Gain scheduling: reduce gains when approaching setpoint
+        # This prevents aggressive response when error is small
+        if abs(e) < GAIN_SCHEDULE_THRESHOLD:
+            # Smooth reduction: 50% to 100% of base gains
+            schedule_factor = 0.5 + 0.5 * (abs(e) / GAIN_SCHEDULE_THRESHOLD)
+        else:
+            schedule_factor = 1.0
+        
+        effective_kp = self.Kp * schedule_factor
+        effective_ki = self.Ki * schedule_factor
+        self._effective_kp = effective_kp
+        self._effective_ki = effective_ki
+
+        # Model confidence for feedforward scaling
+        confidence_a = max(0.0, min(100.0, 100.0 * (1.0 - self.rls.P11 / 1000.0)))
+        confidence_b = max(0.0, min(100.0, 100.0 * (1.0 - self.rls.P22 / 1000.0)))
+        model_confidence = (confidence_a + confidence_b) / 200.0  # 0 to 1
+
+        # Feed-forward calculation
         t_ext = ext_current_temp if ext_current_temp is not None else current_temp
-        k_ff = clamp(b / max(a, 1e-6), 0.0, 5.0)
+        k_ff = clamp(b / max(a, 1e-6), 0.0, 3.0)
         u_ff_base = clamp(k_ff * (target_temp - t_ext), 0.0, 1.0)
 
+        # Limit feedforward during learning phase (when model is unreliable)
+        # At 0% confidence: use 30% of FF, at 100%: use full FF
+        ff_confidence_factor = 0.3 + 0.7 * model_confidence
+        u_ff_base *= ff_confidence_factor
+
+        # Scale down FF during overshoot
         if e < 0:
             # In overshoot: scale down FF proportionally
             # FF = 0 when error <= -OVERSHOOT_SCALE_RANGE
@@ -369,25 +442,25 @@ class AutoPI:
             u_ff = u_ff_base
         self._last_u_ff = u_ff
 
-        # PI control with deadband and overshoot unwinding
+        # PI control with deadband and improved anti-windup
         if abs(e) < self.deadband_c:
             # In deadband: decay integral slowly
-            self.integral *= 0.98
+            self.integral *= 0.95
             u_pi = 0.0
         else:
-            # Overshoot unwinding: reduce integral on sign change
-            if self._prev_error is not None:
-                if (self._prev_error > 0 and e < 0) or (self._prev_error < 0 and e > 0):
-                    self.integral *= 0.5
-                    _LOGGER.debug("%s - Overshoot unwinding: integral *= 0.5", self._name)
+            # Improved overshoot handling: proportional decay instead of multiplicative
+            if e < 0:  # Overshoot (temp above setpoint)
+                # Decay integral proportionally to overshoot magnitude
+                decay_amount = 0.5 * abs(e) * self._cycle_min
+                self.integral = max(0.0, self.integral - decay_amount)
+            else:
+                # Normal operation: accumulate error
+                self.integral += e * self._cycle_min
             
-            # Continuous reduction while in overshoot
-            if e < 0:
-                self.integral *= 0.9
-
-            # Accumulate error scaled by time step (cycle duration in minutes)
-            self.integral += e * self._cycle_min
-            u_pi = self.Kp * e + self.Ki * self.integral
+            # Clamp integral to prevent excessive windup
+            self.integral = clamp(self.integral, -MAX_INTEGRAL, MAX_INTEGRAL)
+            
+            u_pi = effective_kp * e + effective_ki * self.integral
 
         self._prev_error = e
 
@@ -396,12 +469,19 @@ class AutoPI:
 
         # Saturation with anti-windup
         u = clamp(u_raw, 0.0, 1.0)
-        if u != u_raw:
-            # Reduce integral on saturation
-            self.integral *= 0.9
+        if u != u_raw and u_raw > 1.0:
+            # Output saturated high: reduce integral to prevent windup
+            excess = u_raw - 1.0
+            self.integral = max(0.0, self.integral - excess / max(effective_ki, 0.001))
 
-        # Rate limiting
-        max_step = self.max_step_per_min
+        # Adaptive rate limiting: stricter near setpoint
+        if abs(e) < 0.5:
+            max_step = self.max_step_per_min * 0.3  # Much slower near setpoint
+        elif abs(e) < 1.0:
+            max_step = self.max_step_per_min * 0.5
+        else:
+            max_step = self.max_step_per_min
+        
         u = clamp(u, self.u_prev - max_step, self.u_prev + max_step)
 
         # Minimum useful power
@@ -429,11 +509,10 @@ class AutoPI:
 
     def get_diagnostics(self) -> Dict[str, Any]:
         """Return diagnostic information for attributes."""
-        # Thermal time constant (minutes) - how fast the room responds
+        # Thermal time constant (minutes)
         tau_min = 1.0 / max(self.rls.theta_b, 1e-6)
 
         # Model confidence: 0-100% based on covariance reduction
-        # P starts at 1000, converges toward smaller values after learning
         confidence_a = max(0.0, min(100.0, 100.0 * (1.0 - self.rls.P11 / 1000.0)))
         confidence_b = max(0.0, min(100.0, 100.0 * (1.0 - self.rls.P22 / 1000.0)))
         model_confidence = (confidence_a + confidence_b) / 2.0
@@ -445,10 +524,12 @@ class AutoPI:
             "confidence_a": round(confidence_a, 1),
             "confidence_b": round(confidence_b, 1),
             "model_confidence": round(model_confidence, 1),
-            "Kp": self.Kp,
-            "Ki": self.Ki,
-            "integral_error": self.integral,
-            "error": self._last_error,
-            "u_ff": self._last_u_ff,
-            "on_percent": self._on_percent,
+            "Kp": round(self.Kp, 3),
+            "Ki": round(self.Ki, 4),
+            "effective_Kp": round(self._effective_kp, 3),
+            "effective_Ki": round(self._effective_ki, 4),
+            "integral_error": round(self.integral, 2),
+            "error": round(self._last_error, 2),
+            "u_ff": round(self._last_u_ff, 3),
+            "on_percent": round(self._on_percent, 3),
         }

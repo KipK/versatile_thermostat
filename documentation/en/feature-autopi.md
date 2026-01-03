@@ -16,7 +16,7 @@ The **AutoPI** algorithm is an adaptive controller that automatically learns the
 
 1. **Continuous learning**: At each heating cycle, AutoPI observes how the temperature evolves based on the applied power
 2. **Thermal modeling**: It builds a mathematical model that represents your room (inertia, heat losses, heater power)
-3. **Gain adaptation**: The controller parameters are automatically adjusted to optimize the response
+3. **Gain adaptation**: The controller parameters are automatically adjusted using the SIMC (Skogestad IMC) method
 
 ```
 ┌─────────────────────────────────────────────────────┐
@@ -27,6 +27,7 @@ The **AutoPI** algorithm is an adaptive controller that automatically learns the
 │                         │                           │
 │                         ▼                           │
 │               Gain calculation (Kp, Ki)             │
+│               via SIMC method                       │
 │                         │                           │
 │                         ▼                           │
 │               Power command (%)                     │
@@ -35,7 +36,7 @@ The **AutoPI** algorithm is an adaptive controller that automatically learns the
 
 ## What does it do concretely?
 
-- **At startup**: AutoPI uses reasonable default values
+- **At startup**: AutoPI uses conservative default values
 - **After a few hours**: It starts understanding your installation
 - **After a few days**: The model is refined and regulation becomes optimal
 
@@ -43,9 +44,10 @@ The **AutoPI** algorithm is an adaptive controller that automatically learns the
  
  ✅ **No manual tuning**: No need to find the right Kint/Kext coefficients  
  ✅ **Adapts to changes**: If you change your heater or insulate, it re-adapts  
- ✅ **Avoids oscillations**: The built-in deadband prevents unnecessary regulations near the setpoint  
- ✅ **Robust to disturbances**: The algorithm adapts to changing conditions via continuous learning.
- ✅ **Overshoot protection**: Feed-forward and integral are automatically reduced when temperature exceeds setpoint.
+ ✅ **Avoids oscillations**: Built-in gain scheduling for smooth regulation near setpoint  
+ ✅ **Robust to disturbances**: The algorithm ignores sudden variations to preserve model accuracy  
+ ✅ **Inertia management**: Accounts for heating response time via SIMC method  
+ ✅ **Anti-overshoot**: Multi-level protection (adaptive feedforward, proportional unwinding)
 
 ## Configuration
 
@@ -60,19 +62,19 @@ To enable AutoPI:
 | Parameter | Description | Default value | Recommendation |
 |-----------|-------------|---------------|----------------|
 | **Deadband (°C)** | Zone around the setpoint where no action is taken. Avoids micro-regulations | 0.05°C | 0.05 - 0.1°C |
-| **Aggressiveness** | Response factor of the controller. Lower = more aggressive (higher gains) | 0.5 | 0.25 (aggressive) to 1.0 (smooth) |
+| **Aggressiveness** | Response factor of the controller. Higher = smoother (lower gains) | 0.5 | 0.3 (reactive) to 1.0 (very smooth) |
 
 ### Aggressiveness tuning
 
-Aggressiveness controls the PI controller gains (Kp and Ki). A lower value gives higher gains and thus a faster response. The default value (0.5) gives the base gains calculated by the algorithm.
+Aggressiveness controls the closed-loop time constant (τc) used in SIMC gain calculation. A higher value gives lower gains and thus a slower but more stable response.
 
-- **0.25**: Doubled gains. Very aggressive response, for rooms that respond slowly
-- **0.5**: Base gains. Recommended starting point for most installations
-- **1.0**: Gains halved. Smoother response, to avoid oscillations
+- **0.3**: Reactive response, for well-insulated rooms with low inertia
+- **0.5**: Balance between performance and stability. Recommended starting point
+- **1.0**: Very smooth response, to avoid oscillations in rooms with high inertia
 
 ## Detailed operation of the algorithm
 
-AutoPI operation can be broken down into 4 cyclic steps:
+AutoPI operation can be broken down into 5 cyclic steps:
 
 ### 1. Measurement and Observation
 At each cycle, the algorithm collects:
@@ -82,26 +84,35 @@ At each cycle, the algorithm collects:
 
 ### 2. Modeling (RLS - Recursive Least Squares)
 It updates its internal room model defined by two parameters:
-- **a** (Efficiency): How many degrees I gain per minute if I heat at 100%.
-- **b** (Heat loss): How many degrees I lose per minute per degree of difference with outside.
+- **a** (Efficiency): How many degrees gained per minute at 100% power
+- **b** (Heat loss): How many degrees lost per minute per degree of difference with outside
 
 The RLS algorithm learns these parameters continuously with a forgetting factor to adapt to changing conditions.
 
-### 3. Gain Calculation (PI Tuning)
-Once it knows the room ($a$, $b$), it calculates the ideal coefficients for the PI controller:
-- **Kp** (Proportional): Calculated based on thermal time constant.
-- **Ki** (Integral): Calculated to eliminate residual error.
+### 3. Gain Calculation (SIMC Tuning)
+Once it knows the room ($a$, $b$), it calculates the ideal coefficients for the PI controller using the **SIMC (Skogestad IMC)** method:
+- **τ**: Thermal time constant = 1/b
+- **θ**: Estimated dead time (heating response delay)
+- **τc**: Closed-loop time constant (controlled by aggressiveness)
+- **Kp** = τ / (a × (τc + θ))
+- **Ki** = Kp / min(τ, 4×(τc + θ))
 
-### 4. Command Application
+### 4. Gain Scheduling
+When temperature approaches the setpoint (error < 1.5°C), effective gains are progressively reduced to prevent oscillations:
+- At 1.5°C from setpoint: 100% of gains
+- At 0°C from setpoint: 50% of gains
+
+### 5. Command Application
 Finally, it calculates the power to send to the heater:
 $$ u = u_{ff} + u_{pi} $$
-- **$u_{ff}$ (Feed-forward)**: The power just needed to maintain temperature (based on $T_{ext}$ and heat losses $b$). This term is automatically reduced when overshooting.
+- **$u_{ff}$ (Feed-forward)**: Power needed to compensate thermal losses. This term is limited during learning phase and reduced to zero during overshoot.
 - **$u_{pi}$ (Correction)**: The surplus to correct the current deviation from setpoint.
 
 ### Overshoot protection
-The algorithm integrates protection against temperature overshoot:
+The algorithm integrates multiple protections against temperature overshoot:
 - Feed-forward is progressively reduced to zero when temperature exceeds setpoint
-- Integral is automatically reduced during overshoot
+- Integral is reduced proportionally to overshoot magnitude
+- Power change rate is limited, even more strictly near setpoint
 
 ## Diagnostic metrics
 
@@ -115,7 +126,8 @@ The algorithm exposes several metrics in the climate entity attributes:
 | **confidence_a** | Confidence in parameter a (0-100%) |
 | **confidence_b** | Confidence in parameter b (0-100%) |
 | **model_confidence** | Overall model confidence (average of a and b) |
-| **Kp**, **Ki** | Automatically calculated PI controller gains |
+| **Kp**, **Ki** | Base PI controller gains calculated by SIMC |
+| **effective_Kp**, **effective_Ki** | Effective gains after gain scheduling |
 | **u_ff** | Feed-forward component of the command |
 | **error** | Difference between setpoint and current temperature |
 | **integral_error** | Accumulated integral error |
@@ -139,7 +151,8 @@ AutoPI is particularly suited for:
 | **Configuration** | Complex (Kint, Kext) | Medium | Simple (2 parameters) |
 | **Adaptation time** | Immediate | ~50 cycles | Continuous |
 | **Learning** | None | Finite phase | Permanent |
-| **Model type** | Simple proportional | Statistical observation | Thermal model (Robust Estimator) |
+| **Model type** | Simple proportional | Statistical observation | Thermal model (RLS) |
+| **Tuning method** | Manual | Heuristic | SIMC (industrial) |
 
 > **Note**: AutoPI is a complementary approach to TPI and Auto-TPI. It is particularly suited for users who prefer an automatic solution without configuration.
 
