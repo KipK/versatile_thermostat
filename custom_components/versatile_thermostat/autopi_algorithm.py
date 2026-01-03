@@ -280,11 +280,20 @@ class AutoPI:
         previous_temp: float,
         previous_power: float,
         hvac_mode: VThermHvacMode,
+        cycle_dt: float = None,
     ) -> None:
         """
         Update the thermal model with observed data.
         
         Called once per cycle with data from the previous cycle.
+        
+        Args:
+            current_temp: Current indoor temperature (°C)
+            ext_current_temp: Current outdoor temperature (°C)
+            previous_temp: Indoor temperature at start of cycle (°C)
+            previous_power: Average power applied during cycle [0, 1]
+            hvac_mode: Current HVAC mode
+            cycle_dt: Cycle duration in minutes (defaults to self._cycle_min)
         """
         if previous_temp is None or previous_power is None or current_temp is None:
             return
@@ -292,8 +301,13 @@ class AutoPI:
         if hvac_mode != VThermHvacMode_HEAT:
             return
 
-        # Temperature change over one cycle (assumed 1 minute for simplicity)
-        dt_int = current_temp - previous_temp
+        # Use provided cycle duration or default to configured cycle
+        dt_minutes = cycle_dt if cycle_dt is not None else self._cycle_min
+        if dt_minutes <= 0:
+            return
+
+        # Temperature change rate in °C/min
+        dt_int = (current_temp - previous_temp) / dt_minutes
 
         t_ext = ext_current_temp if ext_current_temp is not None else current_temp
 
@@ -384,7 +398,8 @@ class AutoPI:
             if e < 0:
                 self.integral *= 0.9
 
-            self.integral += e
+            # Accumulate error scaled by time step (cycle duration in minutes)
+            self.integral += e * self._cycle_min
             u_pi = self.Kp * e + self.Ki * self.integral
 
         self._prev_error = e
