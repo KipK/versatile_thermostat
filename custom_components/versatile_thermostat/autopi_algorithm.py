@@ -6,13 +6,12 @@ This module implements a PI controller with:
 - SIMC-based PI tuning with dead time estimation
 - Feed-forward compensation for thermal losses
 - Gain scheduling near setpoint for stability
-- Overshoot protection with FF scaling and integral unwinding
+- Overshoot protection with integral unwinding
 - Anti-windup protection
 
 The output is a power command between 0 and 1 (0-100%), to be applied as duty-cycle.
 """
 import logging
-import math
 from dataclasses import dataclass, field
 from typing import Dict, Any, Optional
 
@@ -34,8 +33,7 @@ KI_MIN, KI_MAX = 0.001, 0.15
 # Gain scheduling: reduce gains when error is below this threshold
 GAIN_SCHEDULE_THRESHOLD = 1.5  # °C
 
-# Overshoot scaling: FF scales to 0 when error reaches this value
-OVERSHOOT_SCALE_RANGE = 0.3  # °C
+
 
 # Anti-windup: maximum allowed integral value
 MAX_INTEGRAL = 50.0
@@ -432,14 +430,7 @@ class AutoPI:
         ff_confidence_factor = 0.3 + 0.7 * model_confidence
         u_ff_base *= ff_confidence_factor
 
-        # Scale down FF during overshoot
-        if e < 0:
-            # In overshoot: scale down FF proportionally
-            # FF = 0 when error <= -OVERSHOOT_SCALE_RANGE
-            scale = clamp(1.0 + (e / OVERSHOOT_SCALE_RANGE), 0.0, 1.0)
-            u_ff = u_ff_base * scale
-        else:
-            u_ff = u_ff_base
+        u_ff = u_ff_base
         self._last_u_ff = u_ff
 
         # PI control with deadband and improved anti-windup

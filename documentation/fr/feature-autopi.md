@@ -109,8 +109,7 @@ $$ u = u_{ff} + u_{pi} $$
 - **$u_{pi}$ (Correction)** : Le surplus pour corriger l'écart actuel par rapport à la consigne.
 
 ### Protection contre le dépassement (overshoot)
-L'algorithme intègre plusieurs protections contre le dépassement de température :
-- Le feed-forward est progressivement réduit à zéro quand la température dépasse la consigne
+L'algorithme intègre des protections contre le dépassement de température :
 - L'intégrale est réduite proportionnellement à l'amplitude du dépassement
 - La vitesse de changement de puissance est limitée, encore plus strictement près de la consigne
 

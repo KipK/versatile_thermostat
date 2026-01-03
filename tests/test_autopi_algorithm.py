@@ -48,54 +48,6 @@ def test_autopi_calculation():
     assert "effective_Kp" in diag
     assert "effective_Ki" in diag
 
-
-def test_feedforward_scaling_during_overshoot():
-    """Test that feedforward is scaled down during overshoot (temp > setpoint)."""
-    autopi = AutoPI(
-        cycle_min=10,
-        minimal_activation_delay=0,
-        minimal_deactivation_delay=0,
-        name="TestAutoPI"
-    )
-
-    # Set up a known model state for predictable behavior
-    autopi.rls.theta_a = 0.02  # Reasonable heating efficiency
-    autopi.rls.theta_b = 0.001  # Reasonable losses
-    # Reduce covariance to simulate well-learned model
-    autopi.rls.P11 = 10.0
-    autopi.rls.P22 = 10.0
-
-    # Calculate with normal heating (temp below setpoint)
-    autopi.calculate(
-        target_temp=20,
-        current_temp=19,  # 1°C below setpoint (positive error)
-        ext_current_temp=5,
-        slope=0,
-        hvac_mode=VThermHvacMode_HEAT
-    )
-
-    diag_normal = autopi.get_diagnostics()
-    u_ff_normal = diag_normal.get("u_ff", 0)
-
-    # Now calculate with overshoot (temp above setpoint)
-    autopi.calculate(
-        target_temp=20,
-        current_temp=20.3,  # 0.3°C above setpoint (negative error)
-        ext_current_temp=5,
-        slope=0,
-        hvac_mode=VThermHvacMode_HEAT
-    )
-
-    diag_overshoot = autopi.get_diagnostics()
-    u_ff_overshoot = diag_overshoot.get("u_ff", 0)
-
-    # Feedforward should be reduced during overshoot
-    assert u_ff_overshoot < u_ff_normal, \
-        f"u_ff during overshoot ({u_ff_overshoot}) should be less than normal ({u_ff_normal})"
-    # At -0.3°C error (OVERSHOOT_SCALE_RANGE), u_ff should be 0
-    assert u_ff_overshoot == 0, f"u_ff should be 0 at -0.3°C overshoot, got {u_ff_overshoot}"
-
-
 def test_overshoot_unwinding():
     """Test that integral is reduced when in overshoot."""
     autopi = AutoPI(

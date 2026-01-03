@@ -109,8 +109,7 @@ $$ u = u_{ff} + u_{pi} $$
 - **$u_{pi}$ (Correction)**: The surplus to correct the current deviation from setpoint.
 
 ### Overshoot protection
-The algorithm integrates multiple protections against temperature overshoot:
-- Feed-forward is progressively reduced to zero when temperature exceeds setpoint
+The algorithm integrates protections against temperature overshoot:
 - Integral is reduced proportionally to overshoot magnitude
 - Power change rate is limited, even more strictly near setpoint
 
