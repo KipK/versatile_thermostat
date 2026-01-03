@@ -311,7 +311,6 @@ class AutoPI:
         ext_current_temp: float | None,
         slope: float | None,
         hvac_mode: VThermHvacMode,
-        hvac_action: str | None = None,
     ) -> None:
         """
         Calculate the power command.
@@ -322,7 +321,6 @@ class AutoPI:
             ext_current_temp: Current outdoor temperature (°C)
             slope: Temperature slope (unused, kept for API)
             hvac_mode: Current HVAC mode
-            hvac_action: Current HVAC action (unused in simplified version)
         """
         if target_temp is None or current_temp is None:
             self._on_percent = 0
