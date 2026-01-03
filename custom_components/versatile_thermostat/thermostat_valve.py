@@ -222,7 +222,6 @@ class ThermostatOverValve(ThermostatTPI[UnderlyingValve]):  # pylint: disable=ab
                 self._cur_ext_temp,
                 self.last_temperature_slope,
                 self.vtherm_hvac_mode or VThermHvacMode_OFF,
-                hvac_action=self.hvac_action,
             )
 
         new_valve_percent = round(
