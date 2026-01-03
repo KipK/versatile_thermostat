@@ -44,9 +44,8 @@ The **AutoPI** algorithm is an adaptive controller that automatically learns the
  ✅ **No manual tuning**: No need to find the right Kint/Kext coefficients  
  ✅ **Adapts to changes**: If you change your heater or insulate, it re-adapts  
  ✅ **Avoids oscillations**: The built-in deadband prevents unnecessary regulations near the setpoint  
- ✅ **Robust to disturbances**: The algorithm ignores sudden variations (e.g., window opening) to avoid corrupting the model.
- ✅ **Inertia management**: Takes into account the reaction time ("Dead time") of your heating to avoid heating too early or too late.
- ✅ **Gain Scheduling**: Adjusts the smoothness of regulation based on distance from setpoint (smoother when approaching the goal).
+ ✅ **Robust to disturbances**: The algorithm adapts to changing conditions via continuous learning.
+ ✅ **Overshoot protection**: Feed-forward and integral are automatically reduced when temperature exceeds setpoint.
 
 ## Configuration
 
@@ -71,9 +70,9 @@ Aggressiveness controls the PI controller gains (Kp and Ki). A lower value gives
 - **0.5**: Base gains. Recommended starting point for most installations
 - **1.0**: Gains halved. Smoother response, to avoid oscillations
 
-## Detailed operation of the "Robust" algorithm
+## Detailed operation of the algorithm
 
-AutoPI operation can be broken down into 5 cyclic steps:
+AutoPI operation can be broken down into 4 cyclic steps:
 
 ### 1. Measurement and Observation
 At each cycle, the algorithm collects:
@@ -81,35 +80,48 @@ At each cycle, the algorithm collects:
 - Outdoor temperature ($T_{ext}$)
 - Power sent to the heater ($u$)
 
-### 2. Modeling (Robust Estimator)
+### 2. Modeling (RLS - Recursive Least Squares)
 It updates its internal room model defined by two parameters:
 - **a** (Efficiency): How many degrees I gain per minute if I heat at 100%.
 - **b** (Heat loss): How many degrees I lose per minute per degree of difference with outside.
 
-This is where the "Robust" approach comes in, filtering anomalies (e.g., sudden temperature drop) to avoid corrupting these $a$ and $b$ parameters.
+The RLS algorithm learns these parameters continuously with a forgetting factor to adapt to changing conditions.
 
 ### 3. Gain Calculation (PI Tuning)
-Once it knows the room ($a$, $b$) and its inertia (Dead time), it calculates the ideal coefficients for the PI controller:
-- **Kp** (Proportional): Calculated to react quickly but without overshooting.
+Once it knows the room ($a$, $b$), it calculates the ideal coefficients for the PI controller:
+- **Kp** (Proportional): Calculated based on thermal time constant.
 - **Ki** (Integral): Calculated to eliminate residual error.
 
-*"Gain Scheduling" reduces these gains when close to the setpoint for a smooth landing.*
-
-### 4. Response Time Learning (Dead Time)
-
-AutoPI automatically learns the **response time** of your heating system:
-- It observes the delay between heater activation and the start of temperature rise
-- This information is used to:
-  - **Freeze the integrator**: During dead time, the integral doesn't accumulate (avoids oscillations)
-  - **Adjust gains**: A longer dead time leads to more conservative gains
-
-The algorithm collects multiple samples and uses the median for robust estimation.
-
-### 5. Command Application
+### 4. Command Application
 Finally, it calculates the power to send to the heater:
 $$ u = u_{ff} + u_{pi} $$
-- **$u_{ff}$ (Feed-forward)**: The power just needed to maintain temperature (based on $T_{ext}$ and heat losses $b$).
+- **$u_{ff}$ (Feed-forward)**: The power just needed to maintain temperature (based on $T_{ext}$ and heat losses $b$). This term is automatically reduced when overshooting.
 - **$u_{pi}$ (Correction)**: The surplus to correct the current deviation from setpoint.
+
+### Overshoot protection
+The algorithm integrates protection against temperature overshoot:
+- Feed-forward is progressively reduced to zero when temperature exceeds setpoint
+- Integral is automatically reduced during overshoot
+
+## Diagnostic metrics
+
+The algorithm exposes several metrics in the climate entity attributes:
+
+| Metric | Description |
+|--------|-------------|
+| **a** | Heating efficiency (°C/min at 100% power) |
+| **b** | Heat loss coefficient (1/min) |
+| **tau_min** | Thermal time constant of the room (in minutes) |
+| **confidence_a** | Confidence in parameter a (0-100%) |
+| **confidence_b** | Confidence in parameter b (0-100%) |
+| **model_confidence** | Overall model confidence (average of a and b) |
+| **Kp**, **Ki** | Automatically calculated PI controller gains |
+| **u_ff** | Feed-forward component of the command |
+| **error** | Difference between setpoint and current temperature |
+| **integral_error** | Accumulated integral error |
+
+The `model_confidence` metric is particularly useful: a value close to 0% means the algorithm has just started, while a high value (>80%) indicates the thermal model is well established.
+
 
 ## Recommended use cases
 
