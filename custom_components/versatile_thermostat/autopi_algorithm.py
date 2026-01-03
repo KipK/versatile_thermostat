@@ -38,6 +38,9 @@ GAIN_SCHEDULE_THRESHOLD = 1.5  # °C
 # Anti-windup: maximum allowed integral value
 MAX_INTEGRAL = 50.0
 
+# Learning cycles needed for full confidence
+LEARNING_CYCLES_FOR_FULL_CONFIDENCE = 50
+
 
 def clamp(x: float, lo: float, hi: float) -> float:
     """Clamp a value to the interval [lo, hi]."""
@@ -158,6 +161,9 @@ class AutoPI:
         self._last_error: float = 0.0
         self._effective_kp: float = 0.0
         self._effective_ki: float = 0.0
+        
+        # Learning cycle counter (for confidence)
+        self._learning_cycles: int = 0
 
         if saved_state:
             self.load_state(saved_state)
@@ -217,6 +223,7 @@ class AutoPI:
         self._prev_error = None
         self.Kp = 0.5
         self.Ki = 0.02
+        self._learning_cycles = 0
         _LOGGER.info("%s - AutoPI learning reset to defaults", self._name)
 
     def load_state(self, state: Dict[str, Any]) -> None:
@@ -231,6 +238,7 @@ class AutoPI:
         self.u_prev = state.get('u_prev', 0.0)
         self.Kp = state.get('Kp', 0.5)
         self.Ki = state.get('Ki', 0.02)
+        self._learning_cycles = state.get('learning_cycles', 0)
         _LOGGER.debug(
             "%s - AutoPI state loaded: a=%.6f, b=%.6f",
             self._name, self.rls.theta_a, self.rls.theta_b
@@ -247,6 +255,7 @@ class AutoPI:
             'u_prev': self.u_prev,
             'Kp': self.Kp,
             'Ki': self.Ki,
+            'learning_cycles': self._learning_cycles,
         }
 
     def notify_setpoint_change(
@@ -318,6 +327,9 @@ class AutoPI:
             t_ext=t_ext,
             dt_int=dt_int
         )
+        
+        # Increment learning cycle counter
+        self._learning_cycles += 1
 
     def _calculate_simc_gains(self, tau_min: float, a: float) -> tuple:
         """
@@ -415,10 +427,11 @@ class AutoPI:
         self._effective_kp = effective_kp
         self._effective_ki = effective_ki
 
-        # Model confidence for feedforward scaling
-        confidence_a = max(0.0, min(100.0, 100.0 * (1.0 - self.rls.P11 / 1000.0)))
-        confidence_b = max(0.0, min(100.0, 100.0 * (1.0 - self.rls.P22 / 1000.0)))
-        model_confidence = (confidence_a + confidence_b) / 200.0  # 0 to 1
+        # Model confidence for feedforward scaling (based on learning cycles)
+        model_confidence = min(
+            1.0,
+            self._learning_cycles / LEARNING_CYCLES_FOR_FULL_CONFIDENCE
+        )
 
         # Feed-forward calculation
         t_ext = ext_current_temp if ext_current_temp is not None else current_temp
@@ -503,17 +516,18 @@ class AutoPI:
         # Thermal time constant (minutes)
         tau_min = 1.0 / max(self.rls.theta_b, 1e-6)
 
-        # Model confidence: 0-100% based on covariance reduction
-        confidence_a = max(0.0, min(100.0, 100.0 * (1.0 - self.rls.P11 / 1000.0)))
-        confidence_b = max(0.0, min(100.0, 100.0 * (1.0 - self.rls.P22 / 1000.0)))
-        model_confidence = (confidence_a + confidence_b) / 2.0
+        # Model confidence: 0-100% based on actual learning cycles observed
+        # This reflects real data quality, not just mathematical uncertainty
+        model_confidence = min(
+            100.0,
+            100.0 * self._learning_cycles / LEARNING_CYCLES_FOR_FULL_CONFIDENCE
+        )
 
         return {
             "a": self.rls.theta_a,
             "b": self.rls.theta_b,
             "tau_min": round(tau_min, 1),
-            "confidence_a": round(confidence_a, 1),
-            "confidence_b": round(confidence_b, 1),
+            "learning_cycles": self._learning_cycles,
             "model_confidence": round(model_confidence, 1),
             "Kp": round(self.Kp, 3),
             "Ki": round(self.Ki, 4),

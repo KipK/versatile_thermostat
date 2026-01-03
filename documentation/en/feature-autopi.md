@@ -122,16 +122,15 @@ The algorithm exposes several metrics in the climate entity attributes:
 | **a** | Heating efficiency (°C/min at 100% power) |
 | **b** | Heat loss coefficient (1/min) |
 | **tau_min** | Thermal time constant of the room (in minutes) |
-| **confidence_a** | Confidence in parameter a (0-100%) |
-| **confidence_b** | Confidence in parameter b (0-100%) |
-| **model_confidence** | Overall model confidence (average of a and b) |
+| **learning_cycles** | Number of learning cycles observed |
+| **model_confidence** | Overall model confidence (0-100%, based on cycles) |
 | **Kp**, **Ki** | Base PI controller gains calculated by SIMC |
 | **effective_Kp**, **effective_Ki** | Effective gains after gain scheduling |
 | **u_ff** | Feed-forward component of the command |
 | **error** | Difference between setpoint and current temperature |
 | **integral_error** | Accumulated integral error |
 
-The `model_confidence` metric is particularly useful: a value close to 0% means the algorithm has just started, while a high value (>80%) indicates the thermal model is well established.
+The `model_confidence` metric is based on the number of learning cycles: it reaches 100% after 50 observed heating cycles, which truly reflects the quality of learned data.
 
 
 ## Recommended use cases
