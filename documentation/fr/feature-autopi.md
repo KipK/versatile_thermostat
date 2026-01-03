@@ -132,6 +132,34 @@ L'algorithme expose plusieurs métriques dans les attributs de l'entité climate
 
 La métrique `model_confidence` est basée sur le nombre de cycles d'apprentissage : elle atteint 100% après 50 cycles de chauffe observés, ce qui reflète réellement la qualité des données apprises.
 
+## Conseils pour un apprentissage optimal
+
+Pour que l'algorithme apprenne efficacement le comportement thermique de votre pièce, suivez ces recommandations :
+
+### ✅ À faire
+
+- **Fixer une consigne stable** pendant 2-3 jours minimum
+- **Consigne modérée** : 1-2°C au-dessus de la température actuelle (génère des cycles partiels, plus informatifs)
+- **Laisser le système en mode HEAT** (l'algo n'apprend qu'en chauffage)
+- **Attendre les cycles jour/nuit** (les variations de température extérieure aident à apprendre les pertes thermiques)
+
+### ❌ À éviter
+
+- **Changer la consigne fréquemment** : crée des transitoires qui perturbent l'apprentissage
+- **Consigne trop haute** : provoque des cycles à 100% de puissance, moins informatifs
+- **Ouvrir les fenêtres** : perturbe le modèle thermique en cours d'apprentissage
+- **Couper le chauffage manuellement** : interrompt la collecte de données
+
+### Procédure recommandée
+
+1. Activer AutoPI et vérifier que le thermostat est en mode HEAT
+2. Fixer la consigne à ~1-2°C au-dessus de la température actuelle
+3. Laisser fonctionner pendant 2-3 jours sans modifier la consigne
+4. Vérifier dans les attributs que `learning_cycles` > 50
+5. La `model_confidence` devrait atteindre 100%
+
+> **Note** : L'algorithme continue d'apprendre en permanence. La phase initiale établit une base, puis il s'affine continuellement pour s'adapter aux changements (météo, isolation, etc.).
+
 ## Cas d'utilisation recommandés
 
 AutoPI est particulièrement adapté pour :
