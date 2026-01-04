@@ -745,12 +745,24 @@ class ThermostatTPI(BaseThermostat[T], Generic[T]):
         """Update custom attributes"""
         super().update_custom_attributes()
 
-        self._attr_extra_state_attributes["specific_states"].update(
-            {
-                "auto_tpi_state": ("on" if self._auto_tpi_manager and self._auto_tpi_manager.learning_active else "off"),
-                "auto_tpi_learning": (self._auto_tpi_manager.state.to_dict() if self._auto_tpi_manager and self._auto_tpi_manager.learning_active else {}),
-            }
-        )
+        if self._proportional_function == PROPORTIONAL_FUNCTION_TPI:
+            self._attr_extra_state_attributes["specific_states"].update({
+                "auto_tpi_state": (
+                    "on"
+                    if self._auto_tpi_manager and self._auto_tpi_manager.learning_active
+                    else "off"
+                ),
+                "auto_tpi_learning": (
+                    self._auto_tpi_manager.state.to_dict()
+                    if self._auto_tpi_manager
+                    else None
+                ),
+            })
+
+        if self._proportional_function == PROPORTIONAL_FUNCTION_AUTO_PI:
+            self._attr_extra_state_attributes["specific_states"].update({
+                "auto_pi": self._prop_algorithm.get_diagnostics()
+            })
 
         self._attr_extra_state_attributes["configuration"].update({
             "minimal_activation_delay_sec": self._minimal_activation_delay,

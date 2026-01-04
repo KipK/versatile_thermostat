@@ -175,8 +175,7 @@ class ThermostatOverValve(ThermostatTPI[UnderlyingValve]):  # pylint: disable=ab
                     else None
                 ),
                 "minimal_activation_delay": self._minimal_activation_delay,
-                "minimal_deactivation_delay": self._minimal_deactivation_delay,
-                "auto_pi": self._prop_algorithm.get_diagnostics()
+                "minimal_deactivation_delay": self._minimal_deactivation_delay
             })
 
         attributes["vtherm_over_valve"] = vtherm_over_valve_attr

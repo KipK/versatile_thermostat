@@ -161,8 +161,7 @@ class ThermostatOverSwitch(ThermostatTPI[UnderlyingSwitch]):
             vtherm_over_switch_attr.update({
                 "calculated_on_percent": self._prop_algorithm.calculated_on_percent,
                 "minimal_activation_delay": self._minimal_activation_delay,
-                "minimal_deactivation_delay": self._minimal_deactivation_delay,
-                "auto_pi": self._prop_algorithm.get_diagnostics()
+                "minimal_deactivation_delay": self._minimal_deactivation_delay
             })
             
         attributes["vtherm_over_switch"] = vtherm_over_switch_attr
