@@ -66,15 +66,17 @@ Pour activer AutoPI :
 | Paramètre | Description | Valeur par défaut | Recommandation |
 |-----------|-------------|-------------------|----------------|
 | **Bande morte (°C)** | Zone autour de la consigne où aucune action n'est effectuée. Évite les micro-régulations | 0.05°C | 0.05 - 0.1°C |
-| **Agressivité** | Facteur de réponse du régulateur. Plus haut = plus doux (gains plus faibles) | 0.5 | 0.3 (réactif) à 1.0 (très doux) |
+| **Agressivité** | Facteur de réponse du régulateur. Plus haut = plus réactif (gains plus forts) | 0.5 | 0.3 (très doux) à 1.0 (très réactif) |
 
 ### Réglage de l'agressivité
 
-L'agressivité influence le calcul heuristique des gains. Une valeur plus haute donne des gains plus faibles et donc une réponse plus lente mais plus stable.
+L'agressivité influence directement les gains du régulateur (Kp). Une valeur plus haute donne des gains plus forts, donc une réponse plus rapide mais avec plus de risque d'oscillation.
 
-- **0.3** : Réponse réactive, pour des pièces bien isolées avec peu d'inertie
+- **0.3** : Réponse très douce, pour les pièces à forte inertie ou sujettes aux dépassements
 - **0.5** : Équilibre performance/stabilité. Point de départ recommandé
-- **1.0** : Réponse très douce, pour éviter les oscillations dans des pièces à forte inertie
+- **1.0** : Réponse très réactive, pour les radiateurs électriques rapides sans inertie
+
+> **Nouveau** : L'algorithme réduit automatiquement son agressivité lorsque la température est très proche de la consigne (< 2°C) pour atterrir en douceur et éviter les oscillations.
 
 ## Fonctionnement détaillé de l'algorithme
 

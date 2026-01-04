@@ -410,12 +410,28 @@ class AutoPI:
             tau = tau_info.tau_min
             # Heuristic: Kp scales with tau, Ki = Kp/tau
             kp_calc = 0.35 + 0.9 * (tau / 200.0)
-            self.Kp = clamp(kp_calc, KP_MIN, KP_MAX)
-            self.Ki = clamp(self.Kp / max(tau, 10.0), KI_MIN, KI_MAX)
         else:
             # Safe gains when model is unreliable
-            self.Kp = KP_SAFE
-            self.Ki = KI_SAFE
+            kp_calc = KP_SAFE
+            tau = 200.0 if self.est.b <= 0 else (1.0 / self.est.b)
+
+        # Apply aggressiveness
+        # Default 0.5 -> multiplier 1.0
+        # 0.1 -> 0.2
+        # 0.9 -> 1.8
+        kp_calc *= (self.aggressiveness * 2)
+
+        # Gain scheduling: reduce Kp when close to setpoint to reduce overshoot/oscillation
+        # If |error| < 2°C, reduce Kp linearly down to 50%
+        # error=0 -> factor=0.5
+        # error=2 -> factor=1.0
+        err_abs = abs(target_temp - current_temp)
+        if err_abs < 2.0:
+            factor = 0.5 + 0.5 * (err_abs / 2.0)
+            kp_calc *= factor
+
+        self.Kp = clamp(kp_calc, KP_MIN, KP_MAX)
+        self.Ki = clamp(self.Kp / max(tau, 10.0), KI_MIN, KI_MAX)
         
         # Calculate error
         e = target_temp - current_temp

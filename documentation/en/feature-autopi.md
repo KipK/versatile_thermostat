@@ -66,15 +66,17 @@ To enable AutoPI:
 | Parameter | Description | Default value | Recommendation |
 |-----------|-------------|---------------|----------------|
 | **Deadband (°C)** | Zone around the setpoint where no action is taken. Avoids micro-regulations | 0.05°C | 0.05 - 0.1°C |
-| **Aggressiveness** | Response factor of the controller. Higher = smoother (lower gains) | 0.5 | 0.3 (reactive) to 1.0 (very smooth) |
+| **Aggressiveness** | Response factor of the controller. Higher = more reactive (higher gains) | 0.5 | 0.3 (very smooth) to 1.0 (very reactive) |
 
 ### Aggressiveness tuning
 
-Aggressiveness influences the heuristic gain calculation. A higher value gives lower gains and thus a slower but more stable response.
+Aggressiveness directly influences the controller gains (Kp). A higher value results in higher gains, giving a faster response but with higher risk of oscillation.
 
-- **0.3**: Reactive response, for well-insulated rooms with low inertia
+- **0.3**: Very smooth response, for high inertia rooms or those prone to overshoot
 - **0.5**: Balance between performance and stability. Recommended starting point
-- **1.0**: Very smooth response, to avoid oscillations in rooms with high inertia
+- **1.0**: Very reactive response, for fast electric heaters with low inertia
+
+> **New**: The algorithm automatically reduces its aggressiveness when the temperature is very close to the setpoint (< 2°C) to land smoothly and avoid oscillations.
 
 ## Detailed operation of the algorithm
 
