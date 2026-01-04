@@ -138,7 +138,7 @@ Quand l'erreur change de signe (température passe au-dessus ou en-dessous de la
 Dans une bande de ±0.3°C autour de la consigne, les gains Kp et Ki sont réduits (×0.70 et ×0.50) pour un comportement plus doux à l'approche de la cible.
 
 ### 2-DOF PI (pondération de consigne)
-L'action proportionnelle utilise une erreur pondérée `e_p = 0.4 × consigne - température` (au lieu de `consigne - température`), ce qui réduit les dépassements lors des changements de consigne.
+L'action proportionnelle utilise une erreur pondérée `e_p = 0.4 × erreur` (au lieu de `erreur` directement), ce qui réduit la réactivité sur les changements de consigne tout en préservant le signe de l'erreur.
 
 ### Protection contre le dépassement
 La vitesse de changement de puissance est limitée (25% par minute) pour éviter les à-coups.

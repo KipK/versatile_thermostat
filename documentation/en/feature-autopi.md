@@ -138,7 +138,7 @@ When the error changes sign (temperature crosses above or below setpoint), the i
 Within a ±0.3°C band around the setpoint, Kp and Ki gains are reduced (×0.70 and ×0.50) for smoother behavior approaching the target.
 
 ### 2-DOF PI (setpoint weighting)
-The proportional action uses a weighted error `e_p = 0.4 × setpoint - temperature` (instead of `setpoint - temperature`), which reduces overshoot on setpoint changes.
+The proportional action uses a weighted error `e_p = 0.4 × error` (instead of `error` directly), which reduces reactivity on setpoint changes while preserving the error sign.
 
 ### Overshoot protection
 The power change rate is limited (25% per minute) to prevent sudden changes.

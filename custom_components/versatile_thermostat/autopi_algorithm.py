@@ -488,10 +488,9 @@ class AutoPI:
         self._last_error = e
         
         # 2-DOF: Compute error for proportional action (setpoint weighting)
-        # e_p = b * setpoint - y, reduces overshoot on setpoint changes
-        e_p = self.setpoint_weight_b * target_temp - current_temp
-        if hvac_mode == VThermHvacMode_COOL:
-            e_p = -e_p
+        # e_p = b * e, where b < 1 reduces proportional gain for setpoint changes
+        # This preserves the sign of error while reducing overshoot on setpoint steps
+        e_p = self.setpoint_weight_b * e
         self._last_error_p = e_p
         
         # Sign-flip detection: apply leak when error crosses zero near setpoint
