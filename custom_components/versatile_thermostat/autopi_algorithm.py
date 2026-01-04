@@ -232,7 +232,7 @@ class ABEstimator:
 
         tau = 1.0 / max(b, 1e-9)  # minutes
         # Plausible thermal tau for a room is usually tens to hundreds of minutes.
-        reliable = 10.0 <= tau <= 800.0
+        reliable = 10.0 <= tau <= 2000.0
         return TauReliability(reliable=reliable, tau_min=tau)
 
 
