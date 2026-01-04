@@ -47,11 +47,12 @@ L'algorithme **AutoPI** est un régulateur adaptatif qui apprend automatiquement
  
  ✅ **Pas de réglage manuel** : Pas besoin de trouver les bons coefficients Kint/Kext  
  ✅ **S'adapte aux changements** : Si vous changez de radiateur ou isolez, il se ré-adapte  
- ✅ **Évite les oscillations** : Gain scheduling intégré pour une régulation douce près de la consigne  
+ ✅ **Évite les oscillations** : Réduction automatique des gains près de la consigne (near-band scheduling)  
  ✅ **Robuste aux perturbations** : L'algo ignore les variations brutales pour ne pas fausser le modèle  
  ✅ **Gestion de l'inertie** : Prend en compte la constante de temps thermique de votre pièce  
- ✅ **Anti-dépassement** : Protection par "conditional integration" anti-windup
- ✅ **Fiabilité du modèle** : Utilise des gains "safe" tant que le modèle n'est pas fiable
+ ✅ **Anti-dépassement** : Protection 2-DOF PI et décharge douce de l'intégrale (sign-flip leak)
+ ✅ **Fiabilité du modèle** : Utilise des gains "safe" et une rampe progressive du feed-forward
+ ✅ **Anti-windup** : Intégration conditionnelle pour éviter la saturation
 
 ## Configuration
 
@@ -76,7 +77,7 @@ L'agressivité influence directement les gains du régulateur (Kp). Une valeur p
 - **0.5** : Équilibre performance/stabilité. Point de départ recommandé
 - **1.0** : Réponse très réactive, pour les radiateurs électriques rapides sans inertie
 
-> **Nouveau** : L'algorithme réduit automatiquement son agressivité lorsque la température est très proche de la consigne (< 2°C) pour atterrir en douceur et éviter les oscillations.
+L'algorithme réduit automatiquement les gains Kp et Ki dans une bande proche de la consigne (±0.3°C par défaut) grâce au **near-band scheduling**.
 
 ## Fonctionnement détaillé de l'algorithme
 
@@ -102,22 +103,22 @@ Cette approche évite les interférences entre les deux paramètres et ignore le
 ### 3. Vérification de la fiabilité du modèle
 Avant d'utiliser le modèle appris, l'algorithme vérifie sa **fiabilité** :
 - Au moins 6 cycles d'apprentissage réussis
-- τ (constante de temps) dans une plage plausible (30 à 3000 minutes)
+- τ (constante de temps) dans une plage plausible (10 à 2000 minutes)
 - b stable (coefficient de variation < 35%)
 
-Si ces critères ne sont pas remplis, des **gains "safe"** conservateurs sont utilisés (Kp=1.0, Ki=0.003).
+Si ces critères ne sont pas remplis, des **gains "safe"** conservateurs sont utilisés (Kp=0.55, Ki calculé).
 
 ### 4. Calcul des Gains (Heuristique)
 Une fois le modèle fiable, les gains sont calculés via une heuristique simple :
 - **τ** : Constante de temps thermique = 1/b
-- **Kp** = 0.35 + 0.9 × (τ / 200), borné entre 0.2 et 1.5
-- **Ki** = Kp / max(τ, 10), borné entre 0.0005 et 0.25
+- **Kp** = 0.35 + 0.9 × (τ / 200), borné entre 0.10 et 2.50
+- **Ki** = Kp / max(τ, 10), borné entre 0.001 et 0.050
 
 ### 5. Application de la commande
 Enfin, il calcule la puissance à envoyer au radiateur :
 $$ u = u_{ff} + u_{pi} $$
-- **$u_{ff}$ (Feed-forward)** : La puissance nécessaire pour compenser les pertes thermiques. Ce terme est désactivé si le paramètre `a` est trop faible (modèle non fiable).
-- **$u_{pi}$ (Correction)** : Le surplus pour corriger l'écart actuel par rapport à la consigne.
+- **$u_{ff}$ (Feed-forward)** : La puissance nécessaire pour compenser les pertes thermiques. Ce terme monte progressivement au démarrage (rampe de warmup) et est capé à 30% tant que le modèle n'est pas fiable.
+- **$u_{pi}$ (Correction)** : Le surplus pour corriger l'écart actuel par rapport à la consigne. Utilise une erreur pondérée (2-DOF) pour l'action proportionnelle.
 
 ### Anti-windup : Conditional Integration
 L'algorithme utilise une technique d'anti-windup appelée **conditional integration** :
@@ -128,10 +129,19 @@ L'algorithme utilise une technique d'anti-windup appelée **conditional integrat
 Cela évite l'accumulation excessive d'erreur intégrale ("windup") quand l'actionneur ne peut pas appliquer plus de puissance.
 
 ### Integrator Hold (temps mort)
-De plus, si l'intégrateur est en mode **HOLD** (pendant les périodes de "dead time" après une commutation), l'intégrale est gelée pour éviter le pompage.
+Si l'intégrateur est en mode **HOLD** (pendant les périodes de "dead time" après une commutation), l'intégrale est gelée pour éviter le pompage.
+
+### Sign-Flip Leak (décharge douce)
+Quand l'erreur change de signe (température passe au-dessus ou en-dessous de la consigne), l'intégrale est partiellement déchargée (30% par cycle pendant 2 cycles). Cela permet un "atterrissage" plus doux et évite les oscillations autour de la consigne.
+
+### Near-Band Scheduling (réduction des gains)
+Dans une bande de ±0.3°C autour de la consigne, les gains Kp et Ki sont réduits (×0.70 et ×0.50) pour un comportement plus doux à l'approche de la cible.
+
+### 2-DOF PI (pondération de consigne)
+L'action proportionnelle utilise une erreur pondérée `e_p = 0.4 × consigne - température` (au lieu de `consigne - température`), ce qui réduit les dépassements lors des changements de consigne.
 
 ### Protection contre le dépassement
-La vitesse de changement de puissance est limitée (12% par minute par défaut) pour éviter les à-coups.
+La vitesse de changement de puissance est limitée (25% par minute) pour éviter les à-coups.
 
 ## Métriques de diagnostic
 
@@ -148,11 +158,15 @@ L'algorithme expose plusieurs métriques dans les attributs de l'entité climate
 | **Kp**, **Ki** | Gains du régulateur PI (calculés ou "safe") |
 | **u_ff** | Composante feed-forward de la commande |
 | **i_mode** | État de l'intégrateur (I:RUN, I:SKIP, I:HOLD, I:LEAK) |
+| **sat** | État de saturation (NO_SAT, SAT_HI, SAT_LO) |
 | **error** | Écart entre la consigne et la température actuelle |
+| **error_p** | Erreur pondérée 2-DOF utilisée pour l'action proportionnelle |
 | **error_filtered** | Erreur filtrée par EMA (lissage des capteurs quantifiés) |
 | **integral_error** | Erreur intégrale accumulée |
+| **cycles_since_reset** | Nombre de cycles depuis le dernier reset |
+| **sign_flip_leak_left** | Cycles restants de décharge d'intégrale |
 
-La métrique `tau_reliable` devient `true` quand le modèle a accumulé suffisamment de données fiables (au moins 6 apprentissages réussis, τ dans une plage plausible, et b stable).
+La métrique `tau_reliable` devient `true` quand le modèle a accumulé suffisamment de données fiables (au moins 6 apprentissages réussis, τ dans la plage 10-2000 minutes, et b stable).
 
 ## Conseils pour un apprentissage optimal
 

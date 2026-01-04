@@ -66,21 +66,29 @@ def test_conditional_integration_saturation_high():
         minimal_activation_delay=0,
         minimal_deactivation_delay=0,
         name="TestAutoPI",
+        # Set 2-DOF weight to 1.0 so e_p = e for predictable behavior
+        setpoint_weight_b=1.0,
+        # Disable near-band scheduling
+        near_band_deg=0.0,
     )
     
-    # Set up a high integral to force saturation
-    autopi.integral = 100.0  # Very high to force saturation
-    autopi.Kp = 1.0
-    autopi.Ki = 0.1
+    # Set up estimator to produce high FF that saturates
+    autopi.est.a = 0.01
+    autopi.est.b = 0.02  # k_ff = b/a = 2.0
+    autopi.est.learn_ok_count = 50  # Enable full FF
+    autopi._cycles_since_reset = 10  # Enable FF warmup
+    autopi._tau_reliable = True
+    
+    autopi.integral = 10.0
     autopi.u_prev = 1.0  # Already at max
     
     integral_before = autopi.integral
     
-    # Positive error (need more heat) but already saturated at 1.0
+    # Positive error (need more heat) with high FF that causes saturation
     autopi.calculate(
         target_temp=25,
         current_temp=20,  # error = 5 (positive)
-        ext_current_temp=5,
+        ext_current_temp=5,  # u_ff = 2.0 * (25-5) = 40, clamped to 1.0
         slope=0,
         hvac_mode=VThermHvacMode_HEAT
     )
@@ -231,9 +239,10 @@ def test_tau_reliability_ok():
     est = ABEstimator()
     
     # Simulate successful learning with stable b
+    # Use b=0.002 -> tau=500, which is within new range [10, 800]
     for i in range(15):
         # Slight variations in b to simulate real learning
-        est.b = 0.001 + 0.00001 * (i % 3)
+        est.b = 0.002 + 0.00001 * (i % 3)
         est.b_hist.append(est.b)
         est.learn_ok_count += 1
     
@@ -394,7 +403,9 @@ def test_safe_gains_unreliable_tau():
         cycle_min=10,
         minimal_activation_delay=0,
         minimal_deactivation_delay=0,
-        name="TestAutoPI"
+        name="TestAutoPI",
+        # Disable near-band to avoid Kp reduction
+        near_band_deg=0.0,
     )
     
     # No learning done, tau unreliable
@@ -406,7 +417,11 @@ def test_safe_gains_unreliable_tau():
         hvac_mode=VThermHvacMode_HEAT
     )
     
-    # Gains should be safe defaults
+    # Kp should be based on KP_SAFE (with aggressiveness applied)
+    # KP_SAFE=0.55, aggressiveness=0.5 -> Kp = 0.55 * 0.5 * 2 = 0.55
     assert not autopi._tau_reliable
-    assert autopi.Kp == KP_SAFE
-    assert autopi.Ki == KI_SAFE
+    expected_kp = KP_SAFE * 0.5 * 2  # aggressiveness default is 0.5
+    assert autopi.Kp == expected_kp, f"Kp should be {expected_kp}, got {autopi.Kp}"
+    # Ki is calculated from Kp/tau, not set to KI_SAFE directly
+    # Just verify it's valid (within bounds)
+    assert autopi.Ki >= 0.001 and autopi.Ki <= 0.050

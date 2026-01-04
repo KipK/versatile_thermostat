@@ -47,11 +47,12 @@ The **AutoPI** algorithm is an adaptive controller that automatically learns the
  
  ✅ **No manual tuning**: No need to find the right Kint/Kext coefficients  
  ✅ **Adapts to changes**: If you change your heater or insulate, it re-adapts  
- ✅ **Avoids oscillations**: Built-in gain scheduling for smooth regulation near setpoint  
+ ✅ **Avoids oscillations**: Automatic gain reduction near setpoint (near-band scheduling)  
  ✅ **Robust to disturbances**: The algorithm ignores sudden variations to preserve model accuracy  
  ✅ **Inertia management**: Accounts for the thermal time constant of your room  
- ✅ **Anti-overshoot**: Protection via "conditional integration" anti-windup
- ✅ **Model reliability**: Uses "safe" gains until the model is reliable
+ ✅ **Anti-overshoot**: 2-DOF PI protection and soft integral discharge (sign-flip leak)
+ ✅ **Model reliability**: Uses "safe" gains and progressive feed-forward warmup
+ ✅ **Anti-windup**: Conditional integration to prevent saturation
 
 ## Configuration
 
@@ -76,11 +77,11 @@ Aggressiveness directly influences the controller gains (Kp). A higher value res
 - **0.5**: Balance between performance and stability. Recommended starting point
 - **1.0**: Very reactive response, for fast electric heaters with low inertia
 
-> **New**: The algorithm automatically reduces its aggressiveness when the temperature is very close to the setpoint (< 2°C) to land smoothly and avoid oscillations.
+The algorithm automatically reduces Kp and Ki gains within a band close to the setpoint (±0.3°C by default) via **near-band scheduling**.
 
 ## Detailed operation of the algorithm
 
-AutoPI operation can be broken down into 5 cyclic steps:
+AutoPI operation can be broken into 5 cyclic steps:
 
 ### 1. Measurement and Observation
 At each cycle, the algorithm collects:
@@ -102,22 +103,22 @@ This approach avoids interference between the two parameters and ignores noisy m
 ### 3. Model Reliability Check
 Before using the learned model, the algorithm verifies its **reliability**:
 - At least 6 successful learning cycles
-- τ (time constant) in a plausible range (30 to 3000 minutes)
+- τ (time constant) in a plausible range (10 to 2000 minutes)
 - b is stable (coefficient of variation < 35%)
 
-If these criteria are not met, conservative **"safe" gains** are used (Kp=1.0, Ki=0.003).
+If these criteria are not met, conservative **"safe" gains** are used (Kp=0.55, Ki calculated).
 
 ### 4. Gain Calculation (Heuristic)
 Once the model is reliable, gains are calculated via a simple heuristic:
 - **τ**: Thermal time constant = 1/b
-- **Kp** = 0.35 + 0.9 × (τ / 200), bounded between 0.2 and 1.5
-- **Ki** = Kp / max(τ, 10), bounded between 0.0005 and 0.25
+- **Kp** = 0.35 + 0.9 × (τ / 200), bounded between 0.10 and 2.50
+- **Ki** = Kp / max(τ, 10), bounded between 0.001 and 0.050
 
 ### 5. Command Application
 Finally, it calculates the power to send to the heater:
 $$ u = u_{ff} + u_{pi} $$
-- **$u_{ff}$ (Feed-forward)**: Power needed to compensate thermal losses. This term is disabled if parameter `a` is too low (unreliable model).
-- **$u_{pi}$ (Correction)**: The surplus to correct the current deviation from setpoint.
+- **$u_{ff}$ (Feed-forward)**: Power needed to compensate thermal losses. This term progressively ramps up at startup (warmup) and is capped at 30% until the model is reliable.
+- **$u_{pi}$ (Correction)**: The surplus to correct the current deviation from setpoint. Uses a weighted error (2-DOF) for proportional action.
 
 ### Anti-windup: Conditional Integration
 The algorithm uses an anti-windup technique called **conditional integration**:
@@ -128,10 +129,19 @@ The algorithm uses an anti-windup technique called **conditional integration**:
 This prevents excessive accumulation of integral error ("windup") when the actuator cannot apply more power.
 
 ### Integrator Hold (dead time)
-Additionally, if the integrator is in **HOLD** mode (during "dead time" periods after a switching), the integral is frozen to prevent pumping.
+If the integrator is in **HOLD** mode (during "dead time" periods after a switching), the integral is frozen to prevent pumping.
+
+### Sign-Flip Leak (soft discharge)
+When the error changes sign (temperature crosses above or below setpoint), the integral is partially discharged (30% per cycle for 2 cycles). This allows a softer "landing" and avoids oscillations around the setpoint.
+
+### Near-Band Scheduling (gain reduction)
+Within a ±0.3°C band around the setpoint, Kp and Ki gains are reduced (×0.70 and ×0.50) for smoother behavior approaching the target.
+
+### 2-DOF PI (setpoint weighting)
+The proportional action uses a weighted error `e_p = 0.4 × setpoint - temperature` (instead of `setpoint - temperature`), which reduces overshoot on setpoint changes.
 
 ### Overshoot protection
-The power change rate is limited (12% per minute by default) to prevent sudden changes.
+The power change rate is limited (25% per minute) to prevent sudden changes.
 
 ## Diagnostic metrics
 
@@ -148,11 +158,15 @@ The algorithm exposes several metrics in the climate entity attributes:
 | **Kp**, **Ki** | PI controller gains (calculated or "safe") |
 | **u_ff** | Feed-forward component of the command |
 | **i_mode** | Integrator state (I:RUN, I:SKIP, I:HOLD, I:LEAK) |
+| **sat** | Saturation state (NO_SAT, SAT_HI, SAT_LO) |
 | **error** | Difference between setpoint and current temperature |
+| **error_p** | 2-DOF weighted error used for proportional action |
 | **error_filtered** | EMA-filtered error (smoothing for quantized sensors) |
 | **integral_error** | Accumulated integral error |
+| **cycles_since_reset** | Number of cycles since last reset |
+| **sign_flip_leak_left** | Remaining cycles of integral discharge |
 
-The `tau_reliable` metric becomes `true` when the model has accumulated enough reliable data (at least 6 successful learning cycles, τ in a plausible range, and stable b).
+The `tau_reliable` metric becomes `true` when the model has accumulated enough reliable data (at least 6 successful learning cycles, τ in the 10-2000 minute range, and stable b).
 
 ## Tips for optimal learning
 
