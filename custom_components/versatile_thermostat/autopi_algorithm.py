@@ -1,331 +1,352 @@
 """
-AutoPI Algorithm - Auto-adaptive PI controller for Versatile Thermostat.
+AutoPI Algorithm - Auto-adaptive PI controller for Versatile Thermostat (VTH).
 
-This module implements a PI controller with:
-- Online model learning (EWMA conditional): dT_int (°C/min) ≈ a * u - b * (T_int - T_ext)
-- Heuristic-based PI tuning with tau reliability check
-- Feed-forward compensation for thermal losses
-- Conditional integration anti-windup
-- Integrator hold during dead time
+This module implements a duty-cycle PI controller for slow thermal systems (heating),
+with on-line identification of a simple 1st-order loss model and pragmatic safeguards.
 
-The output is a power command between 0 and 1 (0-100%), to be applied as duty-cycle.
+Key features
+------------
+- Online learning of a and b in the model (discrete-time, per-minute form):
+
+    dT_int ("C/min) = a * u - b * (T_int - T_ext)
+
+  where:
+    * u in [0, 1] is the power command (duty-cycle)
+    * a ("C/min) is the heating effectiveness
+    * b (1/min) is the loss coefficient
+
+- Reliability check using tau = 1/b (minutes) inferred from the model; PI gains fall back
+  to conservative values when the model is not reliable.
+
+- Feed-forward compensation based on the learned model to reduce steady-state error
+  and improve efficiency.
+
+- Anti-windup (conditional integration) for saturated actuators.
+
+- Servo-oriented overshoot reduction (change of setpoint):
+    * 2DOF PI (setpoint weighting) on the proportional action
+    * Near-setpoint gain scheduling (Kp/Ki reduction near target)
+    * Optional integrator "leak" after error sign change (soft discharge)
+
+The output is a power command between 0 and 1 (0-100%), applied as duty-cycle over a
+fixed cycle period (e.g., 10 minutes). The controller also computes ON/OFF times in
+seconds, optionally constrained by minimum activation/deactivation times.
 """
+
+from __future__ import annotations
+
 import logging
 import statistics
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Dict, Any, Optional, Deque
+from typing import Any, Deque, Dict, Optional
 
-from .vtherm_hvac_mode import VThermHvacMode, VThermHvacMode_COOL, VThermHvacMode_OFF, VThermHvacMode_HEAT
+from .vtherm_hvac_mode import (
+    VThermHvacMode,
+    VThermHvacMode_COOL,
+    VThermHvacMode_HEAT,
+    VThermHvacMode_OFF,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
-# Model parameters (EWMA)
-A_INIT = 0.00050
-B_INIT = 0.00100
-A_MIN, A_MAX = 1e-5, 0.05
-B_MIN, B_MAX = 1e-6, 0.02
-ALPHA_A = 0.15  # EWMA factor for a
-ALPHA_B = 0.10  # EWMA factor for b
 
-# Learning thresholds
-MIN_DTPM_FOR_LEARN = 0.003  # °C/min minimum for learning (noise rejection)
-MIN_DELTA_T_FOR_B = 0.5  # Min |Tin-Text| for b learning
+def clamp(x: float, lo: float, hi: float) -> float:
+    """Clamp x into [lo, hi]."""
+    if x < lo:
+        return lo
+    if x > hi:
+        return hi
+    return x
 
-# PI tuning bounds
-KP_MIN, KP_MAX = 0.10, 2.50
-KI_MIN, KI_MAX = 0.001, 0.050
 
-# Safe gains when tau is unreliable
+# ------------------------------
+# Default controller parameters
+# ------------------------------
+
+# Safe fallback gains when model is unreliable
 KP_SAFE = 0.55
 KI_SAFE = 0.010
 
-# Tau reliability settings
-TAU_MIN_PLAUSIBLE_MIN = 10  # Minimum plausible tau (minutes)
-TAU_MAX_PLAUSIBLE_MIN = 2000  # Maximum plausible tau (minutes)
-B_STABILITY_WINDOW = 20  # Window size for b stability check
-B_CV_MAX = 0.35  # Maximum coefficient of variation for b
-LEARN_OK_MIN = 6  # Minimum successful learns for reliability
+# Allowed ranges for computed gains
+KP_MIN = 0.10
+KP_MAX = 2.50
+KI_MIN = 0.001
+KI_MAX = 0.050
 
-# PI settings
-DEADBAND_C = 0.05  # Default deadband
-INTEGRAL_LEAK = 0.995  # Integral leak factor in deadband
-MAX_STEP_PER_MIN = 0.25  # Max u change per minute (rate limiting)
+# Anti-windup / integrator behavior
+INTEGRAL_LEAK = 0.995  # leak factor per cycle when inside deadband
+MAX_STEP_PER_MIN = 0.25  # max output change per minute (rate limit)
 
-
-def clamp(x: float, lo: float, hi: float) -> float:
-    """Clamp a value to the interval [lo, hi]."""
-    return max(lo, min(hi, x))
+# Default deadband around setpoint ("C)
+DEFAULT_DEADBAND_C = 0.05
 
 
-@dataclass
+@dataclass(frozen=True)
 class TauReliability:
-    """Result of tau reliability check."""
+    """Result of tau (time constant) reliability check."""
     reliable: bool
-    reason: str
-    tau_min: float
+    tau_min: float  # minutes (min of candidates used)
 
 
 @dataclass
 class ABEstimator:
     """
-    EWMA-based estimator for thermal model parameters.
-    
-    Model: dT_int = a * u - b * (T_int - T_ext)
-    - a: heating efficiency (°C/min at 100% power)
-    - b: thermal losses (1/min)
-    - tau = 1/b: time constant (minutes)
-    
-    Learning strategy:
-    - b is best identified when u ≈ 0 (cooling phase)
-    - a is best identified when u > 0.20 (significant heating)
+    Online estimator for a and b in:
+
+        dT_int approx a*u - b*(T_int - T_ext)
+
+    Notes
+    -----
+    - Designed for incremental learning on noisy data.
+    - Uses bounded / robust aggregation over a sliding window.
+    - Keeps internal diagnostics about learning health.
     """
-    a: float = A_INIT
-    b: float = B_INIT
-    
+
+    a: float = 0.0
+    b: float = 0.0
+
+    # Learning diagnostics
     learn_ok_count: int = 0
+    learn_skip_count: int = 0
     learn_last_reason: str = "init"
-    b_hist: Deque[float] = field(default_factory=lambda: deque(maxlen=B_STABILITY_WINDOW))
-    
+
+    # Internal windows
+    _a_hist: Deque[float] = field(default_factory=lambda: deque(maxlen=96))
+    _b_hist: Deque[float] = field(default_factory=lambda: deque(maxlen=96))
+
+    # Robust bounds (these are conservative; tune to your installation)
+    A_MIN: float = 1e-5
+    A_MAX: float = 0.05
+    B_MIN: float = 1e-5
+    B_MAX: float = 0.05
+
+    def reset(self) -> None:
+        """Reset learned parameters and history."""
+        self.a = 0.0
+        self.b = 0.0
+        self.learn_ok_count = 0
+        self.learn_skip_count = 0
+        self.learn_last_reason = "reset"
+        self._a_hist.clear()
+        self._b_hist.clear()
+
     def learn(
         self,
-        u_eff: float,
-        t_in_prev: float,
-        t_in_now: float,
-        t_out_prev: float,
-        dt_min: float,
-    ) -> tuple[bool, str, float]:
+        dT_int_per_min: float,
+        u: float,
+        t_int: float,
+        t_ext: float,
+        *,
+        min_u_for_learning: float = 0.05,
+        max_abs_dT_per_min: float = 0.35,
+    ) -> None:
         """
-        Update model parameters from observed data.
-        
-        Args:
-            u_eff: Effective power applied during the period [0, 1]
-            t_in_prev: Indoor temperature at start (°C)
-            t_in_now: Indoor temperature at end (°C)
-            t_out_prev: Outdoor temperature at start (°C)
-            dt_min: Duration of the period (minutes)
-            
-        Returns:
-            Tuple of (learn_ok, reason, dTpm)
+        Update (a,b) using a single observation.
+
+        Parameters
+        ----------
+        dT_int_per_min:
+            Indoor temperature slope over the last cycle ("C/min)
+        u:
+            Applied power duty-cycle over the last cycle in [0,1]
+        t_int:
+            Current indoor temperature ("C)
+        t_ext:
+            External/ambient temperature ("C)
+        min_u_for_learning:
+            Skip learning when actuation is too low to be informative.
+        max_abs_dT_per_min:
+            Outlier rejection threshold to ignore impossible slopes (sensor glitches, etc.)
         """
-        if dt_min <= 1e-6:
-            self.learn_last_reason = "skip:dt too small"
-            return False, self.learn_last_reason, 0.0
-        
-        dT = t_in_now - t_in_prev
-        dTpm = dT / dt_min  # Temperature change per minute
-        
-        # Reject noisy measurements (quantized sensors)
-        if abs(dTpm) < MIN_DTPM_FOR_LEARN:
-            self.learn_last_reason = "skip:|dT/min| too low"
-            return False, self.learn_last_reason, dTpm
-        
-        delta = t_in_prev - t_out_prev  # Tin - Text at start
-        
-        # Learn b primarily during OFF periods (u ≈ 0)
-        if u_eff < 0.05:
-            if abs(delta) < MIN_DELTA_T_FOR_B:
-                self.learn_last_reason = "skip:b:|Tin-Text| too low"
-                return False, self.learn_last_reason, dTpm
-            b_meas = -dTpm / delta
-            if b_meas <= 0:
-                self.learn_last_reason = "skip:b:measured b<=0"
-                return False, self.learn_last_reason, dTpm
-            self.b = clamp((1 - ALPHA_B) * self.b + ALPHA_B * b_meas, B_MIN, B_MAX)
-            self.b_hist.append(self.b)
-            self.learn_ok_count += 1
-            self.learn_last_reason = "update:b(off)"
-            return True, self.learn_last_reason, dTpm
-        
-        # Learn a primarily during ON periods (u > 0.20)
-        if u_eff > 0.20:
-            a_meas = (dTpm + self.b * delta) / max(u_eff, 1e-6)
-            if a_meas <= 0:
-                self.learn_last_reason = "skip:a:measured a<=0"
-                return False, self.learn_last_reason, dTpm
-            self.a = clamp((1 - ALPHA_A) * self.a + ALPHA_A * a_meas, A_MIN, A_MAX)
-            self.learn_ok_count += 1
-            self.learn_last_reason = "update:a(on)"
-            return True, self.learn_last_reason, dTpm
-        
-        self.learn_last_reason = "skip:gray zone u"
-        return False, self.learn_last_reason, dTpm
-    
+        # Basic validity checks
+        if u < min_u_for_learning:
+            self.learn_skip_count += 1
+            self.learn_last_reason = "skip: u too small"
+            return
+
+        if abs(dT_int_per_min) > max_abs_dT_per_min:
+            self.learn_skip_count += 1
+            self.learn_last_reason = "skip: slope outlier"
+            return
+
+        # Identify candidate (a,b) from rearranging the model:
+        # dT = a*u - b*(Tin-Text)  =>  a = (dT + b*(Tin-Text)) / u
+        # In practice, solve both a and b from multiple samples; here we use a pragmatic approach:
+        #
+        # If we assume b is slowly varying, we can estimate b from:
+        # b = (a*u - dT) / (Tin-Text)  (when Tin != Text)
+        #
+        # We'll generate a candidate b from current values and update robustly.
+        dt = float(dT_int_per_min)
+        delta = float(t_int - t_ext)
+
+        if abs(delta) < 0.2:
+            # Too little gradient: b estimation becomes ill-conditioned.
+            self.learn_skip_count += 1
+            self.learn_last_reason = "skip: |Tin-Text| too small"
+            return
+
+        # Heuristic candidate b: if a already known, update b; else bootstrap b from dt/delta
+        if self.a > 0.0:
+            b_cand = (self.a * u - dt) / delta
+        else:
+            # Bootstrap: assume u roughly explains heating effect; dt/delta gives losses sign.
+            b_cand = clamp(abs(dt / delta), self.B_MIN, self.B_MAX)
+
+        b_cand = clamp(b_cand, self.B_MIN, self.B_MAX)
+
+        # Candidate a using b_cand
+        a_cand = (dt + b_cand * delta) / max(u, 1e-6)
+        a_cand = clamp(a_cand, self.A_MIN, self.A_MAX)
+
+        # Robust aggregation: store, then use median (resistant to outliers)
+        self._a_hist.append(a_cand)
+        self._b_hist.append(b_cand)
+
+        self.a = float(statistics.median(self._a_hist)) if self._a_hist else a_cand
+        self.b = float(statistics.median(self._b_hist)) if self._b_hist else b_cand
+
+        self.learn_ok_count += 1
+        self.learn_last_reason = "ok"
+
     def tau_reliability(self) -> TauReliability:
         """
-        Check if tau (=1/b) is reliable.
-        
-        Criteria:
-        - Enough successful learning updates
-        - tau in plausible range
-        - b is stable (low coefficient of variation)
+        Determine whether the estimated tau (=1/b) is reliable.
+
+        Heuristic:
+        - Need enough valid samples
+        - b must be in a plausible range
+        - tau must be within reasonable bounds
+
+        Returns
+        -------
+        TauReliability
         """
-        tau = 1.0 / max(self.b, B_MIN)
-        
-        if self.learn_ok_count < LEARN_OK_MIN:
-            return TauReliability(False, f"tau:NO (learn_ok<{LEARN_OK_MIN})", tau)
-        
-        if not (TAU_MIN_PLAUSIBLE_MIN <= tau <= TAU_MAX_PLAUSIBLE_MIN):
-            return TauReliability(False, "tau:NO (out of plausible range)", tau)
-        
-        if len(self.b_hist) < max(6, B_STABILITY_WINDOW // 2):
-            return TauReliability(False, "tau:NO (not enough b history)", tau)
-        
-        mean_b = statistics.mean(self.b_hist)
-        if mean_b <= 0:
-            return TauReliability(False, "tau:NO (mean(b)<=0)", tau)
-        
-        std_b = statistics.pstdev(self.b_hist)
-        cv = std_b / mean_b
-        if cv > B_CV_MAX:
-            return TauReliability(False, f"tau:NO (b unstable, CV={cv:.2f})", tau)
-        
-        return TauReliability(True, f"tau:OK (CV(b)={cv:.2f})", tau)
+        if self.learn_ok_count < 10:
+            return TauReliability(reliable=False, tau_min=9999.0)
+
+        b = self.b
+        if b < self.B_MIN or b > self.B_MAX:
+            return TauReliability(reliable=False, tau_min=9999.0)
+
+        tau = 1.0 / max(b, 1e-9)  # minutes
+        # Plausible thermal tau for a room is usually tens to hundreds of minutes.
+        reliable = 10.0 <= tau <= 800.0
+        return TauReliability(reliable=reliable, tau_min=tau)
 
 
 class AutoPI:
     """
-    Auto-adaptive PI controller with feed-forward compensation.
-    
-    Features:
-    - Online model learning via EWMA (conditional on u value)
-    - Heuristic-based PI tuning with reliability check
-    - Feed-forward based on outdoor temperature
-    - Conditional integration anti-windup
-    - Integrator hold during dead time
+    Auto-adaptive PI controller with practical overshoot suppression for setpoint changes.
+
+    Public API
+    ----------
+    - calculate(...): compute the next duty-cycle command in [0,1]
+    - get_diagnostics(): return a dict of key internal values for UI/attributes
+    - update_learning(...): feed learning data (slope and previously applied u)
+
+    Design intent
+    -------------
+    - Primary objective: minimize overshoot on setpoint changes (servo),
+      accepting a slower approach to target.
+    - Keep computational footprint small; no external libs.
     """
 
     def __init__(
         self,
-        cycle_min: int,
+        # Original integration arguments (positional)
+        cycle_min: float,
         minimal_activation_delay: int,
         minimal_deactivation_delay: int,
         name: str,
-        max_on_percent: float = None,
-        deadband_c: float = DEADBAND_C,
-        aggressiveness: float = 0.5,
+        max_on_percent: Optional[float] = None,
+        # Tuning knobs (keyword)
+        deadband_c: float = DEFAULT_DEADBAND_C,
+        aggressiveness: float = 1.0,  # Note: logic changed, 1.0 is now default
         saved_state: Optional[Dict[str, Any]] = None,
-        # Progressive FF Warmup
+        # --- Feed-forward (FF) progressive enablement ("smart warm-up") ---
         ff_warmup_ok_count: int = 30,
         ff_warmup_cycles: int = 6,
         ff_scale_unreliable_max: float = 0.30,
-        # 2-DOF PI / Servo Overshoot Suppression
+        # --- Servo overshoot suppression knobs ---
         setpoint_weight_b: float = 0.4,
         near_band_deg: float = 0.30,
         kp_near_factor: float = 0.70,
         ki_near_factor: float = 0.50,
-        # Sign-Flip Integral Leak
         sign_flip_leak: float = 0.30,
         sign_flip_leak_cycles: int = 2,
         sign_flip_band_mult: float = 2.0,
-    ):
+    ) -> None:
+        
         self._name = name
-        self._cycle_min = cycle_min
-        self._minimal_activation_delay = minimal_activation_delay
-        self._minimal_deactivation_delay = minimal_deactivation_delay
+        self._cycle_min = float(cycle_min)
+        self.deadband_c = float(deadband_c)
+        self.aggressiveness = float(aggressiveness)
+
+        self._minimal_activation_delay = int(minimal_activation_delay)
+        self._minimal_deactivation_delay = int(minimal_deactivation_delay)
         self._max_on_percent = max_on_percent
-        
-        # Tuning parameters
-        self.deadband_c = deadband_c
-        self.aggressiveness = aggressiveness
-        
-        # Progressive FF Warmup parameters
+
+        # FF progressive enablement
         self.ff_warmup_ok_count = max(int(ff_warmup_ok_count), 1)
         self.ff_warmup_cycles = max(int(ff_warmup_cycles), 1)
         self.ff_scale_unreliable_max = clamp(float(ff_scale_unreliable_max), 0.0, 1.0)
         self._cycles_since_reset: int = 0
-        
-        # 2-DOF / Near-band scheduling parameters
+
+        # 2DOF / scheduling parameters
         self.setpoint_weight_b = clamp(float(setpoint_weight_b), 0.0, 1.0)
         self.near_band_deg = max(float(near_band_deg), 0.0)
         self.kp_near_factor = clamp(float(kp_near_factor), 0.1, 1.0)
         self.ki_near_factor = clamp(float(ki_near_factor), 0.1, 1.0)
-        
-        # Sign-Flip Integral Leak parameters
         self.sign_flip_leak = clamp(float(sign_flip_leak), 0.0, 1.0)
         self.sign_flip_leak_cycles = max(int(sign_flip_leak_cycles), 0)
         self.sign_flip_band_mult = max(float(sign_flip_band_mult), 0.0)
-        
+
         # Model estimator
         self.est = ABEstimator()
-        
+
         # PI state
         self.integral: float = 0.0
         self.u_prev: float = 0.0
-        
-        # Error filtering (EMA)
+
+        # Error filtering (EMA) - kept for diagnostics / potential future use
         self._e_filt: Optional[float] = None
         self._ema_alpha: float = 0.35
-        
+
         # Current gains
         self.Kp: float = KP_SAFE
         self.Ki: float = KI_SAFE
-        
-        # Outputs
+
+        # Outputs (duty-cycle and realized timings)
         self._on_percent: float = 0.0
         self._on_time_sec: int = 0
         self._off_time_sec: int = 0
-        
-        # Diagnostics
+
+        # Diagnostics / status
         self._last_u_ff: float = 0.0
         self._last_error: float = 0.0
         self._last_error_p: float = 0.0
         self._last_i_mode: str = "init"
         self._tau_reliable: bool = False
         self._last_sat: str = "init"
-        
-        # Sign-flip leak state
+
+        # Sign-flip leak helper
         self._prev_error: Optional[float] = None
         self._sign_flip_leak_left: int = 0
-        
+
         if saved_state:
             self.load_state(saved_state)
         
         _LOGGER.debug("%s - AutoPI initialized", self._name)
 
-    @property
-    def a(self) -> float:
-        """Heating efficiency parameter."""
-        return self.est.a
-
-    @property
-    def b(self) -> float:
-        """Thermal losses parameter."""
-        return self.est.b
-
-    @property
-    def on_percent(self) -> float:
-        """Current power command [0, 1]."""
-        return self._on_percent
-
-    @property
-    def calculated_on_percent(self) -> float:
-        """Alias for on_percent."""
-        return self._on_percent
-
-    @property
-    def on_time_sec(self) -> int:
-        """ON time in seconds for duty-cycle."""
-        return self._on_time_sec
-
-    @property
-    def off_time_sec(self) -> int:
-        """OFF time in seconds for duty-cycle."""
-        return self._off_time_sec
-
-    @property
-    def integral_error(self) -> float:
-        """Current integral accumulator value."""
-        return self.integral
-
-    @property
-    def u_ff(self) -> float:
-        """Last feed-forward value."""
-        return self._last_u_ff
+    # ------------------------------
+    # Persistence
+    # ------------------------------
 
     def reset_learning(self) -> None:
         """Reset all learned parameters to defaults."""
-        self.est = ABEstimator()
+        self.est.reset()
         self.integral = 0.0
         self.u_prev = 0.0
         self._e_filt = None
@@ -334,36 +355,52 @@ class AutoPI:
         self._cycles_since_reset = 0
         self._prev_error = None
         self._sign_flip_leak_left = 0
-        _LOGGER.info("%s - AutoPI learning reset to defaults", self._name)
+        _LOGGER.info("%s - AutoPI learning and history reset", self._name)
 
     def load_state(self, state: Dict[str, Any]) -> None:
         """Load persistent state."""
         if not state:
             return
-        self.est.a = state.get('a', A_INIT)
-        self.est.b = state.get('b', B_INIT)
-        self.est.learn_ok_count = state.get('learn_ok_count', 0)
-        b_hist_data = state.get('b_hist', [])
-        self.est.b_hist = deque(b_hist_data, maxlen=B_STABILITY_WINDOW)
-        self.integral = state.get('integral', 0.0)
-        self.u_prev = state.get('u_prev', 0.0)
-        self._cycles_since_reset = state.get('cycles_since_reset', 0)
+        
+        # Load estimator state
+        self.est.a = state.get("a", 0.0)
+        self.est.b = state.get("b", 0.0)
+        self.est.learn_ok_count = state.get("learn_ok_count", 0)
+        
+        # Load history queues
+        a_hist = state.get("a_hist", [])
+        b_hist = state.get("b_hist", [])
+        
+        # We need to manually reconstruct deque objects
+        self.est._a_hist = deque(a_hist, maxlen=self.est._a_hist.maxlen)
+        self.est._b_hist = deque(b_hist, maxlen=self.est._b_hist.maxlen)
+        
+        # Load PI state
+        self.integral = state.get("integral", 0.0)
+        self.u_prev = state.get("u_prev", 0.0)
+        self._cycles_since_reset = state.get("cycles_since_reset", 0)
+        
         _LOGGER.debug(
-            "%s - AutoPI state loaded: a=%.6f, b=%.6f, learn_ok=%d",
+            "%s - AutoPI state loaded: a=%.6f, b=%.6f, learns=%d",
             self._name, self.est.a, self.est.b, self.est.learn_ok_count
         )
 
     def save_state(self) -> Dict[str, Any]:
         """Return state for persistence."""
         return {
-            'a': self.est.a,
-            'b': self.est.b,
-            'learn_ok_count': self.est.learn_ok_count,
-            'b_hist': list(self.est.b_hist),
-            'integral': self.integral,
-            'u_prev': self.u_prev,
-            'cycles_since_reset': self._cycles_since_reset,
+            "a": self.est.a,
+            "b": self.est.b,
+            "learn_ok_count": self.est.learn_ok_count,
+            "a_hist": list(self.est._a_hist),
+            "b_hist": list(self.est._b_hist),
+            "integral": self.integral,
+            "u_prev": self.u_prev,
+            "cycles_since_reset": self._cycles_since_reset,
         }
+
+    # ------------------------------
+    # Learning entry point
+    # ------------------------------
 
     def update_learning(
         self,
@@ -380,9 +417,9 @@ class AutoPI:
         Called once per cycle with data from the previous cycle.
         
         Args:
-            current_temp: Current indoor temperature (°C)
-            ext_current_temp: Current outdoor temperature (°C)
-            previous_temp: Indoor temperature at start of cycle (°C)
+            current_temp: Current indoor temperature ("C)
+            ext_current_temp: Current outdoor temperature ("C)
+            previous_temp: Indoor temperature at start of cycle ("C)
             previous_power: Average power applied during cycle [0, 1]
             hvac_mode: Current HVAC mode
             cycle_dt: Cycle duration in minutes (defaults to self._cycle_min)
@@ -394,18 +431,71 @@ class AutoPI:
             return
         
         dt_minutes = cycle_dt if cycle_dt is not None else self._cycle_min
-        if dt_minutes <= 0:
+        if dt_minutes <= 1e-4:
             return
         
         t_ext = ext_current_temp if ext_current_temp is not None else current_temp
         
+        dT = current_temp - previous_temp
+        dT_int_per_min = dT / dt_minutes
+        
         self.est.learn(
-            u_eff=previous_power,
-            t_in_prev=previous_temp,
-            t_in_now=current_temp,
-            t_out_prev=t_ext,
-            dt_min=dt_minutes
+            dT_int_per_min=dT_int_per_min,
+            u=previous_power,
+            t_int=current_temp,
+            t_ext=t_ext
         )
+
+    # ------------------------------
+    # Props / API Compat
+    # ------------------------------
+    
+    @property
+    def a(self) -> float:
+        return self.est.a
+
+    @property
+    def b(self) -> float:
+        return self.est.b
+
+    @property
+    def on_percent(self) -> float:
+        return self._on_percent
+        
+    @property
+    def calculated_on_percent(self) -> float:
+        return self._on_percent
+
+    @property
+    def on_time_sec(self) -> int:
+        return self._on_time_sec
+
+    @property
+    def off_time_sec(self) -> int:
+        return self._off_time_sec
+        
+    @property
+    def tpi_coef_int(self) -> float:
+        return self.Kp
+
+    @property
+    def tpi_coef_ext(self) -> float:
+        t_ext = self.est.b / max(self.est.a, 1e-6) if self.est.a > 1e-6 else 0
+        return t_ext
+
+    @property
+    def integral_error(self) -> float:
+        """Current integral accumulator value."""
+        return self.integral
+
+    @property
+    def u_ff(self) -> float:
+        """Last feed-forward value."""
+        return self._last_u_ff
+
+    # ------------------------------
+    # Main control law
+    # ------------------------------
 
     def calculate(
         self,
@@ -417,132 +507,135 @@ class AutoPI:
         integrator_hold: bool = False,
     ) -> None:
         """
-        Calculate the power command.
-        
-        Args:
-            target_temp: Setpoint temperature (°C)
-            current_temp: Current indoor temperature (°C)
-            ext_current_temp: Current outdoor temperature (°C)
-            slope: Temperature slope (unused, kept for API compatibility)
-            hvac_mode: Current HVAC mode
-            integrator_hold: If True, freeze integrator (dead time period)
+        Compute the next duty-cycle command.
+
+        Notes
+        -----
+        - slope parameter is accepted for API compatibility (unused for now).
+        - integrator_hold can be used during dead time / actuator constraints to avoid pumping.
+
+        Side effects:
+        - Updates internal duty-cycle (_on_percent) and ON/OFF timings
+        - Updates diagnostics and PI state
         """
+        # Input validation
         if target_temp is None or current_temp is None:
-            self._on_percent = 0
+            self._on_percent = 0.0
+            self.u_prev = 0.0
             self._calculate_times()
             return
-        
+
         if hvac_mode == VThermHvacMode_OFF:
-            self._on_percent = 0
-            self.u_prev = 0
+            self._on_percent = 0.0
+            self.u_prev = 0.0
             self._calculate_times()
             return
-        
-        # Increment cycle counter (for FF warmup)
+
+        # Count cycles since (re)start (used for FF warm-up)
         self._cycles_since_reset += 1
-        
+
         # Get model parameters
         a = self.est.a
         b = self.est.b
-        
+
         # Check tau reliability
         tau_info = self.est.tau_reliability()
         self._tau_reliable = tau_info.reliable
-        
-        # Calculate gains based on tau reliability
+
+        # Compute gains (simple heuristic based on tau)
         if tau_info.reliable:
-            tau = tau_info.tau_min
+            tau = tau_info.tau_min  # minutes
             # Heuristic: Kp scales with tau, Ki = Kp/tau
             kp_calc = 0.35 + 0.9 * (tau / 200.0)
+            kp = clamp(kp_calc, KP_MIN, KP_MAX)
+            ki = clamp(kp / max(tau, 10.0), KI_MIN, KI_MAX)
         else:
-            # Safe gains when model is unreliable
-            kp_calc = KP_SAFE
-            tau = 200.0 if self.est.b <= 0 else (1.0 / self.est.b)
+            kp = KP_SAFE
+            ki = KI_SAFE
 
-        # Apply aggressiveness
-        # Default 0.5 -> multiplier 1.0
-        # 0.1 -> 0.2
-        # 0.9 -> 1.8
-        kp_calc *= (self.aggressiveness * 2)
+        # Apply global aggressiveness
+        kp *= max(self.aggressiveness, 0.0)
+        ki *= max(self.aggressiveness, 0.0)
 
-        # Calculate error for scheduling decision
-        e = target_temp - current_temp
+        # Compute errors
+        e = float(target_temp - current_temp)
+        # Invert error for COOL mode (simple fix for now, should be refined if full cool support desired)
         if hvac_mode == VThermHvacMode_COOL:
             e = -e
-        
-        # Near-band gain scheduling: reduce Kp/Ki when close to setpoint
-        in_near_band = (self.near_band_deg > 0.0) and (abs(e) <= self.near_band_deg)
-        if in_near_band:
-            kp_calc *= self.kp_near_factor
-        
-        kp = clamp(kp_calc, KP_MIN, KP_MAX)
-        ki = clamp(kp / max(tau, 10.0), KI_MIN, KI_MAX)
-        
-        # Apply ki_near_factor in near band
-        if in_near_band:
-            ki *= self.ki_near_factor
-            ki = clamp(ki, KI_MIN, KI_MAX)
-        
-        self.Kp = kp
-        self.Ki = ki
+            
         self._last_error = e
-        
-        # 2-DOF: Compute error for proportional action (setpoint weighting)
-        # e_p = b * e, where b < 1 reduces proportional gain for setpoint changes
-        # This preserves the sign of error while reducing overshoot on setpoint steps
-        e_p = self.setpoint_weight_b * e
+
+        # 2DOF (setpoint weighting) for proportional action:
+        # e_p = b_sp * r - y, with y = current_temp
+        e_p = float(self.setpoint_weight_b * target_temp - current_temp)
+        if hvac_mode == VThermHvacMode_COOL:
+             # Basic cooling inversion: simplistic, but matches error inversion
+            e_p = float(current_temp - self.setpoint_weight_b * target_temp)
+
         self._last_error_p = e_p
-        
-        # Sign-flip detection: apply leak when error crosses zero near setpoint
+
+        # Sign-flip detection (for optional integral discharge)
         if self._prev_error is not None and (e * self._prev_error) < 0.0:
+            # Only apply if we are close enough to setpoint (avoid messing with large disturbances)
             band = self.sign_flip_band_mult * max(self.near_band_deg, 1e-6)
             if abs(e) <= band and self.sign_flip_leak_cycles > 0 and self.sign_flip_leak > 0.0:
                 self._sign_flip_leak_left = self.sign_flip_leak_cycles
         self._prev_error = e
-        
-        # EMA filtering of error (for quantized sensors)
+
+        # Near-setpoint gain scheduling (soft landing)
+        in_near_band = (self.near_band_deg > 0.0) and (abs(e) <= self.near_band_deg)
+        if in_near_band:
+            kp *= self.kp_near_factor
+            ki *= self.ki_near_factor
+
+        # Store current gains (for diagnostics)
+        self.Kp = kp
+        self.Ki = ki
+
+        # EMA filtering of error (for diagnostics / future options)
         if self._e_filt is None:
             self._e_filt = e
         else:
             self._e_filt = (1 - self._ema_alpha) * self._e_filt + self._ema_alpha * e
-        
+
         # Feed-forward calculation
+        # For HEAT: positive command; For COOL: invert sign of error/FF (very simplistic)
         t_ext = ext_current_temp if ext_current_temp is not None else current_temp
         if a < 2e-4:
-            # a too low, FF unreliable
             u_ff = 0.0
         else:
             k_ff = clamp(b / a, 0.0, 3.0)
             u_ff = clamp(k_ff * (target_temp - t_ext), 0.0, 1.0)
-        
+
         if hvac_mode == VThermHvacMode_COOL:
-            # Cooling: FF not valid in this simple model
-            u_ff = 0.0
-        
-        # Progressive FF warmup scaling:
+            # Cooling: map to "cooling effort" (this is kept for compatibility; tune as needed)
+            u_ff = 0.0  # FF is usually not valid for COOL in this simple model
+
+        # Progressive "smart" FF warm-up:
         # - Scale up with learning confidence (learn_ok_count)
         # - Scale up with time since start (cycles)
-        # - Cap when model is not reliable yet
+        # - Cap when the model is not reliable yet (tau check)
         learn_scale = clamp(self.est.learn_ok_count / float(self.ff_warmup_ok_count), 0.0, 1.0)
         time_scale = clamp(self._cycles_since_reset / float(self.ff_warmup_cycles), 0.0, 1.0)
         reliable_cap = 1.0 if self._tau_reliable else self.ff_scale_unreliable_max
         ff_scale = clamp(reliable_cap * learn_scale * time_scale, 0.0, 1.0)
         u_ff *= ff_scale
-        
+
         self._last_u_ff = u_ff
-        
+
         # Dynamic integral limit: bound so |Ki * I| <= 2.0
         i_max = 2.0 / max(self.Ki, KI_MIN)
-        
-        # Apply sign-flip leak (soft discharge when crossing setpoint)
+
+        # Optional "sign flip leak" soft discharge
         if self._sign_flip_leak_left > 0:
             self.integral *= (1.0 - self.sign_flip_leak)
             self._sign_flip_leak_left -= 1
+            # Keep integral bounded
             self.integral = clamp(self.integral, -i_max, i_max)
-        
-        # PI control with conditional integration anti-windup
+
+        # --- PI control with anti-windup ---
         if abs(e) < self.deadband_c:
-            # In deadband: leak integral slowly
+            # In deadband: leak integral slowly and output zero (helps avoid chatter)
             self.integral *= INTEGRAL_LEAK
             self.integral = clamp(self.integral, -i_max, i_max)
             u_pi = 0.0
@@ -550,16 +643,13 @@ class AutoPI:
         else:
             if integrator_hold:
                 # Dead time: don't integrate to avoid pumping
-                # Use e_p for proportional action (2-DOF)
                 u_pi = self.Kp * e_p + self.Ki * self.integral
-                self._last_i_mode = "I:HOLD(dead time)"
+                self._last_i_mode = "I:HOLD"
             else:
-                # Compute preliminary output without updating integral
-                # Use e_p for proportional action (2-DOF)
+                # Preview output without updating integral
                 u_pi_pre = self.Kp * e_p + self.Ki * self.integral
                 u_raw_pre = u_ff + u_pi_pre
-                
-                # Check saturation
+
                 if u_raw_pre > 1.0:
                     sat_state = "SAT_HI"
                 elif u_raw_pre < 0.0:
@@ -567,83 +657,106 @@ class AutoPI:
                 else:
                     sat_state = "NO_SAT"
                 self._last_sat = sat_state
-                
+
                 # Conditional integration:
-                # Skip integration if saturated AND error would make it worse
-                # Use e (not e_p) for integration decision
+                # Skip integration if saturated AND error would make it worse.
+                # IMPORTANT: windup is determined by the *integrator-driving error* (e), not e_p.
                 if (sat_state == "SAT_HI" and e > 0) or (sat_state == "SAT_LO" and e < 0):
                     self._last_i_mode = f"I:SKIP({sat_state})"
                     u_pi = u_pi_pre
                 else:
-                    # Normal integration (use e, not e_p)
+                    # Normal integration (integrate the true error e)
                     self.integral += e * self._cycle_min
                     self.integral = clamp(self.integral, -i_max, i_max)
                     self._last_i_mode = "I:RUN"
                     u_pi = self.Kp * e_p + self.Ki * self.integral
-        
-        # Combine FF and PI
+
+        # Combine FF and PI, then clamp to [0,1]
         u_raw = u_ff + u_pi
         u = clamp(u_raw, 0.0, 1.0)
-        
-        # Rate limiting
+
+        # Rate limiting: bound command delta per minute
         max_step = MAX_STEP_PER_MIN * max(self._cycle_min, 1e-3)
         u = clamp(u, self.u_prev - max_step, self.u_prev + max_step)
-        
-        # Apply max_on_percent limit
+
+        # Apply max_on_percent limit if configured
         if self._max_on_percent is not None and u > self._max_on_percent:
             u = self._max_on_percent
-        
+
+        # Store final command
         self.u_prev = u
         self._on_percent = u
-        
+
+        # Update timings, ensuring percent matches the enforced timings
         self._calculate_times()
 
+    # ------------------------------
+    # Timings and diagnostics
+    # ------------------------------
+
     def _calculate_times(self) -> None:
-        """Calculate ON/OFF times from power percentage."""
-        self._on_time_sec = int(self._on_percent * self._cycle_min * 60)
+        """Compute ON/OFF times from duty-cycle, respecting minimal ON/OFF delays."""
+        cycle_sec = int(round(self._cycle_min * 60.0))
+        cycle_sec = max(cycle_sec, 0)
+
+        # Base
+        self._on_time_sec = int(round(self._on_percent * cycle_sec))
+
+        # Enforce minimal activation duration
         if self._on_time_sec < self._minimal_activation_delay:
             self._on_time_sec = 0
-        self._off_time_sec = int(self._cycle_min * 60 - self._on_time_sec)
+
+        self._off_time_sec = cycle_sec - self._on_time_sec
+
+        # Enforce minimal deactivation duration
         if self._off_time_sec < self._minimal_deactivation_delay:
-            self._on_time_sec = int(self._cycle_min * 60)
+            self._on_time_sec = cycle_sec
             self._off_time_sec = 0
 
+        # CRITICAL: resync on_percent with realized timing after constraints
+        if cycle_sec > 0:
+            self._on_percent = self._on_time_sec / cycle_sec
+        else:
+            self._on_percent = 0.0
+
     def get_diagnostics(self) -> Dict[str, Any]:
-        """Return diagnostic information for attributes."""
+        """Return diagnostic information (suitable for attributes/UI)."""
         tau_info = self.est.tau_reliability()
-        
+
         return {
             # Model
             "a": round(self.est.a, 6),
             "b": round(self.est.b, 6),
             "tau_min": round(tau_info.tau_min, 1),
             "tau_reliable": tau_info.reliable,
-            "learn_ok_count": self.est.learn_ok_count,
-            "learn_last_reason": self.est.learn_last_reason,
-            # PI gains
-            "Kp": round(self.Kp, 3),
-            "Ki": round(self.Ki, 4),
-            "integral_error": round(self.integral, 2),
+            "learn_ok_count": int(self.est.learn_ok_count),
+            "learn_skip_count": int(self.est.learn_skip_count),
+            "learn_last_reason": str(self.est.learn_last_reason),
+            # PI
+            "Kp": round(self.Kp, 6),
+            "Ki": round(self.Ki, 6),
+            "integral_error": round(self.integral, 6),
+            "i_mode": self._last_i_mode,
+            "sat": self._last_sat,
             # Errors
-            "error": round(self._last_error, 2),
+            "error": round(self._last_error, 4),
             "error_p": round(self._last_error_p, 4),
-            "error_filtered": round(self._e_filt, 2) if self._e_filt is not None else None,
-            # 2-DOF / Near-band scheduling
+            "error_filtered": None if self._e_filt is None else round(self._e_filt, 4),
+            # 2DOF/scheduling
             "setpoint_weight_b": round(self.setpoint_weight_b, 3),
             "near_band_deg": round(self.near_band_deg, 3),
             "kp_near_factor": round(self.kp_near_factor, 3),
             "ki_near_factor": round(self.ki_near_factor, 3),
-            # Sign-flip leak
             "sign_flip_leak": round(self.sign_flip_leak, 3),
             "sign_flip_leak_left": int(self._sign_flip_leak_left),
-            # FF warmup
-            "u_ff": round(self._last_u_ff, 3),
+            # Output
+            "u_ff": round(self._last_u_ff, 6),
             "ff_warmup_ok_count": int(self.ff_warmup_ok_count),
             "ff_warmup_cycles": int(self.ff_warmup_cycles),
             "ff_scale_unreliable_max": round(self.ff_scale_unreliable_max, 3),
             "cycles_since_reset": int(self._cycles_since_reset),
-            # Status
-            "i_mode": self._last_i_mode,
-            "sat": self._last_sat,
-            "on_percent": round(self._on_percent, 3),
+            "on_percent": round(self._on_percent, 6),
+            "on_time_sec": int(self._on_time_sec),
+            "off_time_sec": int(self._off_time_sec),
+            "cycle_min": round(self._cycle_min, 3),
         }

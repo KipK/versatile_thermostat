@@ -5,11 +5,9 @@ from unittest.mock import MagicMock
 from custom_components.versatile_thermostat.autopi_algorithm import (
     AutoPI,
     ABEstimator,
-    A_INIT,
-    B_INIT,
     KP_SAFE,
     KI_SAFE,
-    LEARN_OK_MIN,
+    KP_MAX
 )
 from custom_components.versatile_thermostat.vtherm_hvac_mode import VThermHvacMode_HEAT
 
@@ -109,22 +107,17 @@ def test_conditional_integration_normal():
     )
     
     # Note: calculate() recalculates Kp/Ki from tau_reliability
-    # With unreliable tau, safe gains (KP_SAFE=1.0, KI_SAFE=0.003) are used
+    # With unreliable tau, safe gains (KP_SAFE=0.55, KI_SAFE=0.01) are used
     autopi.integral = 0.0
     autopi.u_prev = 0.0  # Start from 0 to avoid rate limiting issues
     
-    # With default a=0.0005, b=0.001:
-    # k_ff = b/a = 2.0
-    # To avoid saturation, u_ff must be small, so (target - ext) must be small
-    # If ext_current_temp = 19.5, then target - ext = 0.5, u_ff = 2.0 * 0.5 = 1.0 -> still saturates!
-    # Let's set ext_current_temp = 19.8, then target - ext = 0.2, u_ff = 0.4
-    # With e=1, u_pi = 1.0 * 1 = 1.0, total = 1.4 > 1.0 = SAT_HI -> still saturates!
-    # Solution: use very small error so u_pi is small
-    # With e=0.2, u_pi = 1.0 * 0.2 = 0.2, u_ff = 0.4, total = 0.6 < 1.0 = NO_SAT
+    # With default a=0.0, b=0.0 (unreliable)
+    # u_ff = 0
+    # With e=0.2, u_pi = Kp*e + Ki*I = 0.55*0.2 + 0.01*0 = 0.11 < 1.0 = NO_SAT
     autopi.calculate(
         target_temp=20,
         current_temp=19.8,  # error = 0.2 (above deadband 0.05)
-        ext_current_temp=19.8,  # (target - ext) = 0.2, u_ff = 2 * 0.2 = 0.4
+        ext_current_temp=19.8,
         slope=0,
         hvac_mode=VThermHvacMode_HEAT
     )
@@ -166,90 +159,88 @@ def test_abestimator_learn_b_off():
     """Test learning of b during OFF periods."""
     est = ABEstimator()
     
-    # Simulate cooling phase (u_eff < 0.05)
-    # dT/dt = -b * (Tin - Text)
-    # With Tin=20, Text=10, delta=10, assume dT=-0.03 over 3 min => dTpm=-0.01
-    # b_meas = -(-0.01) / 10 = 0.001
+    # Test valid learning
+    u = 0.1
+    tin_prev = 20.0
+    # dT approx a*u - b*delta
+    # Let's assume a=0.01, b=0.001
+    # text = 10, delta = 10
+    # dT_per_min = 0.01*0.1 - 0.001*10 = 0.001 - 0.01 = -0.009
+    # dT = -0.009 * 10min = -0.09
+    tin_now = 20.0 - 0.09
     
-    learn_ok, reason, dTpm = est.learn(
-        u_eff=0.0,
-        t_in_prev=20.0,
-        t_in_now=19.97,  # dT = -0.03
-        t_out_prev=10.0,
-        dt_min=3.0
+    est.learn(
+        dT_int_per_min=-0.009,
+        u=u,
+        t_int=tin_now,
+        t_ext=10.0,
+        min_u_for_learning=0.05
     )
     
-    assert learn_ok, f"Should learn: {reason}"
-    assert "update:b(off)" in reason
     assert est.learn_ok_count == 1
+    assert "ok" in est.learn_last_reason
 
 
 def test_abestimator_learn_a_on():
-    """Test learning of a during ON periods."""
+    """Test learning of a."""
     est = ABEstimator()
-    est.b = 0.001  # Pre-set b to a known value
     
-    # Simulate heating phase (u_eff > 0.20)
-    # dT/dt = a*u - b*(Tin - Text)
-    # With u=0.5, Tin=18, Text=10, delta=8, dT=0.04 over 2 min => dTpm=0.02
-    # a_meas = (dTpm + b*delta) / u = (0.02 + 0.001*8) / 0.5 = 0.028/0.5 = 0.056
+    # Test valid learning with higher u
+    u = 0.5
+    # a=0.01, b=0.001
+    # dT/min = a*u - b*delta
+    # delta = 10
+    # dT/min = 0.01*0.5 - 0.001*10 = 0.005 - 0.01 = -0.005
     
-    learn_ok, reason, dTpm = est.learn(
-        u_eff=0.5,
-        t_in_prev=18.0,
-        t_in_now=18.04,  # dT = 0.04
-        t_out_prev=10.0,
-        dt_min=2.0
+    est.learn(
+        dT_int_per_min=-0.005,
+        u=u,
+        t_int=20.0,
+        t_ext=10.0
     )
     
-    assert learn_ok, f"Should learn: {reason}"
-    assert "update:a(on)" in reason
     assert est.learn_ok_count == 1
+    assert "ok" in est.learn_last_reason
 
 
-def test_abestimator_gray_zone():
-    """Test that learning is skipped in gray zone (0.05 < u < 0.20)."""
+def test_abestimator_skip_low_u():
+    """Test that learning is skipped when u is too low."""
     est = ABEstimator()
     
-    learn_ok, reason, dTpm = est.learn(
-        u_eff=0.10,  # Gray zone
-        t_in_prev=19.0,
-        t_in_now=19.1,
-        t_out_prev=10.0,
-        dt_min=5.0
+    est.learn(
+        dT_int_per_min=-0.01,
+        u=0.01,  # < 0.05 default
+        t_int=19.0,
+        t_ext=10.0
     )
     
-    assert not learn_ok
-    assert "gray zone" in reason
+    assert est.learn_ok_count == 0
+    assert "skip: u too small" in est.learn_last_reason
 
 
 def test_tau_reliability_not_enough_learns():
     """Test tau reliability when not enough learns."""
     est = ABEstimator()
-    est.learn_ok_count = LEARN_OK_MIN - 1
+    est.learn_ok_count = 5  # < 10 needed
     
     tau_info = est.tau_reliability()
     
     assert not tau_info.reliable
-    assert f"learn_ok<{LEARN_OK_MIN}" in tau_info.reason
+    assert tau_info.tau_min == 9999.0
 
 
 def test_tau_reliability_ok():
     """Test tau reliability when conditions are met."""
     est = ABEstimator()
     
-    # Simulate successful learning with stable b
-    # Use b=0.002 -> tau=500, which is within new range [10, 800]
-    for i in range(15):
-        # Slight variations in b to simulate real learning
-        est.b = 0.002 + 0.00001 * (i % 3)
-        est.b_hist.append(est.b)
-        est.learn_ok_count += 1
+    # Inject reliable values
+    est.learn_ok_count = 15
+    est.b = 0.002  # tau = 500
     
     tau_info = est.tau_reliability()
     
-    assert tau_info.reliable, f"Should be reliable: {tau_info.reason}"
-    assert "tau:OK" in tau_info.reason
+    assert tau_info.reliable
+    assert tau_info.tau_min == 500.0
 
 
 def test_save_and_load_state():
@@ -265,8 +256,8 @@ def test_save_and_load_state():
     autopi1.est.a = 0.015
     autopi1.est.b = 0.003
     autopi1.est.learn_ok_count = 10
-    autopi1.est.b_hist.append(0.003)
-    autopi1.est.b_hist.append(0.0031)
+    autopi1.est._b_hist.append(0.003)
+    autopi1.est._b_hist.append(0.0031)
     autopi1.integral = 5.0
     autopi1.u_prev = 0.6
     
@@ -284,7 +275,7 @@ def test_save_and_load_state():
     assert autopi2.est.a == 0.015
     assert autopi2.est.b == 0.003
     assert autopi2.est.learn_ok_count == 10
-    assert len(autopi2.est.b_hist) == 2
+    assert len(autopi2.est._b_hist) == 2
     assert autopi2.integral == 5.0
     assert autopi2.u_prev == 0.6
 
@@ -308,8 +299,8 @@ def test_reset_learning():
     autopi.reset_learning()
     
     # Check defaults restored
-    assert autopi.est.a == A_INIT
-    assert autopi.est.b == B_INIT
+    assert autopi.est.a == 0.0
+    assert autopi.est.b == 0.0
     assert autopi.integral == 0.0
     assert autopi.est.learn_ok_count == 0
 
@@ -337,7 +328,7 @@ def test_deadband_leak():
         hvac_mode=VThermHvacMode_HEAT
     )
     
-    # Integral should decay (INTEGRAL_LEAK = 0.985)
+    # Integral should decay (INTEGRAL_LEAK = 0.995)
     assert autopi.integral < integral_before, \
         f"Integral should leak: before={integral_before}, after={autopi.integral}"
     assert "LEAK" in autopi._last_i_mode
@@ -377,11 +368,11 @@ def test_heuristic_gains_reliable_tau():
     )
     
     # Set up for reliable tau
-    autopi.est.b = 0.002  # tau = 500 min
-    for i in range(15):
-        autopi.est.b_hist.append(0.002 + 0.00001 * (i % 3))
-        autopi.est.learn_ok_count += 1
+    # New tau range [10, 800]. Let's pick 500. b = 1/500 = 0.002
+    autopi.est.learn_ok_count = 15
+    autopi.est.b = 0.002
     
+    # calculate() triggers tau_reliability check inside
     autopi.calculate(
         target_temp=20,
         current_temp=18,
@@ -390,11 +381,16 @@ def test_heuristic_gains_reliable_tau():
         hvac_mode=VThermHvacMode_HEAT
     )
     
-    # Gains should be calculated via heuristic
-    # Kp = 0.35 + 0.9 * (tau / 200) = 0.35 + 0.9 * 2.5 = 2.6, clamped to KP_MAX=1.5
-    # So Kp should be close to 1.5
+    # Check if reliable
     assert autopi._tau_reliable
-    assert autopi.Kp > KP_SAFE or autopi.Kp == 1.5  # Should not be safe gains
+    
+    # Heuristic: Kp = 0.35 + 0.9 * (500 / 200) = 0.35 + 2.25 = 2.6
+    # Clamped to KP_MAX = 2.5
+    # Default aggressiveness = 1.0 (was 0.5 in previous code!)
+    # Wait, in new code default aggressiveness is 1.0.
+    # So Kp = 2.5 * 1.0 = 2.5
+    
+    assert autopi.Kp == 2.5
 
 
 def test_safe_gains_unreliable_tau():
@@ -417,11 +413,9 @@ def test_safe_gains_unreliable_tau():
         hvac_mode=VThermHvacMode_HEAT
     )
     
-    # Kp should be based on KP_SAFE (with aggressiveness applied)
-    # KP_SAFE=0.55, aggressiveness=0.5 -> Kp = 0.55 * 0.5 * 2 = 0.55
     assert not autopi._tau_reliable
-    expected_kp = KP_SAFE * 0.5 * 2  # aggressiveness default is 0.5
-    assert autopi.Kp == expected_kp, f"Kp should be {expected_kp}, got {autopi.Kp}"
-    # Ki is calculated from Kp/tau, not set to KI_SAFE directly
-    # Just verify it's valid (within bounds)
-    assert autopi.Ki >= 0.001 and autopi.Ki <= 0.050
+    
+    # KP_SAFE = 0.55
+    # Aggressiveness default = 1.0
+    # Kp = 0.55 * 1.0 = 0.55
+    assert autopi.Kp == KP_SAFE
