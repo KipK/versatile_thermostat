@@ -566,11 +566,12 @@ class AutoPI:
         self._last_error = e
 
         # 2DOF (setpoint weighting) for proportional action:
-        # e_p = b_sp * r - y, with y = current_temp
-        e_p = float(self.setpoint_weight_b * target_temp - current_temp)
+        # e_p = b_sp * e, with e = (target_temp - current_temp)
+        # This reduces the proportional kick on setpoint changes while preserving error sign
+        e_p = float(self.setpoint_weight_b * e)
         if hvac_mode == VThermHvacMode_COOL:
-             # Basic cooling inversion: simplistic, but matches error inversion
-            e_p = float(current_temp - self.setpoint_weight_b * target_temp)
+            # Cooling mode: invert the weighted error
+            e_p = -e_p
 
         self._last_error_p = e_p
 
