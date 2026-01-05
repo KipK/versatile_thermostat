@@ -111,7 +111,7 @@ If these criteria are not met, conservative **"safe" gains** are used (Kp=0.55, 
 ### 4. Gain Calculation (Heuristic)
 Once the model is reliable, gains are calculated via a simple heuristic:
 - **τ**: Thermal time constant = 1/b
-- **Kp** = 0.35 + 0.9 × (τ / 200), bounded between 0.10 and 2.50
+- **Kp** = 0.35 + 0.9 × sqrt(τ / 200), bounded between 0.10 and 2.50
 - **Ki** = Kp / max(τ, 10), bounded between 0.001 and 0.050
 
 ### 5. Command Application

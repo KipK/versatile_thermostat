@@ -36,6 +36,7 @@ seconds, optionally constrained by minimum activation/deactivation times.
 from __future__ import annotations
 
 import logging
+import math
 import statistics
 from collections import deque
 from dataclasses import dataclass, field
@@ -546,7 +547,7 @@ class AutoPI:
         if tau_info.reliable:
             tau = tau_info.tau_min  # minutes
             # Heuristic: Kp scales with tau, Ki = Kp/tau
-            kp_calc = 0.35 + 0.9 * (tau / 200.0)
+            kp_calc = 0.35 + 0.9 * math.sqrt(tau / 200.0)
             kp = clamp(kp_calc, KP_MIN, KP_MAX)
             ki = clamp(kp / max(tau, 10.0), KI_MIN, KI_MAX)
         else:

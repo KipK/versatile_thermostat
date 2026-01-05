@@ -7,8 +7,10 @@ from custom_components.versatile_thermostat.autopi_algorithm import (
     ABEstimator,
     KP_SAFE,
     KI_SAFE,
+    KI_SAFE,
     KP_MAX
 )
+import math
 from custom_components.versatile_thermostat.vtherm_hvac_mode import VThermHvacMode_HEAT
 
 
@@ -384,13 +386,10 @@ def test_heuristic_gains_reliable_tau():
     # Check if reliable
     assert autopi._tau_reliable
     
-    # Heuristic: Kp = 0.35 + 0.9 * (500 / 200) = 0.35 + 2.25 = 2.6
-    # Clamped to KP_MAX = 2.5
-    # Default aggressiveness = 1.0 (was 0.5 in previous code!)
-    # Wait, in new code default aggressiveness is 1.0.
-    # So Kp = 2.5 * 1.0 = 2.5
+    # Heuristic: Kp = 0.35 + 0.9 * sqrt(500 / 200) = 0.35 + 0.9 * 1.5811 = 0.35 + 1.423 = 1.773
+    # Clamped to KP_MAX = 2.5 (no clamping needed here since 1.773 < 2.5)
     
-    assert autopi.Kp == 2.5
+    assert math.isclose(autopi.Kp, 1.773, rel_tol=1e-3)
 
 
 def test_safe_gains_unreliable_tau():

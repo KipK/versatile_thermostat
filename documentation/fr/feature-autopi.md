@@ -111,7 +111,7 @@ Si ces critères ne sont pas remplis, des **gains "safe"** conservateurs sont ut
 ### 4. Calcul des Gains (Heuristique)
 Une fois le modèle fiable, les gains sont calculés via une heuristique simple :
 - **τ** : Constante de temps thermique = 1/b
-- **Kp** = 0.35 + 0.9 × (τ / 200), borné entre 0.10 et 2.50
+- **Kp** = 0.35 + 0.9 × sqrt(τ / 200), borné entre 0.10 et 2.50
 - **Ki** = Kp / max(τ, 10), borné entre 0.001 et 0.050
 
 ### 5. Application de la commande
