@@ -287,7 +287,7 @@ class ThermostatTPI(BaseThermostat[T], Generic[T]):
             )
 
         # Sync coefficients from AutoTpiManager before calculating
-        if self._auto_tpi_manager and self._auto_tpi_manager.learning_active and self._proportional_function != PROPORTIONAL_FUNCTION_AUTO_PI:
+        if self._auto_tpi_manager and self._auto_tpi_manager.learning_active:
             new_params = await self._auto_tpi_manager.calculate()
             if new_params:
                 new_coef_int = new_params.get(CONF_TPI_COEF_INT)
@@ -344,7 +344,8 @@ class ThermostatTPI(BaseThermostat[T], Generic[T]):
         """Implement the specific control heating logic for TPI"""
 
         # Feed the Auto TPI manager (Before starting the cycle to apply new coeffs if any)
-        if self._auto_tpi_manager:
+        # This is only for TPI algorithm
+        if self._auto_tpi_manager and self._proportional_function == PROPORTIONAL_FUNCTION_TPI:
             await self._auto_tpi_manager.update(
                 room_temp=self._cur_temp,
                 ext_temp=self._cur_ext_temp,
@@ -496,6 +497,9 @@ class ThermostatTPI(BaseThermostat[T], Generic[T]):
             f"tpi_threshold_low: {tpi_threshold_low}, "
             f"tpi_threshold_high: {tpi_threshold_high}",
         )
+
+        if self._proportional_function != PROPORTIONAL_FUNCTION_TPI:
+            raise ServiceValidationError(f"{self} - This service is only available for TPI algorithm.")
 
         if self._prop_algorithm is None:
             raise ServiceValidationError(f"{self} - No TPI algorithm configured for this thermostat.")
@@ -657,6 +661,11 @@ class ThermostatTPI(BaseThermostat[T], Generic[T]):
         allow_kext_overshoot: bool = False,
     ):
         """Set the auto TPI mode"""
+
+        if self._proportional_function != PROPORTIONAL_FUNCTION_TPI:
+            _LOGGER.debug("%s - async_set_auto_tpi_mode: Ignoring call as proportional function is not TPI", self)
+            return
+
         _LOGGER.debug(
             "%s - async_set_auto_tpi_mode called with auto_tpi_mode=%s, reinitialise=%s, kint_boost=%s, kext_overshoot=%s",
             self,
