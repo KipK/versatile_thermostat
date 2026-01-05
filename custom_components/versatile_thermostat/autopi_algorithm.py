@@ -40,6 +40,7 @@ import math
 import statistics
 from collections import deque
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any, Deque, Dict, Optional
 
 from .vtherm_hvac_mode import (
@@ -336,6 +337,9 @@ class AutoPI:
         self._prev_error: Optional[float] = None
         self._sign_flip_leak_left: int = 0
 
+        # Learning start timestamp
+        self._learning_start_date: Optional[datetime] = datetime.now()
+
         if saved_state:
             self.load_state(saved_state)
         
@@ -356,6 +360,7 @@ class AutoPI:
         self._cycles_since_reset = 0
         self._prev_error = None
         self._sign_flip_leak_left = 0
+        self._learning_start_date = datetime.now()
         _LOGGER.info("%s - AutoPI learning and history reset", self._name)
 
     def load_state(self, state: Dict[str, Any]) -> None:
@@ -381,6 +386,14 @@ class AutoPI:
         self.u_prev = state.get("u_prev", 0.0)
         self._cycles_since_reset = state.get("cycles_since_reset", 0)
         
+        # Load learning start date
+        learning_start = state.get("learning_start_date")
+        if learning_start:
+            try:
+                self._learning_start_date = datetime.fromisoformat(learning_start)
+            except (ValueError, TypeError):
+                self._learning_start_date = None
+        
         _LOGGER.debug(
             "%s - AutoPI state loaded: a=%.6f, b=%.6f, learns=%d",
             self._name, self.est.a, self.est.b, self.est.learn_ok_count
@@ -397,6 +410,7 @@ class AutoPI:
             "integral": self.integral,
             "u_prev": self.u_prev,
             "cycles_since_reset": self._cycles_since_reset,
+            "learning_start_date": self._learning_start_date.isoformat() if self._learning_start_date else None,
         }
 
     # ------------------------------
@@ -734,6 +748,8 @@ class AutoPI:
             "learn_ok_count": int(self.est.learn_ok_count),
             "learn_skip_count": int(self.est.learn_skip_count),
             "learn_last_reason": str(self.est.learn_last_reason),
+            # Learning metadata
+            "learning_start_dt": self._learning_start_date,
             # PI
             "Kp": round(self.Kp, 6),
             "Ki": round(self.Ki, 6),
