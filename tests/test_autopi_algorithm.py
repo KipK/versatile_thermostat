@@ -158,66 +158,87 @@ def test_integrator_hold():
 
 
 def test_abestimator_learn_b_off():
-    """Test learning of b during OFF periods."""
+    """Test learning of b during OFF periods (u < 0.05)."""
     est = ABEstimator()
     
-    # Test valid learning
-    u = 0.1
-    tin_prev = 20.0
-    # dT approx a*u - b*delta
-    # Let's assume a=0.01, b=0.001
-    # text = 10, delta = 10
-    # dT_per_min = 0.01*0.1 - 0.001*10 = 0.001 - 0.01 = -0.009
-    # dT = -0.009 * 10min = -0.09
-    tin_now = 20.0 - 0.09
+    # OFF phase: u = 0 (no heating)
+    # Model: dT/dt = -b * (T_int - T_ext)
+    # With T_int = 20, T_ext = 10, delta = 10
+    # If b = 0.001, then dT/dt = -0.001 * 10 = -0.01 (cooling)
     
     est.learn(
-        dT_int_per_min=-0.009,
-        u=u,
-        t_int=tin_now,
-        t_ext=10.0,
-        min_u_for_learning=0.05
-    )
-    
-    assert est.learn_ok_count == 1
-    assert "ok" in est.learn_last_reason
-
-
-def test_abestimator_learn_a_on():
-    """Test learning of a."""
-    est = ABEstimator()
-    
-    # Test valid learning with higher u
-    u = 0.5
-    # a=0.01, b=0.001
-    # dT/min = a*u - b*delta
-    # delta = 10
-    # dT/min = 0.01*0.5 - 0.001*10 = 0.005 - 0.01 = -0.005
-    
-    est.learn(
-        dT_int_per_min=-0.005,
-        u=u,
+        dT_int_per_min=-0.01,  # Cooling
+        u=0.0,  # OFF phase (u < 0.05)
         t_int=20.0,
         t_ext=10.0
     )
     
     assert est.learn_ok_count == 1
-    assert "ok" in est.learn_last_reason
+    assert "update:b(off)" in est.learn_last_reason
+    # b should be learned: b = -(-0.01) / 10 = 0.001
+    assert est.b > 0
 
 
-def test_abestimator_skip_low_u():
-    """Test that learning is skipped when u is too low."""
+def test_abestimator_learn_a_on():
+    """Test learning of a during ON phases (u > 0.20)."""
+    est = ABEstimator()
+    
+    # First, learn b during OFF phase so it's not 0
+    est.learn(
+        dT_int_per_min=-0.01,
+        u=0.0,
+        t_int=20.0,
+        t_ext=10.0
+    )
+    assert est.b > 0, "b should be learned first"
+    
+    # ON phase: u = 0.5 (strong heating)
+    # Model: dT/dt = a*u - b*(T_int - T_ext)
+    # With b already learned, we can estimate a
+    # dT/dt = 0.01 (heating), u = 0.5, b = 0.001, delta = 10
+    # a = (dT/dt + b*delta) / u = (0.01 + 0.001*10) / 0.5 = 0.02 / 0.5 = 0.04
+    
+    est.learn(
+        dT_int_per_min=0.01,  # Heating
+        u=0.5,  # ON phase (u > 0.20)
+        t_int=20.0,
+        t_ext=10.0
+    )
+    
+    assert est.learn_ok_count == 2
+    assert "update:a(on)" in est.learn_last_reason
+    assert est.a > 0
+
+
+def test_abestimator_skip_gray_zone():
+    """Test that learning is skipped in gray zone (0.05 <= u <= 0.20)."""
     est = ABEstimator()
     
     est.learn(
         dT_int_per_min=-0.01,
-        u=0.01,  # < 0.05 default
+        u=0.10,  # Gray zone: 0.05 <= u <= 0.20
         t_int=19.0,
         t_ext=10.0
     )
     
     assert est.learn_ok_count == 0
-    assert "skip: u too small" in est.learn_last_reason
+    assert "gray zone" in est.learn_last_reason
+
+
+def test_abestimator_learn_b_off_phase():
+    """Test that b is learned during OFF phase (u < 0.05)."""
+    est = ABEstimator()
+    
+    est.learn(
+        dT_int_per_min=-0.01,  # Cooling
+        u=0.01,  # OFF phase (u < 0.05)
+        t_int=19.0,
+        t_ext=10.0
+    )
+    
+    # Should learn b in OFF phase, not skip
+    assert est.learn_ok_count == 1
+    assert "update:b(off)" in est.learn_last_reason
 
 
 def test_tau_reliability_not_enough_learns():

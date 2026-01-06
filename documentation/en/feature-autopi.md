@@ -153,7 +153,9 @@ The algorithm exposes several metrics in the climate entity attributes:
 | **b** | Heat loss coefficient (1/min) |
 | **tau_min** | Thermal time constant of the room (in minutes) |
 | **tau_reliable** | Indicates if the thermal model is considered reliable |
-| **learn_ok_count** | Number of successful learning cycles |
+| **learn_ok_count** | Total number of successful learning cycles |
+| **learn_ok_count_a** | Number of cycles where `a` was learned (ON phases) |
+| **learn_ok_count_b** | Number of cycles where `b` was learned (OFF phases) |
 | **learn_last_reason** | Reason for the last learning result |
 | **Kp**, **Ki** | PI controller gains (calculated or "safe") |
 | **u_ff** | Feed-forward component of the command |

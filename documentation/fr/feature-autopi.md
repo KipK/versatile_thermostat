@@ -153,7 +153,9 @@ L'algorithme expose plusieurs métriques dans les attributs de l'entité climate
 | **b** | Coefficient de déperdition (1/min) |
 | **tau_min** | Constante de temps thermique de la pièce (en minutes) |
 | **tau_reliable** | Indique si le modèle thermique est considéré fiable |
-| **learn_ok_count** | Nombre de cycles d'apprentissage réussis |
+| **learn_ok_count** | Nombre total de cycles d'apprentissage réussis |
+| **learn_ok_count_a** | Nombre de cycles où `a` a été appris (phases ON) |
+| **learn_ok_count_b** | Nombre de cycles où `b` a été appris (phases OFF) |
 | **learn_last_reason** | Raison du dernier résultat d'apprentissage |
 | **Kp**, **Ki** | Gains du régulateur PI (calculés ou "safe") |
 | **u_ff** | Composante feed-forward de la commande |

@@ -98,11 +98,12 @@ class ABEstimator:
 
         dT_int approx a*u - b*(T_int - T_ext)
 
-    Notes
-    -----
-    - Designed for incremental learning on noisy data.
-    - Uses bounded / robust aggregation over a sliding window.
-    - Keeps internal diagnostics about learning health.
+    Learning strategy (ON/OFF separation):
+    - b is learned during OFF phases (u < 0.05) when cooling is observable
+    - a is learned during ON phases (u > 0.20) when heating is significant
+    - Gray zone (0.05 <= u <= 0.20) is skipped as data quality is poor
+
+    This separation avoids circular coupling between a and b estimates.
     """
 
     a: float = 0.0
@@ -110,24 +111,32 @@ class ABEstimator:
 
     # Learning diagnostics
     learn_ok_count: int = 0
+    learn_ok_count_a: int = 0
+    learn_ok_count_b: int = 0
     learn_skip_count: int = 0
     learn_last_reason: str = "init"
 
-    # Internal windows
+    # Internal windows for robust median estimation
     _a_hist: Deque[float] = field(default_factory=lambda: deque(maxlen=96))
     _b_hist: Deque[float] = field(default_factory=lambda: deque(maxlen=96))
 
-    # Robust bounds (these are conservative; tune to your installation)
+    # Robust bounds (conservative; tune to your installation)
     A_MIN: float = 1e-5
     A_MAX: float = 0.05
     B_MIN: float = 1e-5
     B_MAX: float = 0.05
+
+    # EWMA smoothing factor for parameter updates
+    ALPHA_A: float = 0.15
+    ALPHA_B: float = 0.12
 
     def reset(self) -> None:
         """Reset learned parameters and history."""
         self.a = 0.0
         self.b = 0.0
         self.learn_ok_count = 0
+        self.learn_ok_count_a = 0
+        self.learn_ok_count_b = 0
         self.learn_skip_count = 0
         self.learn_last_reason = "reset"
         self._a_hist.clear()
@@ -140,77 +149,125 @@ class ABEstimator:
         t_int: float,
         t_ext: float,
         *,
-        min_u_for_learning: float = 0.05,
         max_abs_dT_per_min: float = 0.35,
+        min_dT_per_min: float = 0.003,
     ) -> None:
         """
-        Update (a,b) using a single observation.
+        Update (a,b) using a single observation with ON/OFF separation.
 
         Parameters
         ----------
         dT_int_per_min:
-            Indoor temperature slope over the last cycle ("C/min)
+            Indoor temperature slope over the last cycle (°C/min)
         u:
             Applied power duty-cycle over the last cycle in [0,1]
         t_int:
-            Current indoor temperature ("C)
+            Current indoor temperature (°C)
         t_ext:
-            External/ambient temperature ("C)
-        min_u_for_learning:
-            Skip learning when actuation is too low to be informative.
+            External/ambient temperature (°C)
         max_abs_dT_per_min:
-            Outlier rejection threshold to ignore impossible slopes (sensor glitches, etc.)
+            Outlier rejection threshold for impossible slopes
+        min_dT_per_min:
+            Minimum slope magnitude to consider (below = noise)
         """
-        # Basic validity checks
-        if u < min_u_for_learning:
-            self.learn_skip_count += 1
-            self.learn_last_reason = "skip: u too small"
-            return
+        dt = float(dT_int_per_min)
+        delta = float(t_int - t_ext)
 
-        if abs(dT_int_per_min) > max_abs_dT_per_min:
+        # Outlier rejection: slope too large (sensor glitch)
+        if abs(dt) > max_abs_dT_per_min:
             self.learn_skip_count += 1
             self.learn_last_reason = "skip: slope outlier"
             return
 
-        # Identify candidate (a,b) from rearranging the model:
-        # dT = a*u - b*(Tin-Text)  =>  a = (dT + b*(Tin-Text)) / u
-        # In practice, solve both a and b from multiple samples; here we use a pragmatic approach:
-        #
-        # If we assume b is slowly varying, we can estimate b from:
-        # b = (a*u - dT) / (Tin-Text)  (when Tin != Text)
-        #
-        # We'll generate a candidate b from current values and update robustly.
-        dt = float(dT_int_per_min)
-        delta = float(t_int - t_ext)
-
-        if abs(delta) < 0.2:
-            # Too little gradient: b estimation becomes ill-conditioned.
+        # Noise rejection: slope too small to be informative
+        if abs(dt) < min_dT_per_min:
             self.learn_skip_count += 1
-            self.learn_last_reason = "skip: |Tin-Text| too small"
+            self.learn_last_reason = "skip: slope too small (noise)"
             return
 
-        # Heuristic candidate b: if a already known, update b; else bootstrap b from dt/delta
-        if self.a > 0.0:
-            b_cand = (self.a * u - dt) / delta
-        else:
-            # Bootstrap: assume u roughly explains heating effect; dt/delta gives losses sign.
-            b_cand = clamp(abs(dt / delta), self.B_MIN, self.B_MAX)
+        # === PHASE OFF: Learn b when u < 0.05 ===
+        # Model simplifies to: dT/dt = -b * (T_int - T_ext)
+        # => b = -dT/dt / (T_int - T_ext)
+        if u < 0.05:
+            if abs(delta) < 0.5:
+                self.learn_skip_count += 1
+                self.learn_last_reason = "skip:b: |Tin-Text| too small"
+                return
 
-        b_cand = clamp(b_cand, self.B_MIN, self.B_MAX)
+            b_meas = -dt / delta
 
-        # Candidate a using b_cand
-        a_cand = (dt + b_cand * delta) / max(u, 1e-6)
-        a_cand = clamp(a_cand, self.A_MIN, self.A_MAX)
+            if b_meas <= 0:
+                self.learn_skip_count += 1
+                self.learn_last_reason = "skip:b: measured b <= 0"
+                return
 
-        # Robust aggregation: store, then use median (resistant to outliers)
-        self._a_hist.append(a_cand)
-        self._b_hist.append(b_cand)
+            b_meas = clamp(b_meas, self.B_MIN, self.B_MAX)
+            self._b_hist.append(b_meas)
 
-        self.a = float(statistics.median(self._a_hist)) if self._a_hist else a_cand
-        self.b = float(statistics.median(self._b_hist)) if self._b_hist else b_cand
+            # Update b using EWMA with median for robustness
+            if len(self._b_hist) >= 3:
+                b_median = float(statistics.median(self._b_hist))
+                self.b = clamp(
+                    (1 - self.ALPHA_B) * self.b + self.ALPHA_B * b_median,
+                    self.B_MIN,
+                    self.B_MAX,
+                )
+            else:
+                # Warmup: direct EWMA
+                self.b = clamp(
+                    (1 - self.ALPHA_B) * self.b + self.ALPHA_B * b_meas,
+                    self.B_MIN,
+                    self.B_MAX,
+                )
 
-        self.learn_ok_count += 1
-        self.learn_last_reason = "ok"
+            self.learn_ok_count += 1
+            self.learn_ok_count_b += 1
+            self.learn_last_reason = "update:b(off)"
+            return
+
+        # === PHASE ON: Learn a when u > 0.20 ===
+        # Using known b: a = (dT/dt + b * (T_int - T_ext)) / u
+        if u > 0.20:
+            if abs(delta) < 0.2:
+                self.learn_skip_count += 1
+                self.learn_last_reason = "skip:a: |Tin-Text| too small"
+                return
+
+            a_meas = (dt + self.b * delta) / u
+
+            if a_meas <= 0:
+                self.learn_skip_count += 1
+                self.learn_last_reason = "skip:a: measured a <= 0"
+                return
+
+            a_meas = clamp(a_meas, self.A_MIN, self.A_MAX)
+            self._a_hist.append(a_meas)
+
+            # Update a using EWMA with median for robustness
+            if len(self._a_hist) >= 3:
+                a_median = float(statistics.median(self._a_hist))
+                self.a = clamp(
+                    (1 - self.ALPHA_A) * self.a + self.ALPHA_A * a_median,
+                    self.A_MIN,
+                    self.A_MAX,
+                )
+            else:
+                # Warmup: direct EWMA
+                self.a = clamp(
+                    (1 - self.ALPHA_A) * self.a + self.ALPHA_A * a_meas,
+                    self.A_MIN,
+                    self.A_MAX,
+                )
+
+            self.learn_ok_count += 1
+            self.learn_ok_count_a += 1
+            self.learn_last_reason = "update:a(on)"
+            return
+
+        # === GRAY ZONE: 0.05 <= u <= 0.20 ===
+        # Data quality is poor, skip learning
+        self.learn_skip_count += 1
+        self.learn_last_reason = "skip: gray zone (0.05 <= u <= 0.20)"
 
     def tau_reliability(self) -> TauReliability:
         """
@@ -372,6 +429,8 @@ class AutoPI:
         self.est.a = state.get("a", 0.0)
         self.est.b = state.get("b", 0.0)
         self.est.learn_ok_count = state.get("learn_ok_count", 0)
+        self.est.learn_ok_count_a = state.get("learn_ok_count_a", 0)
+        self.est.learn_ok_count_b = state.get("learn_ok_count_b", 0)
         
         # Load history queues
         a_hist = state.get("a_hist", [])
@@ -405,6 +464,8 @@ class AutoPI:
             "a": self.est.a,
             "b": self.est.b,
             "learn_ok_count": self.est.learn_ok_count,
+            "learn_ok_count_a": self.est.learn_ok_count_a,
+            "learn_ok_count_b": self.est.learn_ok_count_b,
             "a_hist": list(self.est._a_hist),
             "b_hist": list(self.est._b_hist),
             "integral": self.integral,
@@ -746,6 +807,8 @@ class AutoPI:
             "tau_min": round(tau_info.tau_min, 1),
             "tau_reliable": tau_info.reliable,
             "learn_ok_count": int(self.est.learn_ok_count),
+            "learn_ok_count_a": int(self.est.learn_ok_count_a),
+            "learn_ok_count_b": int(self.est.learn_ok_count_b),
             "learn_skip_count": int(self.est.learn_skip_count),
             "learn_last_reason": str(self.est.learn_last_reason),
             # Learning metadata
