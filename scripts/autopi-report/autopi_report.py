@@ -39,11 +39,40 @@ except ImportError:
 # API Functions
 # ------------------------------------------------------------------------------
 
+def get_entity_state(
+    base_url: str,
+    token: str,
+    entity_id: str,
+    verbose: bool = False
+) -> Dict[str, Any]:
+    """Fetch current entity state."""
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+    }
+    url = f"{base_url}/api/states/{entity_id}"
+    
+    if verbose:
+        print(f"[DEBUG] Fetching state: {url}")
+
+    try:
+        r = requests.get(url, headers=headers, timeout=20)
+    except requests.exceptions.RequestException as e:
+        print(f"[ERROR] Failed to fetch entity state: {e}")
+        sys.exit(1)
+
+    if r.status_code != 200:
+        print(f"[ERROR] API Error fetching state: {r.status_code} - {r.text}")
+        sys.exit(1)
+
+    return r.json()
+
 def fetch_history(
     base_url: str,
     token: str,
     entity_id: str,
-    days: int,
+    days: Optional[int] = None,
+    start_date: Optional[datetime] = None,
     verbose: bool = False
 ) -> List[List[Dict[str, Any]]]:
     """Fetch entity history from Home Assistant API."""
@@ -53,7 +82,21 @@ def fetch_history(
     }
 
     now = datetime.now(timezone.utc)
-    start = now - timedelta(days=days)
+
+    if start_date:
+        start = start_date
+        # If naive, we assume it's appropriate for the query or compatible with comparison
+        # But for history API, we usually want a specific timestamp.
+        # If it has no timezone, we might want to attach one or leave as is depending on HA expectations.
+        # Usually HA stores everything in UTC. If learning_start_dt is naive, it might happen.
+        if start.tzinfo is None:
+             # Assume UTC if not specified, to be safe for calculations
+             start = start.replace(tzinfo=timezone.utc)
+    elif days:
+        start = now - timedelta(days=days)
+    else:
+        # Default fallback
+        start = now - timedelta(days=7)
 
     start_iso = start.strftime("%Y-%m-%dT%H:%M:%S")
     end_iso = now.strftime("%Y-%m-%dT%H:%M:%S")
@@ -577,6 +620,9 @@ def generate_text_report(
     lines.append(f"Period:        {days} days")
     lines.append(f"Data points:   {summary.get('data_points', 'N/A')}")
     
+    if summary.get('learning_start_dt'):
+        lines.append(f"Learning Start: {summary['learning_start_dt'].strftime('%Y-%m-%d %H:%M')}")
+
     if summary.get('first_timestamp') and summary.get('last_timestamp'):
         lines.append(f"From:          {summary['first_timestamp'].strftime('%Y-%m-%d %H:%M')}")
         lines.append(f"To:            {summary['last_timestamp'].strftime('%Y-%m-%d %H:%M')}")
@@ -919,8 +965,8 @@ Examples:
                         help="Long-Lived Access Token")
     parser.add_argument("--entity", required=True, 
                         help="Climate entity ID (e.g., climate.thermostat_salon)")
-    parser.add_argument("--days", type=int, default=7, 
-                        help="Number of days of history to fetch (default: 7)")
+    parser.add_argument("--days", type=int, default=None, 
+                        help="Number of days of history to fetch (default: 7, or from learning_start_dt)")
     parser.add_argument("--output-dir", default="./reports", 
                         help="Directory for output files (default: ./reports)")
     parser.add_argument("--verbose", action="store_true", 
@@ -932,17 +978,67 @@ Examples:
     print(f"  AUTOPI ANALYSIS REPORT")
     print(f"{'='*70}\n")
     print(f"Entity:     {args.entity}")
-    print(f"Period:     {args.days} days")
     print(f"Output:     {args.output_dir}")
     print()
 
+    # 1. Fetch current state to find learning_start_dt
+    print(f"[INFO] Fetching current state for {args.entity}...")
+    current_state = get_entity_state(args.url, args.token, args.entity, args.verbose)
+    
+    attrs = current_state.get("attributes", {})
+    specific_states = attrs.get("specific_states", {})
+    # Handle case where specific_states might be None or empty
+    if not specific_states: 
+        specific_states = {}
+        
+    auto_pi = specific_states.get("auto_pi", {}) if specific_states else {}
+    learning_start_dt_str = auto_pi.get("learning_start_dt")
+    
+    start_date = None
+    learning_start_dt = None
+
+    if learning_start_dt_str:
+        try:
+            # Parse the datetime string
+            learning_start_dt = datetime.fromisoformat(learning_start_dt_str)
+            # If naive, assume UTC as HA usually works in UTC internally, or handle as needed
+            if learning_start_dt.tzinfo is None:
+                learning_start_dt = learning_start_dt.replace(tzinfo=timezone.utc)
+        except ValueError:
+            print(f"[WARNING] Could not parse learning_start_dt: {learning_start_dt_str}")
+
+    # Determine start date and period
+    days_arg = args.days
+    
+    if days_arg is not None:
+        print(f"[INFO] Using user-specified period: {days_arg} days")
+        days = days_arg
+    elif learning_start_dt:
+        print(f"[INFO] Found Auto-PI learning start date: {learning_start_dt.strftime('%Y-%m-%d %H:%M:%S')}")
+        start_date = learning_start_dt
+        # Calculate approximate days for display/logging
+        diff = datetime.now(timezone.utc) - start_date
+        days = diff.days + 1
+    else:
+        print(f"[INFO] No learning start date found, using default 7 days")
+        days = 7
+
     # Fetch history
     print("[INFO] Fetching history from Home Assistant...")
-    history = fetch_history(args.url, args.token, args.entity, args.days, args.verbose)
+    # helper to ensure we don't pass both if we don't want to, but our function handles it
+    # We pass start_date if we have it (from learning), or days if we have it (from args or default)
+    
+    history_start_arg = start_date if (args.days is None and start_date) else None
+    
+    history = fetch_history(args.url, args.token, args.entity, days=days_arg if days_arg else days, start_date=history_start_arg, verbose=args.verbose)
 
     # Extract data
     print("[INFO] Extracting AutoPI data...")
     data, summary = extract_autopi_data(history, args.verbose)
+    
+    # Add learning start date to summary for report
+    if learning_start_dt:
+        summary['learning_start_dt'] = learning_start_dt
 
     if not data:
         print("\n[ERROR] No AutoPI data found. Exiting.")
