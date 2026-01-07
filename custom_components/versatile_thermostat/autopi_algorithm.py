@@ -329,10 +329,10 @@ class AutoPI:
         ff_warmup_cycles: int = 6,
         ff_scale_unreliable_max: float = 0.30,
         # --- Servo overshoot suppression knobs ---
-        setpoint_weight_b: float = 0.25,
+        setpoint_weight_b: float = 0.3,
         near_band_deg: float = 0.60,
         kp_near_factor: float = 0.60,
-        ki_near_factor: float = 0.60,
+        ki_near_factor: float = 0.70,
         sign_flip_leak: float = 0.40,
         sign_flip_leak_cycles: int = 3,
         sign_flip_band_mult: float = 2.0,
