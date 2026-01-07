@@ -627,8 +627,8 @@ class AutoPI:
             # Heuristic: Kp scales with tau, Ki = Kp/tau
             kp_calc = 0.35 + 0.9 * math.sqrt(tau / 200.0)
             kp = clamp(kp_calc, KP_MIN, KP_MAX)
-            # Cap tau to avoid extremely small Ki for slow systems
-            ki = clamp(kp / clamp(tau, 10.0, TAU_CAP_FOR_KI), KI_MIN, KI_MAX)
+            # Normal Ki based on tau (conservative, avoids overshoot when far from target)
+            ki = clamp(kp / max(tau, 10.0), KI_MIN, KI_MAX)
         else:
             kp = KP_SAFE
             ki = KI_SAFE
@@ -667,6 +667,10 @@ class AutoPI:
         in_near_band = (self.near_band_deg > 0.0) and (abs(e) <= self.near_band_deg)
         if in_near_band:
             kp *= self.kp_near_factor
+            # Boost Ki by capping tau when close to setpoint (eliminates steady-state error)
+            if tau_info.reliable:
+                tau_capped = clamp(tau_info.tau_min, 10.0, TAU_CAP_FOR_KI)
+                ki = clamp(self.Kp / tau_capped, KI_MIN, KI_MAX) * self.aggressiveness
             ki *= self.ki_near_factor
 
         # Store current gains (for diagnostics)
