@@ -76,6 +76,9 @@ KP_MAX = 2.50
 KI_MIN = 0.001
 KI_MAX = 0.050
 
+# Cap for tau in Ki calculation (prevents extremely small Ki for slow systems)
+TAU_CAP_FOR_KI = 250.0
+
 # Anti-windup / integrator behavior
 INTEGRAL_LEAK = 0.995  # leak factor per cycle when inside deadband
 MAX_STEP_PER_MIN = 0.25  # max output change per minute (rate limit)
@@ -624,7 +627,8 @@ class AutoPI:
             # Heuristic: Kp scales with tau, Ki = Kp/tau
             kp_calc = 0.35 + 0.9 * math.sqrt(tau / 200.0)
             kp = clamp(kp_calc, KP_MIN, KP_MAX)
-            ki = clamp(kp / max(tau, 10.0), KI_MIN, KI_MAX)
+            # Cap tau to avoid extremely small Ki for slow systems
+            ki = clamp(kp / clamp(tau, 10.0, TAU_CAP_FOR_KI), KI_MIN, KI_MAX)
         else:
             kp = KP_SAFE
             ki = KI_SAFE
