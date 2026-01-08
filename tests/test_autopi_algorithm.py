@@ -321,9 +321,9 @@ def test_reset_learning():
     # Reset
     autopi.reset_learning()
     
-    # Check defaults restored
-    assert autopi.est.a == 0.0
-    assert autopi.est.b == 0.0
+    # Check defaults restored (uses A_INIT and B_INIT, not 0)
+    assert autopi.est.a == autopi.est.A_INIT
+    assert autopi.est.b == autopi.est.B_INIT
     assert autopi.integral == 0.0
     assert autopi.est.learn_ok_count == 0
 

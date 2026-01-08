@@ -109,8 +109,14 @@ class ABEstimator:
     This separation avoids circular coupling between a and b estimates.
     """
 
-    a: float = 0.0
-    b: float = 0.0
+    # Initial values for faster convergence (matching regul6.py)
+    # A_INIT: heating effectiveness ~0.05°C/min at 100% for typical radiator
+    # B_INIT: loss coefficient giving tau ~ 1000 min (reasonable room)
+    A_INIT: float = 0.0005
+    B_INIT: float = 0.0010
+
+    a: float = 0.0005  # = A_INIT
+    b: float = 0.0010  # = B_INIT
 
     # Learning diagnostics
     learn_ok_count: int = 0
@@ -134,9 +140,9 @@ class ABEstimator:
     ALPHA_B: float = 0.12
 
     def reset(self) -> None:
-        """Reset learned parameters and history."""
-        self.a = 0.0
-        self.b = 0.0
+        """Reset learned parameters and history to initial values."""
+        self.a = self.A_INIT
+        self.b = self.B_INIT
         self.learn_ok_count = 0
         self.learn_ok_count_a = 0
         self.learn_ok_count_b = 0
@@ -144,6 +150,7 @@ class ABEstimator:
         self.learn_last_reason = "reset"
         self._a_hist.clear()
         self._b_hist.clear()
+
 
     def learn(
         self,
@@ -489,6 +496,7 @@ class AutoPI:
         previous_power: float,
         hvac_mode: VThermHvacMode,
         cycle_dt: float = None,
+        ext_previous_temp: float = None,
     ) -> None:
         """
         Update the thermal model with observed data.
@@ -502,6 +510,7 @@ class AutoPI:
             previous_power: Average power applied during cycle [0, 1]
             hvac_mode: Current HVAC mode
             cycle_dt: Cycle duration in minutes (defaults to self._cycle_min)
+            ext_previous_temp: Outdoor temperature at start of cycle ("C), optional
         """
         if previous_temp is None or previous_power is None or current_temp is None:
             return
@@ -513,16 +522,21 @@ class AutoPI:
         if dt_minutes <= 1e-4:
             return
         
-        t_ext = ext_current_temp if ext_current_temp is not None else current_temp
+        # Use temperatures at the START of the cycle for delta calculation
+        # This matches regul6.py's approach: delta = t_in_prev - t_out_prev
+        t_ext_prev = ext_previous_temp if ext_previous_temp is not None else ext_current_temp
+        if t_ext_prev is None:
+            t_ext_prev = previous_temp
         
         dT = current_temp - previous_temp
         dT_int_per_min = dT / dt_minutes
         
+        # Pass previous temperatures for delta calculation (start of observation window)
         self.est.learn(
             dT_int_per_min=dT_int_per_min,
             u=previous_power,
-            t_int=current_temp,
-            t_ext=t_ext
+            t_int=previous_temp,  # Temperature at START of cycle
+            t_ext=t_ext_prev      # External temp at START of cycle
         )
 
     # ------------------------------
