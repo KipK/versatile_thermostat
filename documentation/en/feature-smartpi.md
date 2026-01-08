@@ -1,6 +1,6 @@
-# The AutoPI Algorithm
+# The SmartPI Algorithm
 
-- [The AutoPI Algorithm](#the-autopi-algorithm)
+- [The SmartPI Algorithm](#the-smartpi-algorithm)
   - [How it works](#how-it-works)
   - [What does it do concretely?](#what-does-it-do-concretely)
   - [Configuration](#configuration)
@@ -10,17 +10,17 @@
 
 ## How it works
 
-The **AutoPI** algorithm is an adaptive controller that automatically learns the thermal behavior of your room. Unlike TPI which uses fixed coefficients, AutoPI continuously adapts to the characteristics of your installation.
+The **SmartPI** algorithm is an adaptive controller that automatically learns the thermal behavior of your room. Unlike TPI which uses fixed coefficients, SmartPI continuously adapts to the characteristics of your installation.
 
 ### How does it work?
 
-1. **Continuous learning**: At each heating cycle, AutoPI observes how the temperature evolves based on the applied power
+1. **Continuous learning**: At each heating cycle, SmartPI observes how the temperature evolves based on the applied power
 2. **Thermal modeling**: It builds a mathematical model that represents your room (inertia, heat losses, heater power) via conditional EWMA estimation
 3. **Gain adaptation**: The controller parameters are automatically adjusted using a heuristic based on the thermal time constant
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│                    AutoPI                           │
+│                    SmartPI                          │
 │                                                     │
 │   Temperature ──► Learning ──► Room model           │
 │   Power       ──► (EWMA cond.) ──► (a, b)          │
@@ -39,7 +39,7 @@ The **AutoPI** algorithm is an adaptive controller that automatically learns the
 
 ## What does it do concretely?
 
-- **At startup**: AutoPI uses conservative default values
+- **At startup**: SmartPI uses conservative default values
 - **After a few hours**: It starts understanding your installation
 - **After a few days**: The model is refined and regulation becomes optimal
 
@@ -56,11 +56,11 @@ The **AutoPI** algorithm is an adaptive controller that automatically learns the
 
 ## Configuration
 
-To enable AutoPI:
+To enable SmartPI:
 
 1. Create or modify a VTherm of type **switch** or **valve**
-2. In **Underlyings**, select the **AutoPI** algorithm
-3. Configure the parameters in the **AutoPI** menu
+2. In **Underlyings**, select the **SmartPI** algorithm
+3. Configure the parameters in the **SmartPI** menu
 
 ## Available parameters
 
@@ -81,7 +81,7 @@ The algorithm automatically reduces Kp and Ki gains within a band close to the s
 
 ## Detailed operation of the algorithm
 
-AutoPI operation can be broken into 5 cyclic steps:
+SmartPI operation can be broken into 5 cyclic steps:
 
 ### 1. Measurement and Observation
 At each cycle, the algorithm collects:
@@ -190,7 +190,7 @@ For the algorithm to effectively learn the thermal behavior of your room, follow
 
 ### Recommended procedure
 
-1. Activate AutoPI and verify the thermostat is in HEAT mode
+1. Activate SmartPI and verify the thermostat is in HEAT mode
 2. Set the target to ~1-2°C above current temperature
 3. Let it run for 2-3 days without changing the setpoint
 4. Check in attributes that `learn_ok_count` > 6
@@ -200,7 +200,7 @@ For the algorithm to effectively learn the thermal behavior of your room, follow
 
 ## Recommended use cases
 
-AutoPI is particularly suited for:
+SmartPI is particularly suited for:
 
 - 🏠 Installations where you don't know the right TPI coefficients
 - 🔄 Rooms whose thermal characteristics change (sun exposure, variable occupancy)
@@ -208,7 +208,7 @@ AutoPI is particularly suited for:
 
 ## Differences with TPI and Auto-TPI
 
-| Aspect | TPI | Auto-TPI | AutoPI |
+| Aspect | TPI | Auto-TPI | SmartPI |
 |--------|-----|----------|--------|
 | **Coefficients** | Fixed (manual) | Learned then fixed | Continuously adaptive |
 | **Configuration** | Complex (Kint, Kext) | Medium | Simple (2 parameters) |
@@ -217,13 +217,13 @@ AutoPI is particularly suited for:
 | **Model type** | Simple proportional | Statistical observation | Thermal model (EWMA) |
 | **Tuning method** | Manual | Heuristic | Adaptive heuristic |
 
-> **Note**: AutoPI is a complementary approach to TPI and Auto-TPI. It is particularly suited for users who prefer an automatic solution without configuration.
+> **Note**: SmartPI is a complementary approach to TPI and Auto-TPI. It is particularly suited for users who prefer an automatic solution without configuration.
 
 ## Services
 
-### reset_auto_pi_learning
+### reset_smart_pi_learning
 
-This service completely resets the AutoPI algorithm learning. All learned data (thermal model, controller gains) are reset to their default values.
+This service completely resets the SmartPI algorithm learning. All learned data (thermal model, controller gains) are reset to their default values.
 
 This can be useful if:
 - You have performed significant insulation work
@@ -233,7 +233,7 @@ This can be useful if:
 Learning will restart from scratch at the next heating cycle.
 
 ```yaml
-service: versatile_thermostat.reset_auto_pi_learning
+service: versatile_thermostat.reset_smart_pi_learning
 target:
   entity_id: climate.my_thermostat
 ```

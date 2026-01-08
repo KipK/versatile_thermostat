@@ -150,7 +150,7 @@ STEP_THERMOSTAT_SWITCH = vol.Schema(  # pylint: disable=invalid-name
         vol.Required(CONF_PROP_FUNCTION, default=PROPORTIONAL_FUNCTION_TPI): vol.In(
             [
                 PROPORTIONAL_FUNCTION_TPI,
-                PROPORTIONAL_FUNCTION_AUTO_PI,
+                PROPORTIONAL_FUNCTION_SMART_PI,
             ]
         ),
         vol.Optional(CONF_AC_MODE, default=False): cv.boolean,
@@ -199,7 +199,7 @@ STEP_THERMOSTAT_VALVE = vol.Schema(  # pylint: disable=invalid-name
         vol.Required(CONF_PROP_FUNCTION, default=PROPORTIONAL_FUNCTION_TPI): vol.In(
             [
                 PROPORTIONAL_FUNCTION_TPI,
-                PROPORTIONAL_FUNCTION_AUTO_PI,
+                PROPORTIONAL_FUNCTION_SMART_PI,
             ]
         ),
         vol.Optional(CONF_AC_MODE, default=False): cv.boolean,
@@ -233,7 +233,7 @@ STEP_VALVE_REGULATION = vol.Schema(  # pylint: disable=invalid-name
         vol.Required(CONF_PROP_FUNCTION, default=PROPORTIONAL_FUNCTION_TPI): vol.In(
             [
                 PROPORTIONAL_FUNCTION_TPI,
-                PROPORTIONAL_FUNCTION_AUTO_PI,
+                PROPORTIONAL_FUNCTION_SMART_PI,
             ]
         ),
         vol.Optional(CONF_OPENING_THRESHOLD_DEGREE, default=0): cv.positive_int,
@@ -522,23 +522,23 @@ STEP_AUTO_TPI_1_SCHEMA = vol.Schema(
     }
 )
 
-# AutoPI specific configuration (visible only when AutoPI algorithm is selected)
+# SmartPI specific configuration (visible only when SmartPI algorithm is selected)
 # First step: checkbox for central config
-STEP_AUTO_PI_SCHEMA = vol.Schema(
+STEP_SMART_PI_SCHEMA = vol.Schema(
     {
-        vol.Optional(CONF_USE_AUTO_PI_CENTRAL_CONFIG, default=False): cv.boolean,
+        vol.Optional(CONF_USE_SMART_PI_CENTRAL_CONFIG, default=False): cv.boolean,
     }
 )
 
-# Second step: specific AutoPI parameters (if not using central config)
-STEP_AUTO_PI_PARAMS_SCHEMA = vol.Schema(
+# Second step: specific SmartPI parameters (if not using central config)
+STEP_SMART_PI_PARAMS_SCHEMA = vol.Schema(
     {
-        vol.Optional(CONF_AUTO_PI_DEADBAND, default=0.05): selector.NumberSelector(
+        vol.Optional(CONF_SMART_PI_DEADBAND, default=0.05): selector.NumberSelector(
             selector.NumberSelectorConfig(
                 min=0.0, max=1.0, step=0.01, mode=selector.NumberSelectorMode.BOX
             )
         ),
-        vol.Optional(CONF_AUTO_PI_AGGRESSIVENESS, default=0.5): selector.NumberSelector(
+        vol.Optional(CONF_SMART_PI_AGGRESSIVENESS, default=0.5): selector.NumberSelector(
             selector.NumberSelectorConfig(
                 min=0.1, max=2.0, step=0.1, mode=selector.NumberSelectorMode.BOX
             )
@@ -546,15 +546,15 @@ STEP_AUTO_PI_PARAMS_SCHEMA = vol.Schema(
     }
 )
 
-# Central AutoPI configuration schema (for central config thermostat)
-STEP_AUTO_PI_CENTRAL_SCHEMA = vol.Schema(
+# Central SmartPI configuration schema (for central config thermostat)
+STEP_SMART_PI_CENTRAL_SCHEMA = vol.Schema(
     {
-        vol.Optional(CONF_AUTO_PI_DEADBAND, default=0.05): selector.NumberSelector(
+        vol.Optional(CONF_SMART_PI_DEADBAND, default=0.05): selector.NumberSelector(
             selector.NumberSelectorConfig(
                 min=0.0, max=1.0, step=0.01, mode=selector.NumberSelectorMode.BOX
             )
         ),
-        vol.Optional(CONF_AUTO_PI_AGGRESSIVENESS, default=0.5): selector.NumberSelector(
+        vol.Optional(CONF_SMART_PI_AGGRESSIVENESS, default=0.5): selector.NumberSelector(
             selector.NumberSelectorConfig(
                 min=0.1, max=2.0, step=0.1, mode=selector.NumberSelectorMode.BOX
             )

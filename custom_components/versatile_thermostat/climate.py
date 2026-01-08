@@ -195,9 +195,9 @@ async def async_setup_entry(
     )
 
     platform.async_register_entity_service(
-        SERVICE_RESET_AUTO_PI_LEARNING,
+        SERVICE_RESET_SMART_PI_LEARNING,
         {},
-        "service_reset_auto_pi_learning",
+        "service_reset_smart_pi_learning",
     )
 
     platform.async_register_entity_service(

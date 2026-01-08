@@ -19,12 +19,13 @@ from .const import (
     CONF_AUTO_REGULATION_PERIOD_MIN,
     CONF_UNDERLYING_LIST,
     PROPORTIONAL_FUNCTION_TPI,
-    PROPORTIONAL_FUNCTION_AUTO_PI,
+    PROPORTIONAL_FUNCTION_SMART_PI,
     overrides,
 )
 from .commons import write_event_log
 
 from .underlyings import UnderlyingValve
+from .vtherm_hvac_mode import VThermHvacMode_OFF
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -166,8 +167,8 @@ class ThermostatOverValve(ThermostatTPI[UnderlyingValve]):  # pylint: disable=ab
                 ),
             })
             
-        # Add AutoPI attributes if active
-        if self._proportional_function == PROPORTIONAL_FUNCTION_AUTO_PI:
+        # Add SmartPI attributes if active
+        if self._proportional_function == PROPORTIONAL_FUNCTION_SMART_PI:
             vtherm_over_valve_attr.update({
                 "calculated_on_percent": (
                     self._prop_algorithm.calculated_on_percent

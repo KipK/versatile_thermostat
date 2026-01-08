@@ -350,9 +350,9 @@ auto_tpi_calibrate_capacity:
             selector:
                 boolean:
 
-reset_auto_pi_learning:
-    name: Reset AutoPI learning
-    description: Reset the learning of the AutoPI algorithm to default values.
+reset_smart_pi_learning:
+    name: Reset SmartPI learning
+    description: Reset the learning of the SmartPI algorithm to default values.
     target:
         entity:
             integration: versatile_thermostat

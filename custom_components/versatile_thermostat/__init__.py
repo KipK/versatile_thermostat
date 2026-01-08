@@ -298,6 +298,26 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry):
                 new[CONF_SYNC_WITH_CALIBRATION] = False
                 new[CONF_SYNC_DEVICE_INTERNAL_TEMP] = False
 
+        # Migration of auto_pi to smart_pi (irrespective of version check if needed, or strictly for 2.2)
+        # We check if the value is the old "auto_pi" string and update it.
+        # This handles cases where user might be on version 2.2 but with old data.
+        if new.get(CONF_PROP_FUNCTION) == "auto_pi":
+            _LOGGER.info("Migrating CONF_PROP_FUNCTION from 'auto_pi' to 'smart_pi'")
+            new[CONF_PROP_FUNCTION] = PROPORTIONAL_FUNCTION_SMART_PI
+
+        # Migrate SmartPI parameters keys
+        # auto_pi_deadband -> smart_pi_deadband
+        if "auto_pi_deadband" in new:
+            new[CONF_SMART_PI_DEADBAND] = new.pop("auto_pi_deadband")
+        
+        # auto_pi_aggressiveness -> smart_pi_aggressiveness
+        if "auto_pi_aggressiveness" in new:
+            new[CONF_SMART_PI_AGGRESSIVENESS] = new.pop("auto_pi_aggressiveness")
+
+        # use_auto_pi_central_config -> use_smart_pi_central_config
+        if "use_auto_pi_central_config" in new:
+            new[CONF_USE_SMART_PI_CENTRAL_CONFIG] = new.pop("use_auto_pi_central_config")
+
         # Update the config entry with migrated data
         hass.config_entries.async_update_entry(
             config_entry,

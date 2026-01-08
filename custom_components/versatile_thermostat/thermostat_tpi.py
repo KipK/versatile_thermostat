@@ -20,7 +20,7 @@ from .auto_tpi_manager import AutoTpiManager
 from .const import *  # pylint: disable=wildcard-import, unused-wildcard-import
 from .vtherm_hvac_mode import VThermHvacMode_OFF, VThermHvacMode_HEAT, VThermHvacMode_COOL
 from .commons import write_event_log
-from .autopi_algorithm import AutoPI
+from .smartpi_algorithm import SmartPI
 from homeassistant.helpers.storage import Store
 
 
@@ -45,7 +45,7 @@ class ThermostatTPI(BaseThermostat[T], Generic[T]):
         self._auto_tpi_enable_update_config: bool = False
         self._auto_tpi_enable_notification: bool = False
         self._prop_algorithm = None
-        self._auto_pi_storage = None
+        self._smart_pi_storage = None
         self._last_cycle_start_temp = None
         self._last_cycle_power = None
         self._auto_tpi_manager: AutoTpiManager | None = None
@@ -101,20 +101,25 @@ class ThermostatTPI(BaseThermostat[T], Generic[T]):
             )
             self._tpi_coef_ext = 0
 
-        # Initialize PropAlgorithm or AutoPI
-        if self._proportional_function == PROPORTIONAL_FUNCTION_AUTO_PI:
-            # Get AutoPI specific parameters from config
-            auto_pi_deadband = self._entry_infos.get(CONF_AUTO_PI_DEADBAND, 0.05)
-            auto_pi_aggressiveness = self._entry_infos.get(CONF_AUTO_PI_AGGRESSIVENESS, 0.5)
+        # Migration: handle "auto_pi" -> "smart_pi"
+        if self._proportional_function == "auto_pi":
+            _LOGGER.info("%s - Migrating proportional_function from 'auto_pi' to 'smart_pi'", self)
+            self._proportional_function = PROPORTIONAL_FUNCTION_SMART_PI
 
-            self._prop_algorithm = AutoPI(
+        # Initialize PropAlgorithm or SmartPI
+        if self._proportional_function == PROPORTIONAL_FUNCTION_SMART_PI:
+            # Get SmartPI specific parameters from config
+            smart_pi_deadband = self._entry_infos.get(CONF_SMART_PI_DEADBAND, 0.05)
+            smart_pi_aggressiveness = self._entry_infos.get(CONF_SMART_PI_AGGRESSIVENESS, 0.5)
+
+            self._prop_algorithm = SmartPI(
                 self._cycle_min,
                 self._minimal_activation_delay,
                 self._minimal_deactivation_delay,
                 self.name,
                 max_on_percent=self._max_on_percent,
-                deadband_c=auto_pi_deadband,
-                aggressiveness=auto_pi_aggressiveness,
+                deadband_c=smart_pi_deadband,
+                aggressiveness=smart_pi_aggressiveness,
             )
             # Storage will be initialized in async_added_to_hass because self.hass is not ready here
         else:
@@ -209,25 +214,35 @@ class ThermostatTPI(BaseThermostat[T], Generic[T]):
                 else:
                     _LOGGER.info("%s - Auto TPI learning is active (restored from storage)", self)
 
-        # Load data for AutoPI (new block)
-        if self._proportional_function == PROPORTIONAL_FUNCTION_AUTO_PI:
-             if not self._auto_pi_storage:
-                 self._auto_pi_storage = Store(self.hass, 1, f"versatile_thermostat_{self.unique_id}_autopi")
+        # Load data for SmartPI (new block)
+        if self._proportional_function == PROPORTIONAL_FUNCTION_SMART_PI:
+             if not self._smart_pi_storage:
+                 self._smart_pi_storage = Store(self.hass, 1, f"versatile_thermostat_{self.unique_id}_smartpi")
 
-             state = await self._auto_pi_storage.async_load()
+             state = await self._smart_pi_storage.async_load()
+
+             # Migration from AutoPI
+             if not state:
+                 _old_storage = Store(self.hass, 1, f"versatile_thermostat_{self.unique_id}_autopi")
+                 state = await _old_storage.async_load()
+                 if state:
+                     _LOGGER.info("%s - Migrated AutoPI learning data to SmartPI", self)
+                     await self._smart_pi_storage.async_save(state)
+                     await _old_storage.async_remove()
+
              if state:
                  self._prop_algorithm.load_state(state)
-                 _LOGGER.info("%s - Loaded AutoPI state", self)
+                 _LOGGER.info("%s - Loaded SmartPI state", self)
 
              # Register listener to save state when HA stops
-             async def save_autopi_on_stop(event: Event):
-                 """Save AutoPI state when Home Assistant stops."""
-                 if self._prop_algorithm and self._auto_pi_storage:
+             async def save_smartpi_on_stop(event: Event):
+                 """Save SmartPI state when Home Assistant stops."""
+                 if self._prop_algorithm and self._smart_pi_storage:
                      data = self._prop_algorithm.save_state()
-                     await self._auto_pi_storage.async_save(data)
-                     _LOGGER.info("%s - Saved AutoPI state on HA stop", self)
+                     await self._smart_pi_storage.async_save(data)
+                     _LOGGER.info("%s - Saved SmartPI state on HA stop", self)
 
-             self.hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, save_autopi_on_stop)
+             self.hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, save_smartpi_on_stop)
 
         await super().async_added_to_hass()
 
@@ -250,9 +265,9 @@ class ThermostatTPI(BaseThermostat[T], Generic[T]):
             self._auto_tpi_manager.stop_cycle_loop()
             self.hass.async_create_task(self._auto_tpi_manager.async_save_data())
         
-        if self._proportional_function == PROPORTIONAL_FUNCTION_AUTO_PI and self._auto_pi_storage:
+        if self._proportional_function == PROPORTIONAL_FUNCTION_SMART_PI and self._smart_pi_storage:
             data = self._prop_algorithm.save_state()
-            self.hass.async_create_task(self._auto_pi_storage.async_save(data))
+            self.hass.async_create_task(self._smart_pi_storage.async_save(data))
 
         super().remove_thermostat()
 
@@ -298,8 +313,8 @@ class ThermostatTPI(BaseThermostat[T], Generic[T]):
                     _LOGGER.debug("%s - Synced TPI coeffs before cycle: int=%.3f, ext=%.3f",
                                   self, new_coef_int, new_coef_ext)
 
-        # For AutoPI: Update learning (RLS) once per cycle
-        if self._proportional_function == PROPORTIONAL_FUNCTION_AUTO_PI:
+        # For SmartPI: Update learning (RLS) once per cycle
+        if self._proportional_function == PROPORTIONAL_FUNCTION_SMART_PI:
             # We need previous cycle start temp and power
             if self._last_cycle_start_temp is not None and self._last_cycle_power is not None:
                 self._prop_algorithm.update_learning(
@@ -310,9 +325,9 @@ class ThermostatTPI(BaseThermostat[T], Generic[T]):
                     hvac_mode=self.vtherm_hvac_mode
                 )
                 # Save state periodically after learning updates (survives reboots)
-                if self._auto_pi_storage:
+                if self._smart_pi_storage:
                     data = self._prop_algorithm.save_state()
-                    self.hass.async_create_task(self._auto_pi_storage.async_save(data))
+                    self.hass.async_create_task(self._smart_pi_storage.async_save(data))
             # Update trackers for next cycle
             self._last_cycle_start_temp = self._cur_temp
 
@@ -321,7 +336,7 @@ class ThermostatTPI(BaseThermostat[T], Generic[T]):
         self.recalculate()
         
         # Capture the power that will be applied this cycle
-        if self._proportional_function == PROPORTIONAL_FUNCTION_AUTO_PI:
+        if self._proportional_function == PROPORTIONAL_FUNCTION_SMART_PI:
              self._last_cycle_power = self.safe_on_percent
 
         return {
@@ -629,26 +644,26 @@ class ThermostatTPI(BaseThermostat[T], Generic[T]):
 
         return result
 
-    async def service_reset_auto_pi_learning(self):
+    async def service_reset_smart_pi_learning(self):
         """Called by a service call:
-        service: versatile_thermostat.reset_auto_pi_learning
+        service: versatile_thermostat.reset_smart_pi_learning
         target:
             entity_id: climate.thermostat_1
         """
-        write_event_log(_LOGGER, self, "Calling SERVICE_RESET_AUTO_PI_LEARNING")
+        write_event_log(_LOGGER, self, "Calling SERVICE_RESET_SMART_PI_LEARNING")
 
-        if self._proportional_function != PROPORTIONAL_FUNCTION_AUTO_PI:
-             raise ServiceValidationError(f"{self} - This service is only available for AutoPI algorithm.")
+        if self._proportional_function != PROPORTIONAL_FUNCTION_SMART_PI:
+             raise ServiceValidationError(f"{self} - This service is only available for SmartPI algorithm.")
 
         if self._prop_algorithm:
              self._prop_algorithm.reset_learning()
              # Force recalculate with new parameters
              self.recalculate()
              # Force save
-             if self._auto_pi_storage:
+             if self._smart_pi_storage:
                   data = self._prop_algorithm.save_state()
-                  await self._auto_pi_storage.async_save(data)
-                  _LOGGER.info("%s - AutoPI state reset and saved.", self)
+                  await self._smart_pi_storage.async_save(data)
+                  _LOGGER.info("%s - SmartPI state reset and saved.", self)
 
         self.update_custom_attributes()
         self.async_write_ha_state()
@@ -768,9 +783,9 @@ class ThermostatTPI(BaseThermostat[T], Generic[T]):
                 ),
             })
 
-        if self._proportional_function == PROPORTIONAL_FUNCTION_AUTO_PI:
+        if self._proportional_function == PROPORTIONAL_FUNCTION_SMART_PI:
             self._attr_extra_state_attributes["specific_states"].update({
-                "auto_pi": self._prop_algorithm.get_diagnostics()
+                "smart_pi": self._prop_algorithm.get_diagnostics()
             })
 
         self._attr_extra_state_attributes["configuration"].update({

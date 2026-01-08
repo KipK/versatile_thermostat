@@ -6,7 +6,7 @@ from .vtherm_hvac_mode import VThermHvacMode, VThermHvacMode_OFF, VThermHvacMode
 
 _LOGGER = logging.getLogger(__name__)
 
-from .const import PROPORTIONAL_FUNCTION_TPI, PROPORTIONAL_FUNCTION_AUTO_PI
+from .const import PROPORTIONAL_FUNCTION_TPI, PROPORTIONAL_FUNCTION_SMART_PI
 
 PROPORTIONAL_FUNCTION_ATAN = "atan"
 PROPORTIONAL_FUNCTION_LINEAR = "linear"

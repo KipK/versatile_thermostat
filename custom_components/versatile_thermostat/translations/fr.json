@@ -33,7 +33,7 @@
           "sync_device_internal_temp": "Synchronisation de la température de l'appareil",
           "lock": "Gestion du verrouilage",
           "heating_failure_detection": "Détection de panne de chauffage",
-          "auto_pi": "AutoPI",
+          "smart_pi": "SmartPI",
           "auto_tpi_1": "Auto TPI - Général",
           "auto_tpi_2": "Auto TPI - Méthode",
           "auto_tpi_3_avg": "Auto TPI - Moyenne",
@@ -344,18 +344,18 @@
           "auto_tpi_ema_decay_rate": "Taux auquel Alpha diminue avec le temps (stabilisation)"
         }
       },
-      "auto_pi": {
-        "title": "Paramètres du contrôleur AutoPI",
-        "description": "Configuration des paramètres du contrôleur AutoPI adaptatif.",
+      "smart_pi": {
+        "title": "Paramètres du contrôleur SmartPI",
+        "description": "Configuration des paramètres du contrôleur SmartPI adaptatif.",
         "data": {
-          "use_auto_pi_central_config": "Utiliser la configuration AutoPI centrale",
-          "auto_pi_deadband": "Bande morte (°C)",
-          "auto_pi_aggressiveness": "Agressivité"
+          "use_smart_pi_central_config": "Utiliser la configuration SmartPI centrale",
+          "smart_pi_deadband": "Bande morte (°C)",
+          "smart_pi_aggressiveness": "Agressivité"
         },
         "data_description": {
-          "use_auto_pi_central_config": "Cochez pour utiliser la configuration AutoPI centrale. Décochez pour utiliser une configuration AutoPI spécifique pour ce VTherm",
-          "auto_pi_deadband": "Bande morte autour de la consigne. Aucune action de régulation dans cette plage. Évite les oscillations près de la cible.",
-          "auto_pi_aggressiveness": "Vitesse de réponse du contrôleur (0.1=très rapide, 0.5=équilibré, 1.0=lent, 2.0=très lent)"
+          "use_smart_pi_central_config": "Cochez pour utiliser la configuration SmartPI centrale. Décochez pour utiliser une configuration SmartPI spécifique pour ce VTherm",
+          "smart_pi_deadband": "Bande morte autour de la consigne. Aucune action de régulation dans cette plage. Évite les oscillations près de la cible.",
+          "smart_pi_aggressiveness": "Vitesse de réponse du contrôleur (0.1=très rapide, 0.5=équilibré, 1.0=lent, 2.0=très lent)"
         }
       },
       "sync_device_internal_temp": {
@@ -439,7 +439,7 @@
           "sync_device_internal_temp": "Synchronisation de la température de l'appareil",
           "lock": "Verrouillage",
           "heating_failure_detection": "Détection de panne de chauffage",
-          "auto_pi": "AutoPI",
+          "smart_pi": "SmartPI",
           "auto_tpi_1": "Auto TPI - Général",
           "auto_tpi_2": "Auto TPI - Méthode",
           "auto_tpi_3_avg": "Auto TPI - Moyenne",
@@ -753,18 +753,18 @@
           "auto_tpi_ema_decay_rate": "Taux auquel Alpha diminue avec le temps (stabilisation)"
         }
       },
-      "auto_pi": {
-        "title": "Paramètres du contrôleur AutoPI - {name}",
-        "description": "Configuration des paramètres du contrôleur AutoPI adaptatif.",
+      "smart_pi": {
+        "title": "Paramètres du contrôleur SmartPI - {name}",
+        "description": "Configuration des paramètres du contrôleur SmartPI adaptatif.",
         "data": {
-          "use_auto_pi_central_config": "Utiliser la configuration AutoPI centrale",
-          "auto_pi_deadband": "Bande morte (°C)",
-          "auto_pi_aggressiveness": "Agressivité"
+          "use_smart_pi_central_config": "Utiliser la configuration SmartPI centrale",
+          "smart_pi_deadband": "Bande morte (°C)",
+          "smart_pi_aggressiveness": "Agressivité"
         },
         "data_description": {
-          "use_auto_pi_central_config": "Cochez pour utiliser la configuration AutoPI centrale. Décochez pour utiliser une configuration AutoPI spécifique pour ce VTherm",
-          "auto_pi_deadband": "Bande morte autour de la consigne. Aucune action de régulation dans cette plage. Évite les oscillations près de la cible.",
-          "auto_pi_aggressiveness": "Vitesse de réponse du contrôleur (0.1=très rapide, 0.5=équilibré, 1.0=lent, 2.0=très lent)"
+          "use_smart_pi_central_config": "Cochez pour utiliser la configuration SmartPI centrale. Décochez pour utiliser une configuration SmartPI spécifique pour ce VTherm",
+          "smart_pi_deadband": "Bande morte autour de la consigne. Aucune action de régulation dans cette plage. Évite les oscillations près de la cible.",
+          "smart_pi_aggressiveness": "Vitesse de réponse du contrôleur (0.1=très rapide, 0.5=équilibré, 1.0=lent, 2.0=très lent)"
         }
       },
       "sync_device_internal_temp": {
@@ -1010,9 +1010,9 @@
         }
       }
     },
-    "reset_auto_pi_learning": {
-      "name": "Réinitialiser l'apprentissage AutoPI",
-      "description": "Réinitialiser l'apprentissage de l'algorithme AutoPI aux valeurs par défaut."
+    "reset_smart_pi_learning": {
+      "name": "Réinitialiser l'apprentissage SmartPI",
+      "description": "Réinitialiser l'apprentissage de l'algorithme SmartPI aux valeurs par défaut."
     },
     "set_tpi_parameters": {
       "name": "Définir les paramètres TPI",

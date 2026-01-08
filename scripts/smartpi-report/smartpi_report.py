@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-AutoPI Analysis Report Script
+SmartPI Analysis Report Script
 
 This script connects to a Home Assistant instance, retrieves climate entity history,
-extracts AutoPI algorithm metrics, and generates analysis reports with graphs.
+extracts SmartPI algorithm metrics, and generates analysis reports with graphs.
 
 Usage:
-    python autopi_report.py \
+    python smartpi_report.py \
         --url http://homeassistant.local:8123 \
         --token YOUR_LONG_LIVED_ACCESS_TOKEN \
         --entity climate.your_thermostat \
@@ -142,8 +142,8 @@ def fetch_history(
                 attrs = state.get("attributes", {})
                 if attrs:
                     print(f"[DEBUG] Sample state #{i} attributes keys: {list(attrs.keys())}")
-                    if "auto_pi" in attrs:
-                        print(f"[DEBUG]   -> HAS auto_pi attribute!")
+                    if "smart_pi" in attrs:
+                        print(f"[DEBUG]   -> HAS smart_pi attribute!")
                     if "vtherm_over_switch" in attrs:
                         vos = attrs.get("vtherm_over_switch", {})
                         if isinstance(vos, dict):
@@ -157,12 +157,12 @@ def fetch_history(
 # Data Extraction
 # ------------------------------------------------------------------------------
 
-def extract_autopi_data(
+def extract_smartpi_data(
     history: List[List[Dict[str, Any]]],
     verbose: bool = False
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """
-    Extract AutoPI metrics from climate entity history.
+    Extract SmartPI metrics from climate entity history.
     
     Returns:
         Tuple of (time_series_data, summary_stats)
@@ -173,16 +173,16 @@ def extract_autopi_data(
 
     states = history[0]
     data_points = []
-    autopi_count = 0
-    no_autopi_count = 0
+    smartpi_count = 0
+    no_smartpi_count = 0
 
     for state in states:
         attrs = state.get("attributes", {}) or {}
         
-        # Check if this is an AutoPI-enabled thermostat
-        # AutoPI data is nested inside specific_states.auto_pi
+        # Check if this is an SmartPI-enabled thermostat
+        # SmartPI data is nested inside specific_states.smart_pi
         specific_states = attrs.get("specific_states", {}) or {}
-        auto_pi = specific_states.get("auto_pi")
+        smart_pi = specific_states.get("smart_pi")
         
         # Parse timestamp
         ts_str = state.get("last_changed", "")
@@ -199,14 +199,14 @@ def extract_autopi_data(
         ema_temp = attrs.get("ema_temp") or specific_states.get("ema_temp")
         ext_temp = specific_states.get("ext_current_temperature")
 
-        # If no auto_pi attribute, skip for AutoPI analysis but count
-        if auto_pi is None:
-            no_autopi_count += 1
+        # If no smart_pi attribute, skip for SmartPI analysis but count
+        if smart_pi is None:
+            no_smartpi_count += 1
             continue
 
         autopi_count += 1
 
-        # Extract AutoPI metrics
+        # Extract SmartPI metrics
         point = {
             "timestamp": ts,
             # Temperatures
@@ -217,42 +217,40 @@ def extract_autopi_data(
             "hvac_mode": hvac_mode,
             "hvac_action": hvac_action,
             # Model parameters
-            "a": auto_pi.get("a"),
-            "b": auto_pi.get("b"),
-            "tau_min": auto_pi.get("tau_min"),
-            "tau_reliable": auto_pi.get("tau_reliable"),
+            "a": smart_pi.get("a"),
+            "b": smart_pi.get("b"),
+            "tau_min": smart_pi.get("tau_min"),
+            "tau_reliable": smart_pi.get("tau_reliable"),
             # Learning
-            "learn_ok_count": auto_pi.get("learn_ok_count"),
-            "learn_ok_count_a": auto_pi.get("learn_ok_count_a"),
-            "learn_ok_count_b": auto_pi.get("learn_ok_count_b"),
-            "learn_skip_count": auto_pi.get("learn_skip_count"),
-            "learn_last_reason": auto_pi.get("learn_last_reason"),
+            "learn_ok_count": smart_pi.get("learn_ok_count"),
+            "learn_ok_count_a": smart_pi.get("learn_ok_count_a"),
+            "learn_ok_count_b": smart_pi.get("learn_ok_count_b"),
+            "learn_skip_count": smart_pi.get("learn_skip_count"),
+            "learn_last_reason": smart_pi.get("learn_last_reason"),
             # Controller
-            "Kp": auto_pi.get("Kp"),
-            "Ki": auto_pi.get("Ki"),
-            "integral_error": auto_pi.get("integral_error"),
-            "error": auto_pi.get("error"),
+            "Kp": smart_pi.get("Kp"),
+            "Ki": smart_pi.get("Ki"),
+            "integral_error": smart_pi.get("integral_error"),
+            "error": smart_pi.get("error"),
             "error_p": auto_pi.get("error_p"),
             "error_filtered": auto_pi.get("error_filtered"),
             "i_mode": auto_pi.get("i_mode"),
-            "sat": auto_pi.get("sat"),
-            # Output
-            "on_percent": auto_pi.get("on_percent"),
-            "on_time_sec": auto_pi.get("on_time_sec"),
-            "off_time_sec": auto_pi.get("off_time_sec"),
-            "u_ff": auto_pi.get("u_ff"),
-            "cycles_since_reset": auto_pi.get("cycles_since_reset"),
-            "cycle_min": auto_pi.get("cycle_min"),
+            "on_percent": smart_pi.get("on_percent"),
+            "on_time_sec": smart_pi.get("on_time_sec"),
+            "off_time_sec": smart_pi.get("off_time_sec"),
+            "u_ff": smart_pi.get("u_ff"),
+            "cycles_since_reset": smart_pi.get("cycles_since_reset"),
+            "cycle_min": smart_pi.get("cycle_min"),
         }
         data_points.append(point)
 
     if verbose:
-        print(f"[DEBUG] States with auto_pi: {autopi_count}")
-        print(f"[DEBUG] States without auto_pi: {no_autopi_count}")
+        print(f"[DEBUG] States with smart_pi: {smartpi_count}")
+        print(f"[DEBUG] States without smart_pi: {no_smartpi_count}")
 
     if not data_points:
-        print("[WARNING] No AutoPI data found in history.")
-        print("Make sure the climate entity uses AutoPI (function: auto_pi)")
+        print("[WARNING] No SmartPI data found in history.")
+        print("Make sure the climate entity uses SmartPI (function: smart_pi)")
         return [], {}
 
     # Compute summary statistics
@@ -613,7 +611,7 @@ def generate_text_report(
 
     lines = []
     lines.append("=" * 70)
-    lines.append("  AUTOPI ANALYSIS REPORT")
+    lines.append("  SMARTPI ANALYSIS REPORT")
     lines.append("=" * 70)
     lines.append("")
     lines.append(f"Entity:        {entity_id}")
@@ -743,7 +741,7 @@ def generate_pdf_report(
     with PdfPages(pdf_path) as pdf:
         # Page 1: Text Report
         fig_text = plt.figure(figsize=(11, 8.5))
-        fig_text.suptitle(f"AutoPI Analysis Report - {entity_name}", fontsize=16, fontweight='bold', y=0.98)
+        fig_text.suptitle(f"SmartPI Analysis Report - {entity_name}", fontsize=16, fontweight='bold', y=0.98)
         
         # Add text as a text box
         ax_text = fig_text.add_subplot(111)
@@ -757,7 +755,7 @@ def generate_pdf_report(
         
         # Page 2: Learning Progress (a, b, tau)
         fig1, axes1 = plt.subplots(3, 1, figsize=(11, 8.5), sharex=True)
-        fig1.suptitle(f"AutoPI Learning Progress - {entity_name}", fontsize=14, fontweight='bold')
+        fig1.suptitle(f"SmartPI Learning Progress - {entity_name}", fontsize=14, fontweight='bold')
         
         a_vals = [p["a"] for p in data]
         axes1[0].plot(timestamps, a_vals, 'b-', linewidth=1, label='a (°C/min at 100%)')

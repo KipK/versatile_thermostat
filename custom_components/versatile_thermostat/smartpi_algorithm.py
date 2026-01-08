@@ -1,5 +1,5 @@
 """
-AutoPI Algorithm - Auto-adaptive PI controller for Versatile Thermostat (VTH).
+SmartPI Algorithm - Auto-adaptive PI controller for Versatile Thermostat (VTH).
 
 This module implements a duty-cycle PI controller for slow thermal systems (heating),
 with on-line identification of a simple 1st-order loss model and pragmatic safeguards.
@@ -305,9 +305,9 @@ class ABEstimator:
         return TauReliability(reliable=reliable, tau_min=tau)
 
 
-class AutoPI:
+class SmartPI:
     """
-    Auto-adaptive PI controller with practical overshoot suppression for setpoint changes.
+    SmartPI Algorithm - Auto-adaptive PI controller for Versatile Thermostat (VTH).
 
     Public API
     ----------
@@ -410,7 +410,7 @@ class AutoPI:
         if saved_state:
             self.load_state(saved_state)
         
-        _LOGGER.debug("%s - AutoPI initialized", self._name)
+        _LOGGER.debug("%s - SmartPI initialized", self._name)
 
     # ------------------------------
     # Persistence
@@ -428,7 +428,7 @@ class AutoPI:
         self._prev_error = None
         self._sign_flip_leak_left = 0
         self._learning_start_date = datetime.now()
-        _LOGGER.info("%s - AutoPI learning and history reset", self._name)
+        _LOGGER.info("%s - SmartPI learning and history reset", self._name)
 
     def load_state(self, state: Dict[str, Any]) -> None:
         """Load persistent state."""
@@ -438,6 +438,7 @@ class AutoPI:
         # Load estimator state
         self.est.a = state.get("a", 0.0)
         self.est.b = state.get("b", 0.0)
+
         self.est.learn_ok_count = state.get("learn_ok_count", 0)
         self.est.learn_ok_count_a = state.get("learn_ok_count_a", 0)
         self.est.learn_ok_count_b = state.get("learn_ok_count_b", 0)
@@ -464,7 +465,7 @@ class AutoPI:
                 self._learning_start_date = None
         
         _LOGGER.debug(
-            "%s - AutoPI state loaded: a=%.6f, b=%.6f, learns=%d",
+            "%s - SmartPI state loaded: a=%.6f, b=%.6f, learns=%d",
             self._name, self.est.a, self.est.b, self.est.learn_ok_count
         )
 

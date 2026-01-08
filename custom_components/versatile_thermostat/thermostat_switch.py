@@ -19,7 +19,7 @@ from .const import (
     CONF_VSWITCH_ON_CMD_LIST,
     CONF_VSWITCH_OFF_CMD_LIST,
     PROPORTIONAL_FUNCTION_TPI,
-    PROPORTIONAL_FUNCTION_AUTO_PI,
+    PROPORTIONAL_FUNCTION_SMART_PI,
     overrides,
 )
 
@@ -156,8 +156,8 @@ class ThermostatOverSwitch(ThermostatTPI[UnderlyingSwitch]):
                 "minimal_deactivation_delay": self._minimal_deactivation_delay,
             })
         
-        # Add AutoPI attributes if active
-        if self._proportional_function == PROPORTIONAL_FUNCTION_AUTO_PI:
+        # Add SmartPI attributes if active
+        if self._proportional_function == PROPORTIONAL_FUNCTION_SMART_PI:
             vtherm_over_switch_attr.update({
                 "calculated_on_percent": self._prop_algorithm.calculated_on_percent,
                 "minimal_activation_delay": self._minimal_activation_delay,
