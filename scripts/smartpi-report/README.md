@@ -17,14 +17,13 @@ A standalone Python script to analyze AutoPI algorithm behavior from Home Assist
 ## Installation
 
 ```bash
-cd dev_tests/autoPI_report
 pip install -r requirements.txt
 ```
 
 ## Usage
 
 ```bash
-python autopi_report.py \
+python smart_report.py \
     --url http://homeassistant.local:8123 \
     --token YOUR_LONG_LIVED_ACCESS_TOKEN \
     --entity climate.thermostat_chambre_verte \
@@ -54,16 +53,6 @@ python autopi_report.py \
 ## Output Files
 
 All files are saved to the `--output-dir` directory:
-
-```
-reports/
-├── 01_learning_progress.png
-├── 02_temperature_tracking.png
-├── 03_pi_controller.png
-├── 04_power_output.png
-├── 05_learning_quality.png
-└── autopi_report.txt
-```
 
 ## Requirements
 

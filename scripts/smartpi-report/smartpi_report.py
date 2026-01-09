@@ -204,7 +204,7 @@ def extract_smartpi_data(
             no_smartpi_count += 1
             continue
 
-        autopi_count += 1
+        smartpi_count += 1
 
         # Extract SmartPI metrics
         point = {
@@ -232,9 +232,9 @@ def extract_smartpi_data(
             "Ki": smart_pi.get("Ki"),
             "integral_error": smart_pi.get("integral_error"),
             "error": smart_pi.get("error"),
-            "error_p": auto_pi.get("error_p"),
-            "error_filtered": auto_pi.get("error_filtered"),
-            "i_mode": auto_pi.get("i_mode"),
+            "error_p": smart_pi.get("error_p"),
+            "error_filtered": smart_pi.get("error_filtered"),
+            "i_mode": smart_pi.get("i_mode"),
             "on_percent": smart_pi.get("on_percent"),
             "on_time_sec": smart_pi.get("on_time_sec"),
             "off_time_sec": smart_pi.get("off_time_sec"),
@@ -366,7 +366,7 @@ def generate_graphs(
 
     # --- Graph 1: Learning Progress (a, b, tau) ---
     fig1, axes1 = plt.subplots(3, 1, figsize=(14, 10), sharex=True)
-    fig1.suptitle(f"AutoPI Learning Progress - {entity_name}", fontsize=14, fontweight='bold')
+    fig1.suptitle(f"SmartPI Learning Progress - {entity_name}", fontsize=14, fontweight='bold')
 
     # Parameter 'a' (heating effectiveness)
     a_vals = [p["a"] for p in data]
@@ -949,12 +949,12 @@ def generate_pdf_report(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="AutoPI Algorithm Analysis Report Generator",
+        description="SmartPI Algorithm Analysis Report Generator",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python autopi_report.py --url http://ha:8123 --token xxx --entity climate.my_thermostat
-  python autopi_report.py --url http://ha:8123 --token xxx --entity climate.my_thermostat --days 14 --verbose
+  python smartpi_report.py --url http://ha:8123 --token xxx --entity climate.my_thermostat
+  python smartpi_report.py --url http://ha:8123 --token xxx --entity climate.my_thermostat --days 14 --verbose
         """
     )
     parser.add_argument("--url", required=True, 
@@ -973,7 +973,7 @@ Examples:
     args = parser.parse_args()
 
     print(f"\n{'='*70}")
-    print(f"  AUTOPI ANALYSIS REPORT")
+    print(f"  SMARTPI ANALYSIS REPORT")
     print(f"{'='*70}\n")
     print(f"Entity:     {args.entity}")
     print(f"Output:     {args.output_dir}")
@@ -1012,7 +1012,7 @@ Examples:
         print(f"[INFO] Using user-specified period: {days_arg} days")
         days = days_arg
     elif learning_start_dt:
-        print(f"[INFO] Found Auto-PI learning start date: {learning_start_dt.strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"[INFO] Found SmartPI learning start date: {learning_start_dt.strftime('%Y-%m-%d %H:%M:%S')}")
         start_date = learning_start_dt
         # Calculate approximate days for display/logging
         diff = datetime.now(timezone.utc) - start_date
@@ -1031,15 +1031,15 @@ Examples:
     history = fetch_history(args.url, args.token, args.entity, days=days_arg if days_arg else days, start_date=history_start_arg, verbose=args.verbose)
 
     # Extract data
-    print("[INFO] Extracting AutoPI data...")
-    data, summary = extract_autopi_data(history, args.verbose)
+    print("[INFO] Extracting SmartPI data...")
+    data, summary = extract_smartpi_data(history, args.verbose)
     
     # Add learning start date to summary for report
     if learning_start_dt:
         summary['learning_start_dt'] = learning_start_dt
 
     if not data:
-        print("\n[ERROR] No AutoPI data found. Exiting.")
+        print("\n[ERROR] No SmartPI data found. Exiting.")
         sys.exit(1)
 
     print(f"[INFO] Extracted {len(data)} data points")
