@@ -77,7 +77,7 @@ KI_MIN = 0.001
 KI_MAX = 0.050
 
 # Cap for tau in Ki calculation (prevents extremely small Ki for slow systems)
-TAU_CAP_FOR_KI = 250.0
+TAU_CAP_FOR_KI = 200.0
 
 # Anti-windup / integrator behavior
 INTEGRAL_LEAK = 0.995  # leak factor per cycle when inside deadband
