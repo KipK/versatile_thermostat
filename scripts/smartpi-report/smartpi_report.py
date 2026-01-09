@@ -179,13 +179,20 @@ def extract_smartpi_data(
     for state in states:
         attrs = state.get("attributes", {}) or {}
         
+        # Parse timestamp
+        ts_str = state.get("last_changed", "")
+
         # Check if this is an SmartPI-enabled thermostat
         # SmartPI data is nested inside specific_states.smart_pi
         specific_states = attrs.get("specific_states", {}) or {}
         smart_pi = specific_states.get("smart_pi")
-        
-        # Parse timestamp
-        ts_str = state.get("last_changed", "")
+        if verbose:
+             print(f"[DEBUG] timestamp={ts_str} smart_pi={smart_pi is not None}")
+             
+        if smart_pi is None:
+            # Fallback for legacy AutoPI data in history
+            smart_pi = specific_states.get("auto_pi")
+
         try:
             ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
         except (ValueError, AttributeError):
@@ -199,7 +206,7 @@ def extract_smartpi_data(
         ema_temp = attrs.get("ema_temp") or specific_states.get("ema_temp")
         ext_temp = specific_states.get("ext_current_temperature")
 
-        # If no smart_pi attribute, skip for SmartPI analysis but count
+        # If no smart_pi attribute (and no auto_pi), skip for SmartPI analysis but count
         if smart_pi is None:
             no_smartpi_count += 1
             continue
@@ -989,8 +996,8 @@ Examples:
     if not specific_states: 
         specific_states = {}
         
-    auto_pi = specific_states.get("auto_pi", {}) if specific_states else {}
-    learning_start_dt_str = auto_pi.get("learning_start_dt")
+    smart_pi = specific_states.get("smart_pi", {}) if specific_states else {}
+    learning_start_dt_str = smart_pi.get("learning_start_dt")
     
     start_date = None
     learning_start_dt = None
