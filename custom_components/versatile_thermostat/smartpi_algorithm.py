@@ -81,7 +81,7 @@ TAU_CAP_FOR_KI = 200.0
 
 # Anti-windup / integrator behavior
 INTEGRAL_LEAK = 0.995  # leak factor per cycle when inside deadband
-MAX_STEP_PER_MIN = 0.25  # max output change per minute (rate limit)
+MAX_STEP_PER_CYCLE = 0.15  # max output change per minute (rate limit)
 
 # Default deadband around setpoint ("C)
 DEFAULT_DEADBAND_C = 0.05
@@ -803,7 +803,7 @@ class SmartPI:
         u = clamp(u_raw, 0.0, 1.0)
 
         # Rate limiting: bound command delta per cycle (prevents abrupt power changes)
-        max_step = MAX_STEP_PER_MIN
+        max_step = MAX_STEP_PER_CYCLE
         u = clamp(u, self.u_prev - max_step, self.u_prev + max_step)
 
         # Apply max_on_percent limit if configured
