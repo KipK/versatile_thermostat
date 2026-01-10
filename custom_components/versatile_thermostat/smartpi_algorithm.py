@@ -431,43 +431,70 @@ class SmartPI:
         _LOGGER.info("%s - SmartPI learning and history reset", self._name)
 
     def load_state(self, state: Dict[str, Any]) -> None:
-        """Load persistent state."""
+        """Load persistent state with validation."""
         if not state:
             return
-        
-        # Load estimator state
-        self.est.a = state.get("a", 0.0)
-        self.est.b = state.get("b", 0.0)
 
-        self.est.learn_ok_count = state.get("learn_ok_count", 0)
-        self.est.learn_ok_count_a = state.get("learn_ok_count_a", 0)
-        self.est.learn_ok_count_b = state.get("learn_ok_count_b", 0)
-        
-        # Load history queues
-        a_hist = state.get("a_hist", [])
-        b_hist = state.get("b_hist", [])
-        
-        # We need to manually reconstruct deque objects
-        self.est._a_hist = deque(a_hist, maxlen=self.est._a_hist.maxlen)
-        self.est._b_hist = deque(b_hist, maxlen=self.est._b_hist.maxlen)
-        
-        # Load PI state
-        self.integral = state.get("integral", 0.0)
-        self.u_prev = state.get("u_prev", 0.0)
-        self._cycles_since_reset = state.get("cycles_since_reset", 0)
-        
-        # Load learning start date
-        learning_start = state.get("learning_start_date")
-        if learning_start:
-            try:
-                self._learning_start_date = datetime.fromisoformat(learning_start)
-            except (ValueError, TypeError):
-                self._learning_start_date = None
-        
-        _LOGGER.debug(
-            "%s - SmartPI state loaded: a=%.6f, b=%.6f, learns=%d",
-            self._name, self.est.a, self.est.b, self.est.learn_ok_count
-        )
+        try:
+            # Load estimator state with validation
+            a_val = float(state.get("a", 0.0) or 0.0)
+            b_val = float(state.get("b", 0.0) or 0.0)
+
+            # Safety check: use init values if out of bounds or NaN
+            if math.isnan(a_val) or not (self.est.A_MIN <= a_val <= self.est.A_MAX):
+                a_val = self.est.A_INIT
+                _LOGGER.warning("%s - Invalid 'a' in saved state, using default", self._name)
+            if math.isnan(b_val) or not (self.est.B_MIN <= b_val <= self.est.B_MAX):
+                b_val = self.est.B_INIT
+                _LOGGER.warning("%s - Invalid 'b' in saved state, using default", self._name)
+
+            self.est.a = a_val
+            self.est.b = b_val
+
+            self.est.learn_ok_count = int(state.get("learn_ok_count", 0) or 0)
+            self.est.learn_ok_count_a = int(state.get("learn_ok_count_a", 0) or 0)
+            self.est.learn_ok_count_b = int(state.get("learn_ok_count_b", 0) or 0)
+
+            # Load history queues
+            a_hist = state.get("a_hist", [])
+            b_hist = state.get("b_hist", [])
+
+            # Reconstruct deque objects
+            self.est._a_hist = deque(a_hist, maxlen=self.est._a_hist.maxlen)
+            self.est._b_hist = deque(b_hist, maxlen=self.est._b_hist.maxlen)
+
+            # Load PI state with validation
+            integral_val = float(state.get("integral", 0.0) or 0.0)
+            u_prev_val = float(state.get("u_prev", 0.0) or 0.0)
+
+            if math.isnan(integral_val):
+                integral_val = 0.0
+                _LOGGER.warning("%s - Invalid 'integral' in saved state, using default", self._name)
+
+            if math.isnan(u_prev_val) or not (0.0 <= u_prev_val <= 1.0):
+                u_prev_val = 0.0
+                _LOGGER.warning("%s - Invalid 'u_prev' in saved state, using default", self._name)
+
+            self.integral = integral_val
+            self.u_prev = u_prev_val
+            self._cycles_since_reset = int(state.get("cycles_since_reset", 0) or 0)
+
+            # Load learning start date
+            learning_start = state.get("learning_start_date")
+            if learning_start:
+                try:
+                    self._learning_start_date = datetime.fromisoformat(learning_start)
+                except (ValueError, TypeError):
+                    self._learning_start_date = None
+
+            _LOGGER.debug(
+                "%s - SmartPI state loaded: a=%.6f, b=%.6f, learns=%d",
+                self._name, self.est.a, self.est.b, self.est.learn_ok_count
+            )
+
+        except (TypeError, ValueError) as e:
+            _LOGGER.warning("%s - Error loading SmartPI state, using defaults: %s", self._name, e)
+            self.est.reset()
 
     def save_state(self) -> Dict[str, Any]:
         """Return state for persistence."""
@@ -685,7 +712,7 @@ class SmartPI:
             # Boost Ki by capping tau when close to setpoint (eliminates steady-state error)
             if tau_info.reliable:
                 tau_capped = clamp(tau_info.tau_min, 10.0, TAU_CAP_FOR_KI)
-                ki = clamp(self.Kp / tau_capped, KI_MIN, KI_MAX) * self.aggressiveness
+                ki = clamp(kp / tau_capped, KI_MIN, KI_MAX) * self.aggressiveness
             ki *= self.ki_near_factor
 
         # Store current gains (for diagnostics)
@@ -775,8 +802,8 @@ class SmartPI:
         u_raw = u_ff + u_pi
         u = clamp(u_raw, 0.0, 1.0)
 
-        # Rate limiting: bound command delta per minute
-        max_step = MAX_STEP_PER_MIN * max(self._cycle_min, 1e-3)
+        # Rate limiting: bound command delta per cycle (prevents abrupt power changes)
+        max_step = MAX_STEP_PER_MIN
         u = clamp(u, self.u_prev - max_step, self.u_prev + max_step)
 
         # Apply max_on_percent limit if configured
