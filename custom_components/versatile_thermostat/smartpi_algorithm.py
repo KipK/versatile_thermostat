@@ -413,8 +413,10 @@ class SmartPI:
         self._filtered_setpoint: Optional[float] = None
         self._last_raw_setpoint: Optional[float] = None
 
-        # Rate limiting: track last time calculate() was fully executed
+        # Track last time calculate() was executed for dt-based integration
         self._last_calculate_time: Optional[datetime] = None
+        # Accumulated time for cycle counting (used for FF warm-up)
+        self._accumulated_dt: float = 0.0
 
         # Learning start timestamp
         self._learning_start_date: Optional[datetime] = datetime.now()
@@ -437,10 +439,12 @@ class SmartPI:
         self.Kp = KP_SAFE
         self.Ki = KI_SAFE
         self._cycles_since_reset = 0
+        self._accumulated_dt = 0.0
         self._prev_error = None
         self._sign_flip_leak_left = 0
         self._filtered_setpoint = None
         self._last_raw_setpoint = None
+        self._last_calculate_time = None
         self._learning_start_date = datetime.now()
         _LOGGER.info("%s - SmartPI learning and history reset", self._name)
 
@@ -492,6 +496,7 @@ class SmartPI:
             self.integral = integral_val
             self.u_prev = u_prev_val
             self._cycles_since_reset = int(state.get("cycles_since_reset", 0) or 0)
+            self._accumulated_dt = float(state.get("accumulated_dt", 0.0) or 0.0)
 
             # Load learning start date
             learning_start = state.get("learning_start_date")
@@ -537,6 +542,7 @@ class SmartPI:
             "integral": self.integral,
             "u_prev": self.u_prev,
             "cycles_since_reset": self._cycles_since_reset,
+            "accumulated_dt": self._accumulated_dt,
             "learning_start_date": self._learning_start_date.isoformat() if self._learning_start_date else None,
             "filtered_setpoint": self._filtered_setpoint,
             "last_raw_setpoint": self._last_raw_setpoint,
@@ -766,10 +772,10 @@ class SmartPI:
         - Updates internal duty-cycle (_on_percent) and ON/OFF timings
         - Updates diagnostics and PI state
 
-        Rate limiting: This method is designed to run once per cycle. If called more
-        frequently (e.g., on every temperature sensor update), it returns early with
-        the existing outputs to prevent erroneous accumulation of the integral term.
-        However, the setpoint filter is always updated to capture setpoint changes immediately.
+        Dynamic dt integration: This method can be called on every temperature sensor
+        update. The integral term is accumulated based on actual elapsed time (dt_min),
+        making it robust to irregular call intervals. A minimum dt threshold prevents
+        excessive noise from very rapid calls.
         """
         now = datetime.now()
 
@@ -788,25 +794,31 @@ class SmartPI:
             self._calculate_times()
             return
 
-        # IMPORTANT: Always update the setpoint filter to capture setpoint changes immediately,
-        # even when rate-limited. Pass advance_ema=False to only detect changes without advancing.
-        self._filter_setpoint(target_temp, current_temp, hvac_mode, advance_ema=False)
+        # Calculate elapsed time since last calculation for dt-based integration
+        if self._last_calculate_time is not None:
+            dt_min = (now - self._last_calculate_time).total_seconds() / 60.0
+        else:
+            # First call: use cycle_min as initial approximation
+            dt_min = self._cycle_min
 
-        # Rate limiting: only execute full PI loop once per cycle_min
-        # This prevents integral windup when calculate() is called on every temperature update
-        if self._last_calculate_time is not None:  # pylint: disable=access-member-before-definition
-            elapsed_minutes = (now - self._last_calculate_time).total_seconds() / 60.0
-            if elapsed_minutes < self._cycle_min:
-                # Not enough time has passed - keep existing outputs without updating PI state
-                # Just refresh _calculate_times to ensure correct ON/OFF timing
-                self._calculate_times()
-                return
+        # Minimum dt threshold to prevent noise from very rapid calls (< 3 seconds)
+        MIN_DT_SECONDS = 3.0
+        if dt_min < MIN_DT_SECONDS / 60.0:
+            # Too soon since last calculation - keep existing outputs
+            # BUT still capture setpoint changes to not miss user adjustments
+            self._filter_setpoint(target_temp, current_temp, hvac_mode, advance_ema=False)
+            self._calculate_times()
+            return
 
-        # Mark this as a new cycle
+        # Update timestamp for next dt calculation
         self._last_calculate_time = now
 
-        # Count cycles since (re)start (used for FF warm-up)
-        self._cycles_since_reset += 1
+        # Count cycles (approximate) for FF warm-up logic
+        # Increment when we've accumulated roughly one cycle worth of time
+        self._accumulated_dt += dt_min
+        if self._accumulated_dt >= self._cycle_min:
+            self._cycles_since_reset += 1
+            self._accumulated_dt -= self._cycle_min
 
         # Get model parameters
         a = self.est.a
@@ -949,8 +961,8 @@ class SmartPI:
                     self._last_i_mode = f"I:SKIP({sat_state})"
                     u_pi = u_pi_pre
                 else:
-                    # Normal integration (integrate the true error e)
-                    self.integral += e * self._cycle_min
+                    # Normal integration using actual elapsed time (dt_min)
+                    self.integral += e * dt_min
                     self.integral = clamp(self.integral, -i_max, i_max)
                     self._last_i_mode = "I:RUN"
                     u_pi = self.Kp * e_p + self.Ki * self.integral
