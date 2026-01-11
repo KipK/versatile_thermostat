@@ -150,6 +150,8 @@ Lorsque vous changez la consigne (ex: de 19°C à 21°C), l'algorithme applique 
 
 Ce comportement est inversé en mode COOL. Le filtre utilise un alpha adaptatif qui réagit plus vite aux grands sauts (1°C ou plus) et plus lentement aux petits ajustements.
 
+**Logique de rebase** : Lors d'une augmentation de consigne, la consigne filtrée ne descendra jamais en dessous de la température actuelle. Par exemple, si la pièce est à 18°C et que vous passez de 16°C à 19°C, la consigne filtrée partira de 18°C (pas de 16°C) pour éviter de sous-chauffer.
+
 ## Métriques de diagnostic
 
 L'algorithme expose plusieurs métriques dans les attributs de l'entité climate :

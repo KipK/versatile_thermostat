@@ -645,7 +645,13 @@ class SmartPI:
     # Asymmetric setpoint filter
     # ------------------------------
 
-    def _filter_setpoint(self, target_temp: float, hvac_mode: VThermHvacMode) -> float:
+    def _filter_setpoint(
+        self,
+        target_temp: float,
+        current_temp: float,
+        hvac_mode: VThermHvacMode,
+        advance_ema: bool = True
+    ) -> float:
         """
         Apply asymmetric EMA filter to setpoint to reduce overshoot.
 
@@ -655,6 +661,17 @@ class SmartPI:
 
         This allows the regulation loop to "accompany" the temperature rise
         rather than aggressively overshoot the target.
+
+        Rebase logic: When the setpoint increases (HEAT), the filtered setpoint
+        is never allowed to start below min(current_temp, target_temp). This prevents
+        under-heating when the room is already warm and the setpoint is raised.
+
+        Args:
+            target_temp: The target temperature (raw setpoint)
+            current_temp: Current room temperature (for rebase logic)
+            hvac_mode: Current HVAC mode
+            advance_ema: If True, advance the EMA toward target. If False, only
+                         detect and handle setpoint changes (for rate-limited calls).
         """
         # First call or no previous setpoint: initialize
         if self._filtered_setpoint is None or self._last_raw_setpoint is None:
@@ -662,32 +679,62 @@ class SmartPI:
             self._last_raw_setpoint = target_temp
             return target_temp
 
-        # Determine if we should filter based on mode and direction
-        # HEAT: filter increases, instant decreases
-        # COOL: filter decreases, instant increases
-        if hvac_mode == VThermHvacMode_HEAT:
-            should_filter = target_temp > self._last_raw_setpoint
-        elif hvac_mode == VThermHvacMode_COOL:
-            should_filter = target_temp < self._last_raw_setpoint
-        else:
-            # OFF or unknown mode: no filtering
-            self._filtered_setpoint = target_temp
+        # Detect if the RAW setpoint has changed since last cycle
+        setpoint_changed = abs(target_temp - self._last_raw_setpoint) > 0.01
+
+        if setpoint_changed:
+            # Setpoint just changed - determine direction and action
+            if hvac_mode == VThermHvacMode_HEAT:
+                should_filter = target_temp > self._last_raw_setpoint
+            elif hvac_mode == VThermHvacMode_COOL:
+                should_filter = target_temp < self._last_raw_setpoint
+            else:
+                # OFF or unknown mode: no filtering
+                self._filtered_setpoint = target_temp
+                self._last_raw_setpoint = target_temp
+                return target_temp
+
+            if not should_filter:
+                # Instant follow for decrease (energy saving)
+                self._filtered_setpoint = target_temp
+                self._last_raw_setpoint = target_temp
+                return target_temp
+
+            # It's an increase - start filtering, record the new setpoint
             self._last_raw_setpoint = target_temp
+
+            # Apply FIRST EMA step immediately on setpoint change
+            gap = abs(target_temp - self._filtered_setpoint)
+            if gap > 0.02:
+                w = min(gap / SP_BAND, 1.0)
+                alpha = SP_ALPHA_SLOW + (SP_ALPHA_FAST - SP_ALPHA_SLOW) * w
+                self._filtered_setpoint = alpha * target_temp + (1 - alpha) * self._filtered_setpoint
+            else:
+                self._filtered_setpoint = target_temp
+
+            # REBASE: Don't start below current_temp if it's already high
+            # This prevents under-heating when room is already warm (e.g., 16->19 but room is at 18)
+            if hvac_mode == VThermHvacMode_HEAT and current_temp is not None:
+                floor = min(current_temp, target_temp)
+                self._filtered_setpoint = max(self._filtered_setpoint, floor)
+            elif hvac_mode == VThermHvacMode_COOL and current_temp is not None:
+                ceiling = max(current_temp, target_temp)
+                self._filtered_setpoint = min(self._filtered_setpoint, ceiling)
+
+            return self._filtered_setpoint
+
+        # Setpoint unchanged - check if we need to continue filtering toward target
+        gap = abs(target_temp - self._filtered_setpoint)
+        if gap <= 0.02:
+            # Converged - snap to target
+            self._filtered_setpoint = target_temp
             return target_temp
 
-        if not should_filter:
-            # Instant follow (energy saving / quick response)
-            self._filtered_setpoint = target_temp
-            self._last_raw_setpoint = target_temp
-            return target_temp
-
-        # Filtered direction: apply adaptive EMA
-        dsp = abs(target_temp - self._last_raw_setpoint)  # Jump size
-        w = min(dsp / SP_BAND, 1.0)  # Weight [0..1]
-        alpha = SP_ALPHA_SLOW + (SP_ALPHA_FAST - SP_ALPHA_SLOW) * w
-
-        self._filtered_setpoint = alpha * target_temp + (1 - alpha) * self._filtered_setpoint
-        self._last_raw_setpoint = target_temp
+        # Still catching up - advance EMA only if requested (once per cycle)
+        if advance_ema:
+            w = min(gap / SP_BAND, 1.0)
+            alpha = SP_ALPHA_SLOW + (SP_ALPHA_FAST - SP_ALPHA_SLOW) * w
+            self._filtered_setpoint = alpha * target_temp + (1 - alpha) * self._filtered_setpoint
 
         return self._filtered_setpoint
 
@@ -715,7 +762,14 @@ class SmartPI:
         Side effects:
         - Updates internal duty-cycle (_on_percent) and ON/OFF timings
         - Updates diagnostics and PI state
+
+        Rate limiting: This method is designed to run once per cycle. If called more
+        frequently (e.g., on every temperature sensor update), it returns early with
+        the existing outputs to prevent erroneous accumulation of the integral term.
+        However, the setpoint filter is always updated to capture setpoint changes immediately.
         """
+        now = datetime.now()
+
         # Input validation
         if target_temp is None or current_temp is None:
             self._on_percent = 0.0
@@ -728,6 +782,23 @@ class SmartPI:
             self.u_prev = 0.0
             self._calculate_times()
             return
+
+        # IMPORTANT: Always update the setpoint filter to capture setpoint changes immediately,
+        # even when rate-limited. Pass advance_ema=False to only detect changes without advancing.
+        self._filter_setpoint(target_temp, current_temp, hvac_mode, advance_ema=False)
+
+        # Rate limiting: only execute full PI loop once per cycle_min
+        # This prevents integral windup when calculate() is called on every temperature update
+        if self._last_calculate_time is not None:  # pylint: disable=access-member-before-definition
+            elapsed_minutes = (now - self._last_calculate_time).total_seconds() / 60.0
+            if elapsed_minutes < self._cycle_min:
+                # Not enough time has passed - keep existing outputs without updating PI state
+                # Just refresh _calculate_times to ensure correct ON/OFF timing
+                self._calculate_times()
+                return
+
+        # Mark this as a new cycle
+        self._last_calculate_time = now
 
         # Count cycles since (re)start (used for FF warm-up)
         self._cycles_since_reset += 1
@@ -757,7 +828,8 @@ class SmartPI:
         ki *= max(self.aggressiveness, 0.0)
 
         # Apply asymmetric setpoint filter to reduce overshoot on setpoint changes
-        target_temp_internal = self._filter_setpoint(target_temp, hvac_mode)
+        # advance_ema=True here because we're in the main PI loop (once per cycle)
+        target_temp_internal = self._filter_setpoint(target_temp, current_temp, hvac_mode, advance_ema=True)
 
         # Compute errors using the filtered setpoint
         e = float(target_temp_internal - current_temp)
