@@ -783,6 +783,8 @@ class SmartPI:
         if hvac_mode == VThermHvacMode_OFF:
             self._on_percent = 0.0
             self.u_prev = 0.0
+            # Reset rate-limiting so next HEAT/COOL activation gets immediate calculation
+            self._last_calculate_time = None
             self._calculate_times()
             return
 
