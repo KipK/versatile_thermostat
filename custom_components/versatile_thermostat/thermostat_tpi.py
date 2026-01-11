@@ -776,8 +776,8 @@ class ThermostatTPI(BaseThermostat[T], Generic[T]):
                     if self._auto_tpi_manager and self._auto_tpi_manager.learning_active
                     else "off"
                 ),
-                "auto_tpi_learning": (
-                    self._auto_tpi_manager.state.get_filtered_state()
+            "auto_tpi_learning": (
+                    self._auto_tpi_manager.get_filtered_state()
                     if self._auto_tpi_manager and self._auto_tpi_manager.learning_active
                     else None
                 ),
