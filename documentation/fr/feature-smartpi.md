@@ -143,6 +143,13 @@ L'action proportionnelle utilise une erreur pondérée `e_p = 0.4 × erreur` (au
 ### Protection contre le dépassement
 La vitesse de changement de puissance est limitée (25% par minute) pour éviter les à-coups.
 
+### Filtre de consigne asymétrique
+Lorsque vous changez la consigne (ex: de 19°C à 21°C), l'algorithme applique un filtre EMA asymétrique :
+- **Augmentation de consigne (HEAT)** : La consigne interne monte progressivement, permettant à la régulation d'"accompagner" la montée en température sans dépassement
+- **Baisse de consigne (HEAT)** : Suivi instantané pour économiser l'énergie
+
+Ce comportement est inversé en mode COOL. Le filtre utilise un alpha adaptatif qui réagit plus vite aux grands sauts (1°C ou plus) et plus lentement aux petits ajustements.
+
 ## Métriques de diagnostic
 
 L'algorithme expose plusieurs métriques dans les attributs de l'entité climate :
@@ -167,6 +174,7 @@ L'algorithme expose plusieurs métriques dans les attributs de l'entité climate
 | **integral_error** | Erreur intégrale accumulée |
 | **cycles_since_reset** | Nombre de cycles depuis le dernier reset |
 | **sign_flip_leak_left** | Cycles restants de décharge d'intégrale |
+| **filtered_setpoint** | Consigne interne après filtre asymétrique (pour le debug) |
 
 La métrique `tau_reliable` devient `true` quand le modèle a accumulé suffisamment de données fiables (au moins 6 apprentissages réussis, τ dans la plage 10-2000 minutes, et b stable).
 
