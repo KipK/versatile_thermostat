@@ -90,6 +90,7 @@ DEFAULT_DEADBAND_C = 0.05
 SP_ALPHA_SLOW = 0.05   # EMA alpha for small setpoint increases
 SP_ALPHA_FAST = 0.40   # EMA alpha for large setpoint jumps
 SP_BAND = 1.0          # Band for alpha interpolation (°C)
+SP_BYPASS_ERROR_THRESHOLD = 0.8  # Bypass filter when error > this (°C) to avoid slow heating
 
 
 @dataclass(frozen=True)
@@ -709,6 +710,15 @@ class SmartPI:
                 self._last_raw_setpoint = target_temp
                 return target_temp
 
+            # Bypass filter if we're far from the setpoint (large error)
+            # This prevents sluggish heating when starting far from target
+            if current_temp is not None:
+                error = target_temp - current_temp if hvac_mode == VThermHvacMode_HEAT else current_temp - target_temp
+                if error > SP_BYPASS_ERROR_THRESHOLD:
+                    self._filtered_setpoint = target_temp
+                    self._last_raw_setpoint = target_temp
+                    return target_temp
+
             # It's an increase - start filtering, record the new setpoint
             self._last_raw_setpoint = target_temp
 
@@ -740,6 +750,13 @@ class SmartPI:
             return target_temp
 
         # Still catching up - advance EMA only if requested (once per cycle)
+        # BUT check if we should bypass because we're now far from target
+        if current_temp is not None:
+            error = target_temp - current_temp if hvac_mode == VThermHvacMode_HEAT else current_temp - target_temp
+            if error > SP_BYPASS_ERROR_THRESHOLD:
+                self._filtered_setpoint = target_temp
+                return target_temp
+
         if advance_ema:
             w = min(gap / SP_BAND, 1.0)
             alpha = SP_ALPHA_SLOW + (SP_ALPHA_FAST - SP_ALPHA_SLOW) * w

@@ -150,6 +150,8 @@ When you change the setpoint (e.g., from 19°C to 21°C), the algorithm applies 
 
 This behavior is inverted for COOL mode. The filter uses an adaptive alpha that responds faster to large jumps (1°C or more) and slower to small adjustments.
 
+**Bypass when error > 0.8°C**: If the difference between current temperature and setpoint exceeds 0.8°C, the filter is bypassed and the raw setpoint is used directly. This prevents sluggish heating when far from target.
+
 **Rebase logic**: When the setpoint increases, the filtered setpoint will never start below the current room temperature. For example, if the room is at 18°C and you change from 16°C to 19°C, the filtered setpoint will start from 18°C (not 16°C) to avoid under-heating.
 
 ## Diagnostic metrics
