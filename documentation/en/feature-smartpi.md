@@ -143,6 +143,13 @@ The proportional action uses a weighted error `e_p = 0.4 × error` (instead of `
 ### Overshoot protection
 The power change rate is limited (25% per minute) to prevent sudden changes.
 
+### Asymmetric Setpoint Filter
+When you change the setpoint (e.g., from 19°C to 21°C), the algorithm applies an asymmetric EMA filter:
+- **Setpoint increase (HEAT)**: The internal setpoint rises progressively, allowing the regulation to "accompany" the temperature rise without overshooting
+- **Setpoint decrease (HEAT)**: Instant follow for energy savings
+
+This behavior is inverted for COOL mode. The filter uses an adaptive alpha that responds faster to large jumps (1°C or more) and slower to small adjustments.
+
 ## Diagnostic metrics
 
 The algorithm exposes several metrics in the climate entity attributes:
@@ -167,6 +174,7 @@ The algorithm exposes several metrics in the climate entity attributes:
 | **integral_error** | Accumulated integral error |
 | **cycles_since_reset** | Number of cycles since last reset |
 | **sign_flip_leak_left** | Remaining cycles of integral discharge |
+| **filtered_setpoint** | Internal setpoint after asymmetric filter (for debugging) |
 
 The `tau_reliable` metric becomes `true` when the model has accumulated enough reliable data (at least 6 successful learning cycles, τ in the 10-2000 minute range, and stable b).
 

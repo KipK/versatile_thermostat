@@ -86,6 +86,11 @@ MAX_STEP_PER_CYCLE = 0.15  # max output change per minute (rate limit)
 # Default deadband around setpoint ("C)
 DEFAULT_DEADBAND_C = 0.05
 
+# Asymmetric setpoint EMA filter parameters
+SP_ALPHA_SLOW = 0.05   # EMA alpha for small setpoint increases
+SP_ALPHA_FAST = 0.40   # EMA alpha for large setpoint jumps
+SP_BAND = 1.0          # Band for alpha interpolation (°C)
+
 
 @dataclass(frozen=True)
 class TauReliability:
@@ -404,6 +409,10 @@ class SmartPI:
         self._prev_error: Optional[float] = None
         self._sign_flip_leak_left: int = 0
 
+        # Asymmetric setpoint EMA filter state
+        self._filtered_setpoint: Optional[float] = None
+        self._last_raw_setpoint: Optional[float] = None
+
         # Learning start timestamp
         self._learning_start_date: Optional[datetime] = datetime.now()
 
@@ -427,6 +436,8 @@ class SmartPI:
         self._cycles_since_reset = 0
         self._prev_error = None
         self._sign_flip_leak_left = 0
+        self._filtered_setpoint = None
+        self._last_raw_setpoint = None
         self._learning_start_date = datetime.now()
         _LOGGER.info("%s - SmartPI learning and history reset", self._name)
 
@@ -487,6 +498,20 @@ class SmartPI:
                 except (ValueError, TypeError):
                     self._learning_start_date = None
 
+            # Load setpoint filter state
+            filtered_sp = state.get("filtered_setpoint")
+            last_raw_sp = state.get("last_raw_setpoint")
+            if filtered_sp is not None:
+                try:
+                    self._filtered_setpoint = float(filtered_sp)
+                except (ValueError, TypeError):
+                    self._filtered_setpoint = None
+            if last_raw_sp is not None:
+                try:
+                    self._last_raw_setpoint = float(last_raw_sp)
+                except (ValueError, TypeError):
+                    self._last_raw_setpoint = None
+
             _LOGGER.debug(
                 "%s - SmartPI state loaded: a=%.6f, b=%.6f, learns=%d",
                 self._name, self.est.a, self.est.b, self.est.learn_ok_count
@@ -510,6 +535,8 @@ class SmartPI:
             "u_prev": self.u_prev,
             "cycles_since_reset": self._cycles_since_reset,
             "learning_start_date": self._learning_start_date.isoformat() if self._learning_start_date else None,
+            "filtered_setpoint": self._filtered_setpoint,
+            "last_raw_setpoint": self._last_raw_setpoint,
         }
 
     # ------------------------------
@@ -615,6 +642,72 @@ class SmartPI:
         return self._last_u_ff
 
     # ------------------------------
+    # Asymmetric setpoint filter
+    # ------------------------------
+
+    def _filter_setpoint(self, target_temp: float, hvac_mode: VThermHvacMode) -> float:
+        """
+        Apply asymmetric EMA filter to setpoint to reduce overshoot.
+
+        Behavior:
+        - HEAT mode: increases are filtered (slow ramp), decreases are instant
+        - COOL mode: decreases are filtered (slow ramp), increases are instant
+
+        This allows the regulation loop to "accompany" the temperature rise
+        rather than aggressively overshoot the target.
+        """
+        # First call or no previous setpoint: initialize
+        if self._filtered_setpoint is None or self._last_raw_setpoint is None:
+            self._filtered_setpoint = target_temp
+            self._last_raw_setpoint = target_temp
+            return target_temp
+
+        # Detect if the RAW setpoint has changed since last cycle
+        setpoint_changed = abs(target_temp - self._last_raw_setpoint) > 0.01
+
+        if setpoint_changed:
+            # Setpoint just changed - determine direction and action
+            if hvac_mode == VThermHvacMode_HEAT:
+                is_increase = target_temp > self._last_raw_setpoint
+            elif hvac_mode == VThermHvacMode_COOL:
+                is_increase = target_temp < self._last_raw_setpoint  # "increase" in cooling effort
+            else:
+                # OFF or unknown mode: no filtering
+                self._filtered_setpoint = target_temp
+                self._last_raw_setpoint = target_temp
+                return target_temp
+
+            if not is_increase:
+                # Instant follow for decrease (energy saving)
+                self._filtered_setpoint = target_temp
+                self._last_raw_setpoint = target_temp
+                return target_temp
+
+            # It's an increase - start filtering, record the jump size for alpha calculation
+            # Store the jump size in _last_raw_setpoint update
+            self._last_raw_setpoint = target_temp
+            # Apply first EMA step
+            dsp = abs(target_temp - self._filtered_setpoint)  # Current gap
+            w = min(dsp / SP_BAND, 1.0)
+            alpha = SP_ALPHA_SLOW + (SP_ALPHA_FAST - SP_ALPHA_SLOW) * w
+            self._filtered_setpoint = alpha * target_temp + (1 - alpha) * self._filtered_setpoint
+            return self._filtered_setpoint
+
+        # Setpoint unchanged - check if we need to continue filtering
+        # Continue filtering if filtered_setpoint hasn't reached target yet
+        gap = abs(target_temp - self._filtered_setpoint)
+        if gap > 0.02:  # Still catching up
+            # Continue EMA toward target
+            w = min(gap / SP_BAND, 1.0)
+            alpha = SP_ALPHA_SLOW + (SP_ALPHA_FAST - SP_ALPHA_SLOW) * w
+            self._filtered_setpoint = alpha * target_temp + (1 - alpha) * self._filtered_setpoint
+            return self._filtered_setpoint
+
+        # Converged - snap to target
+        self._filtered_setpoint = target_temp
+        return target_temp
+
+    # ------------------------------
     # Main control law
     # ------------------------------
 
@@ -679,12 +772,15 @@ class SmartPI:
         kp *= max(self.aggressiveness, 0.0)
         ki *= max(self.aggressiveness, 0.0)
 
-        # Compute errors
-        e = float(target_temp - current_temp)
-        # Invert error for COOL mode (simple fix for now, should be refined if full cool support desired)
+        # Apply asymmetric setpoint filter to reduce overshoot on setpoint changes
+        target_temp_internal = self._filter_setpoint(target_temp, hvac_mode)
+
+        # Compute errors using the filtered setpoint
+        e = float(target_temp_internal - current_temp)
+        # Invert error for COOL mode
         if hvac_mode == VThermHvacMode_COOL:
             e = -e
-            
+
         self._last_error = e
 
         # 2DOF (setpoint weighting) for proportional action:
@@ -890,4 +986,6 @@ class SmartPI:
             "on_time_sec": int(self._on_time_sec),
             "off_time_sec": int(self._off_time_sec),
             "cycle_min": round(self._cycle_min, 3),
+            # Setpoint filter
+            "filtered_setpoint": None if self._filtered_setpoint is None else round(self._filtered_setpoint, 2),
         }
