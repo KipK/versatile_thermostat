@@ -413,6 +413,9 @@ class SmartPI:
         self._filtered_setpoint: Optional[float] = None
         self._last_raw_setpoint: Optional[float] = None
 
+        # Rate limiting: track last time calculate() was fully executed
+        self._last_calculate_time: Optional[datetime] = None
+
         # Learning start timestamp
         self._learning_start_date: Optional[datetime] = datetime.now()
 
