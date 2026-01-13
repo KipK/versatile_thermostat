@@ -299,7 +299,7 @@ class ABEstimator:
         -------
         TauReliability
         """
-        if self.learn_ok_count < 10:
+        if self.learn_ok_count_b < 10:
             return TauReliability(reliable=False, tau_min=9999.0)
 
         b = self.b
@@ -693,8 +693,8 @@ class SmartPI:
 
     @property
     def tpi_coef_ext(self) -> float:
-        t_ext = self.est.b / max(self.est.a, 1e-6) if self.est.a > 1e-6 else 0
-        return t_ext
+        k_ext = self.est.b / max(self.est.a, 1e-6) if self.est.a > 1e-6 else 0
+        return k_ext
 
     @property
     def integral_error(self) -> float:
@@ -928,9 +928,9 @@ class SmartPI:
         # e_p = b_sp * e, with e = (target_temp - current_temp)
         # This reduces the proportional kick on setpoint changes while preserving error sign
         e_p = float(self.setpoint_weight_b * e)
-        if hvac_mode == VThermHvacMode_COOL:
-            # Cooling mode: invert the weighted error
-            e_p = -e_p
+        # if hvac_mode == VThermHvacMode_COOL:
+        #     # Cooling mode: invert the weighted error
+        #     e_p = -e_p
 
         self._last_error_p = e_p
 

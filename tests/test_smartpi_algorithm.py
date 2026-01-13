@@ -12,7 +12,7 @@ from custom_components.versatile_thermostat.smartpi_algorithm import (
     KP_MAX
 )
 import math
-from custom_components.versatile_thermostat.vtherm_hvac_mode import VThermHvacMode_HEAT
+from custom_components.versatile_thermostat.vtherm_hvac_mode import VThermHvacMode_HEAT, VThermHvacMode_COOL
 
 
 def test_smartpi_instantiation():
@@ -250,7 +250,7 @@ def test_tau_reliability_not_enough_learns():
     tau_info = est.tau_reliability()
     
     assert not tau_info.reliable
-    assert tau_info.tau_min is None
+    assert tau_info.tau_min == 9999.0
 
 
 def test_tau_reliability_ok():
@@ -259,6 +259,7 @@ def test_tau_reliability_ok():
     
     # Inject reliable values
     est.learn_ok_count = 15
+    est.learn_ok_count_b = 15
     est.b = 0.002  # tau = 500
     
     tau_info = est.tau_reliability()
@@ -397,6 +398,7 @@ def test_heuristic_gains_reliable_tau():
     # Set up for reliable tau
     # New tau range [10, 800]. Let's pick 500. b = 1/500 = 0.002
     smartpi.est.learn_ok_count = 15
+    smartpi.est.learn_ok_count_b = 15
     smartpi.est.b = 0.002
     
     # calculate() triggers tau_reliability check inside
@@ -443,3 +445,53 @@ def test_safe_gains_unreliable_tau():
     # Aggressiveness default = 1.0
     # Kp = 0.55 * 1.0 = 0.55
     assert smartpi.Kp == KP_SAFE
+
+
+def test_cool_mode_inversion_bug():
+    """Test reproduction of double sign inversion in COOL mode."""
+    smartpi = SmartPI(
+        cycle_min=10,
+        minimal_activation_delay=0,
+        minimal_deactivation_delay=0,
+        name="TestSmartPI_COOL"
+    )
+
+    # Setup for COOL mode
+    # Target 20, Current 22 -> Error = -2 (too hot)
+    # in COOL mode, error is inverted -> e = -(-2) = 2 (positive error means cooling needed)
+    
+    # e_p = setpoint_weight_b * e
+    # We expect e_p to preserve the sign of e (positive) so that the PI produces positive output
+    
+    smartpi.calculate(
+        target_temp=20,
+        current_temp=22,
+        ext_current_temp=25,
+        slope=0,
+        hvac_mode=VThermHvacMode_COOL
+    )
+
+    # Check error sign (should be positive for cooling demand)
+    assert smartpi._last_error > 0, f"Error should be positive for cooling demand, got {smartpi._last_error}"
+
+    # Check proportional error sign (should be positive)
+    # The BUG causes this to be negative because of double inversion
+    assert smartpi._last_error_p > 0, f"Proportional error should be positive for cooling demand, got {smartpi._last_error_p}"
+
+
+def test_tau_reliability_dependent_on_b():
+    """Test that tau reliability depends on b learning count."""
+    est = ABEstimator()
+    est.learn_ok_count_a = 20
+    est.learn_ok_count_b = 0 # No b updates
+    est.learn_ok_count = 20  # Total updates reasonable
+    
+    # Inject a valid b so it doesn't fail on range check
+    est.b = 0.002 # Valid b for tau=500
+    
+    tau_info = est.tau_reliability()
+    
+    # Should be unreliable because b count is low
+    # The BUG causes this to be True because it only checks total learn_ok_count
+    assert not tau_info.reliable, "Should be unreliable if b is not learned enough"
+
