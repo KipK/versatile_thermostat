@@ -759,6 +759,10 @@ class SmartPI:
 
             if not should_filter:
                 # Instant follow for decrease (energy saving)
+                _LOGGER.debug(
+                    "%s - Setpoint filter: instant follow for decrease, target=%s, filtered=%s",
+                    self._name, target_temp, target_temp
+                )
                 self._filtered_setpoint = target_temp
                 self._last_raw_setpoint = target_temp
                 self._initial_temp_for_filter = None
@@ -908,18 +912,24 @@ class SmartPI:
         ki *= max(self.aggressiveness, 0.0)
 
         # Apply asymmetric setpoint filter to reduce overshoot on setpoint changes
-        # Only apply filter when tau is reliable (model is learned) to allow full
-        # power and overshoots during learning phase for accurate a/b estimation
+        # Always call _filter_setpoint() to keep _filtered_setpoint synchronized for diagnostics
+        # But only use the filtered value for PI control when tau is reliable
         # advance_ema=True here because we're in the main PI loop (once per cycle)
+        filtered_result = self._filter_setpoint(target_temp, current_temp, hvac_mode, advance_ema=True)
+        
         if self._use_setpoint_filter and self._tau_reliable:
-            target_temp_internal = self._filter_setpoint(target_temp, current_temp, hvac_mode, advance_ema=True)
+            target_temp_internal = filtered_result
+            _LOGGER.debug(
+                "%s - Setpoint filter applied: raw=%s, filtered=%s, tau_reliable=%s",
+                self._name, target_temp, self._filtered_setpoint, self._tau_reliable
+            )
         else:
+            # Use raw target for PI control but _filtered_setpoint is still updated for diagnostics
             target_temp_internal = target_temp
-            # Ensure diagnostics reflect the used setpoint
-            self._filtered_setpoint = target_temp
-            # Also keep filter state in sync to avoid jump if it becomes active later
-            self._last_raw_setpoint = target_temp
-            self._initial_temp_for_filter = None
+            _LOGGER.debug(
+                "%s - Setpoint filter sync-only: use_filter=%s, tau_reliable=%s, filtered_setpoint=%s",
+                self._name, self._use_setpoint_filter, self._tau_reliable, self._filtered_setpoint
+            )
 
         # Compute errors using the filtered setpoint
         e = float(target_temp_internal - current_temp)
