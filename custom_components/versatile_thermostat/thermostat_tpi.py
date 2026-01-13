@@ -246,8 +246,8 @@ class ThermostatTPI(BaseThermostat[T], Generic[T]):
 
         # Ensure the cycle loop is started if we are in a mode that needs it
         # This is necessary because update_states might not detect a change if the state was restored
-        if self._auto_tpi_manager and self._proportional_function == PROPORTIONAL_FUNCTION_TPI and self.vtherm_hvac_mode in [VThermHvacMode_HEAT, VThermHvacMode_COOL]:
-            _LOGGER.info("%s - Startup: Starting Auto TPI cycle loop", self)
+        if self._auto_tpi_manager and self._proportional_function in [PROPORTIONAL_FUNCTION_TPI, PROPORTIONAL_FUNCTION_SMART_PI] and self.vtherm_hvac_mode in [VThermHvacMode_HEAT, VThermHvacMode_COOL]:
+            _LOGGER.info("%s - Startup: Starting cycle loop", self)
             await self._auto_tpi_manager.start_cycle_loop(
                 self._get_tpi_data,
                 self._on_tpi_cycle_start
@@ -443,7 +443,7 @@ class ThermostatTPI(BaseThermostat[T], Generic[T]):
         # If we have a change, we may need to start/stop the cycle loop
         if changed:
             if self._state_manager.current_state.is_hvac_mode_changed:
-                if self._auto_tpi_manager and self._proportional_function == PROPORTIONAL_FUNCTION_TPI:
+                if self._auto_tpi_manager and self._proportional_function in [PROPORTIONAL_FUNCTION_TPI, PROPORTIONAL_FUNCTION_SMART_PI]:
                     # Start cycle loop for HEAT or COOL modes, regardless of learning_active
                     if self.vtherm_hvac_mode in [VThermHvacMode_HEAT, VThermHvacMode_COOL]:
                         await self._auto_tpi_manager.start_cycle_loop(

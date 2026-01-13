@@ -250,7 +250,7 @@ def test_tau_reliability_not_enough_learns():
     tau_info = est.tau_reliability()
     
     assert not tau_info.reliable
-    assert tau_info.tau_min == 9999.0
+    assert tau_info.tau_min is None
 
 
 def test_tau_reliability_ok():
