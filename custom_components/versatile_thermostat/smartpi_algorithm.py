@@ -915,6 +915,11 @@ class SmartPI:
             target_temp_internal = self._filter_setpoint(target_temp, current_temp, hvac_mode, advance_ema=True)
         else:
             target_temp_internal = target_temp
+            # Ensure diagnostics reflect the used setpoint
+            self._filtered_setpoint = target_temp
+            # Also keep filter state in sync to avoid jump if it becomes active later
+            self._last_raw_setpoint = target_temp
+            self._initial_temp_for_filter = None
 
         # Compute errors using the filtered setpoint
         e = float(target_temp_internal - current_temp)
