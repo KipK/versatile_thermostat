@@ -759,10 +759,6 @@ class SmartPI:
 
             if not should_filter:
                 # Instant follow for decrease (energy saving)
-                _LOGGER.debug(
-                    "%s - Setpoint filter: instant follow for decrease, target=%s, filtered=%s",
-                    self._name, target_temp, target_temp
-                )
                 self._filtered_setpoint = target_temp
                 self._last_raw_setpoint = target_temp
                 self._initial_temp_for_filter = None
@@ -919,17 +915,9 @@ class SmartPI:
         
         if self._use_setpoint_filter and self._tau_reliable:
             target_temp_internal = filtered_result
-            _LOGGER.debug(
-                "%s - Setpoint filter applied: raw=%s, filtered=%s, tau_reliable=%s",
-                self._name, target_temp, self._filtered_setpoint, self._tau_reliable
-            )
         else:
             # Use raw target for PI control but _filtered_setpoint is still updated for diagnostics
             target_temp_internal = target_temp
-            _LOGGER.debug(
-                "%s - Setpoint filter sync-only: use_filter=%s, tau_reliable=%s, filtered_setpoint=%s",
-                self._name, self._use_setpoint_filter, self._tau_reliable, self._filtered_setpoint
-            )
 
         # Compute errors using the filtered setpoint
         e = float(target_temp_internal - current_temp)
