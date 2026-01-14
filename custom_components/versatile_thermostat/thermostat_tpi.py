@@ -398,6 +398,13 @@ class ThermostatTPI(BaseThermostat[T], Generic[T]):
                         _LOGGER.info("%s - Synced PropAlgorithm with final persisted Auto TPI coeffs: int=%.3f, ext=%.3f",
                                       self, self._tpi_coef_int, self._tpi_coef_ext)
 
+        # SmartPI: Check for Overpowering (Load Shedding)
+        if self._proportional_function == PROPORTIONAL_FUNCTION_SMART_PI:
+            if self.power_manager.is_overpowering_detected:
+                if not self._current_cycle_interrupted:  # pylint: disable=access-member-before-definition
+                    _LOGGER.info("%s - SmartPI: Cycle interrupted by Overpowering. Learning will be skipped.", self)
+                    self._current_cycle_interrupted = True
+
         # Stop here if we are off
         if self.vtherm_hvac_mode == VThermHvacMode_OFF:
             _LOGGER.debug("%s - End of cycle (HVAC_MODE_OFF)", self)
