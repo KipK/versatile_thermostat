@@ -495,3 +495,122 @@ def test_tau_reliability_dependent_on_b():
     # The BUG causes this to be True because it only checks total learn_ok_count
     assert not tau_info.reliable, "Should be unreliable if b is not learned enough"
 
+
+def test_near_band_gain_scheduling():
+    """Test that near-band scheduling reduces gains correctly.
+    
+    This test verifies:
+    1. Gains are reduced inside the near-band
+    2. Ki is calculated from the ORIGINAL Kp (not reduced Kp)
+    3. Gains are re-clamped to stay within bounds after reduction
+    """
+    from custom_components.versatile_thermostat.smartpi_algorithm import KP_MIN, KI_MIN
+
+    # Create SmartPI with near-band enabled
+    smartpi = SmartPI(
+        cycle_min=10,
+        minimal_activation_delay=0,
+        minimal_deactivation_delay=0,
+        name="TestSmartPI_NearBand",
+        near_band_deg=0.5,      # Enable near-band
+        kp_near_factor=0.60,    # Reduce Kp to 60%
+        ki_near_factor=0.85,    # Reduce Ki to 85%
+        aggressiveness=1.0,     # No aggressiveness scaling
+    )
+
+    # Set up for reliable tau (needed for near-band Ki recalculation)
+    # tau = 1/b = 500 minutes
+    smartpi.est.learn_ok_count = 15
+    smartpi.est.learn_ok_count_b = 15
+    smartpi.est.b = 0.002
+
+    # First calculate outside near-band to get baseline gains
+    smartpi.calculate(
+        target_temp=20.0,
+        current_temp=18.0,  # error = 2.0 > near_band_deg=0.5
+        ext_current_temp=5.0,
+        slope=0,
+        hvac_mode=VThermHvacMode_HEAT
+    )
+
+    kp_outside = smartpi.Kp
+    ki_outside = smartpi.Ki
+    assert abs(smartpi._last_error) > 0.5, "Should be outside near-band"
+
+    # Reset the rate-limiting timestamp to allow immediate recalculation
+    smartpi._last_calculate_time = None
+
+    # Now calculate inside near-band
+    smartpi.calculate(
+        target_temp=20.0,
+        current_temp=19.7,  # error = 0.3 < near_band_deg=0.5
+        ext_current_temp=5.0,
+        slope=0,
+        hvac_mode=VThermHvacMode_HEAT
+    )
+
+    kp_inside = smartpi.Kp
+    ki_inside = smartpi.Ki
+
+    # Verify we're inside near-band
+    assert abs(smartpi._last_error) <= 0.5, f"Should be inside near-band, error={smartpi._last_error}"
+
+    # Verify Kp was reduced by the factor
+    expected_kp = kp_outside * 0.60
+    # Account for possible clamping
+    expected_kp_clamped = max(expected_kp, KP_MIN)
+    assert math.isclose(kp_inside, expected_kp_clamped, rel_tol=0.01), \
+        f"Kp should be reduced: outside={kp_outside}, inside={kp_inside}, expected={expected_kp_clamped}"
+
+    # Verify Ki was NOT calculated from reduced Kp
+    # If it was calculated from reduced Kp, it would be much smaller
+    # With fix: Ki = (kp_base / tau_capped) * ki_near_factor = (kp_outside / 200) * 0.85
+    # Without fix: Ki = (kp_reduced / tau_capped) * ki_near_factor = (kp_inside / 200) * 0.85
+    # The fix ensures Ki is calculated from the original Kp
+    tau_capped = 200.0  # TAU_CAP_FOR_KI
+    ki_from_original_kp = (kp_outside / tau_capped) * 0.85
+    ki_from_reduced_kp = (kp_inside / tau_capped) * 0.85
+
+    # Ki should be closer to the calculation from original Kp
+    assert ki_inside > ki_from_reduced_kp * 1.2, \
+        f"Ki should be calculated from original Kp (not reduced): ki_inside={ki_inside}, ki_from_reduced={ki_from_reduced_kp}"
+
+    # Verify gains stay within bounds
+    assert kp_inside >= KP_MIN, f"Kp should be >= KP_MIN after reduction: {kp_inside}"
+    assert ki_inside >= KI_MIN, f"Ki should be >= KI_MIN after reduction: {ki_inside}"
+
+
+def test_near_band_gains_clamped_at_minimum():
+    """Test that near-band reduction doesn't push gains below their minimums."""
+    from custom_components.versatile_thermostat.smartpi_algorithm import KP_MIN, KI_MIN
+
+    # Create SmartPI with minimum possible gains that will be reduced
+    smartpi = SmartPI(
+        cycle_min=10,
+        minimal_activation_delay=0,
+        minimal_deactivation_delay=0,
+        name="TestSmartPI_NearBandClamp",
+        near_band_deg=0.5,
+        kp_near_factor=0.60,
+        ki_near_factor=0.85,
+        aggressiveness=0.2,  # Very low aggressiveness pushes gains toward minimum
+    )
+
+    # With unreliable tau, safe gains are used: KP_SAFE=0.55, KI_SAFE=0.01
+    # With aggressiveness=0.2: Kp = 0.55 * 0.2 = 0.11
+    # After near-band: Kp = 0.11 * 0.60 = 0.066 < KP_MIN=0.10
+    # Should be clamped to KP_MIN
+
+    smartpi.calculate(
+        target_temp=20.0,
+        current_temp=19.8,  # error = 0.2 < near_band_deg=0.5
+        ext_current_temp=5.0,
+        slope=0,
+        hvac_mode=VThermHvacMode_HEAT
+    )
+
+    # Verify gains are clamped at minimums
+    assert smartpi.Kp >= KP_MIN, f"Kp must not go below KP_MIN: {smartpi.Kp}"
+    assert smartpi.Ki >= KI_MIN, f"Ki must not go below KI_MIN: {smartpi.Ki}"
+
+

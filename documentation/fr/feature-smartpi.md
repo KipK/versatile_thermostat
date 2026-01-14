@@ -78,7 +78,7 @@ L'agressivité influence directement les gains du régulateur (Kp). Une valeur p
 - **0.5** : Équilibre performance/stabilité. Point de départ recommandé
 - **1.0** : Réponse très réactive, pour les radiateurs électriques rapides sans inertie
 
-L'algorithme réduit automatiquement les gains Kp et Ki dans une bande proche de la consigne (±0.3°C par défaut) grâce au **near-band scheduling**.
+L'algorithme réduit automatiquement les gains Kp et Ki dans une bande proche de la consigne (±0.5°C par défaut) grâce au **near-band scheduling**.
 
 ## Fonctionnement détaillé de l'algorithme
 
@@ -136,7 +136,7 @@ Si l'intégrateur est en mode **HOLD** (pendant les périodes de "dead time" apr
 Quand l'erreur change de signe (température passe au-dessus ou en-dessous de la consigne), l'intégrale est partiellement déchargée (30% par cycle pendant 2 cycles). Cela permet un "atterrissage" plus doux et évite les oscillations autour de la consigne.
 
 ### Near-Band Scheduling (réduction des gains)
-Dans une bande de ±0.3°C autour de la consigne, les gains Kp et Ki sont réduits (×0.70 et ×0.50) pour un comportement plus doux à l'approche de la cible.
+Dans une bande de ±0.5°C autour de la consigne, les gains Kp et Ki sont réduits (×0.60 et ×0.85 respectivement) pour un comportement plus doux à l'approche de la cible et éviter de coller au deadband.
 
 ### 2-DOF PI (pondération de consigne)
 L'action proportionnelle utilise une erreur pondérée `e_p = 0.4 × erreur` (au lieu de `erreur` directement), ce qui réduit la réactivité sur les changements de consigne tout en préservant le signe de l'erreur.

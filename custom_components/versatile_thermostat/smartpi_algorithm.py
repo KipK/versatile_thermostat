@@ -347,9 +347,9 @@ class SmartPI:
         ff_scale_unreliable_max: float = 0.30,
         # --- Servo overshoot suppression knobs ---
         setpoint_weight_b: float = 0.3,
-        near_band_deg: float = 0.60,
+        near_band_deg: float = 0.50,
         kp_near_factor: float = 0.60,
-        ki_near_factor: float = 0.70,
+        ki_near_factor: float = 0.85,
         sign_flip_leak: float = 0.40,
         sign_flip_leak_cycles: int = 3,
         sign_flip_band_mult: float = 2.0,
@@ -948,12 +948,22 @@ class SmartPI:
         # Near-setpoint gain scheduling (soft landing)
         in_near_band = (self.near_band_deg > 0.0) and (abs(e) <= self.near_band_deg)
         if in_near_band:
-            kp *= self.kp_near_factor
-            # Boost Ki by capping tau when close to setpoint (eliminates steady-state error)
+            kp_base = kp  # Save original Kp before reduction
+
+            # Reduce Kp for softer proportional action
+            kp = kp_base * self.kp_near_factor
+
+            # Recalculate Ki from the ORIGINAL Kp (avoids double reduction)
             if tau_info.reliable:
                 tau_capped = clamp(tau_info.tau_min, 10.0, TAU_CAP_FOR_KI)
-                ki = clamp(kp / tau_capped, KI_MIN, KI_MAX)
+                ki = clamp(kp_base / tau_capped, KI_MIN, KI_MAX)
+
+            # Apply attenuation factor to Ki
             ki *= self.ki_near_factor
+
+            # Re-clamp to ensure gains stay within bounds after reduction
+            kp = clamp(kp, KP_MIN, KP_MAX)
+            ki = clamp(ki, KI_MIN, KI_MAX)
 
         # Store current gains (for diagnostics)
         self.Kp = kp

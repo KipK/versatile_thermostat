@@ -78,7 +78,7 @@ Aggressiveness directly influences the controller gains (Kp). A higher value res
 - **0.5**: Balance between performance and stability. Recommended starting point
 - **1.0**: Very reactive response, for fast electric heaters with low inertia
 
-The algorithm automatically reduces Kp and Ki gains within a band close to the setpoint (±0.3°C by default) via **near-band scheduling**.
+The algorithm automatically reduces Kp and Ki gains within a band close to the setpoint (±0.5°C by default) via **near-band scheduling**.
 
 ## Detailed operation of the algorithm
 
@@ -136,7 +136,7 @@ If the integrator is in **HOLD** mode (during "dead time" periods after a switch
 When the error changes sign (temperature crosses above or below setpoint), the integral is partially discharged (30% per cycle for 2 cycles). This allows a softer "landing" and avoids oscillations around the setpoint.
 
 ### Near-Band Scheduling (gain reduction)
-Within a ±0.3°C band around the setpoint, Kp and Ki gains are reduced (×0.70 and ×0.50) for smoother behavior approaching the target.
+Within a ±0.5°C band around the setpoint, Kp and Ki gains are reduced (×0.60 and ×0.85 respectively) for smoother behavior approaching the target and to avoid sticking at the deadband.
 
 ### 2-DOF PI (setpoint weighting)
 The proportional action uses a weighted error `e_p = 0.4 × error` (instead of `error` directly), which reduces reactivity on setpoint changes while preserving the error sign.
