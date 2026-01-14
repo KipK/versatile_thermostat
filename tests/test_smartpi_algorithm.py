@@ -633,7 +633,6 @@ def test_notify_resume_after_interruption_sets_skip_counter():
 
     # Counter should be set to default
     assert smartpi._skip_learning_cycles_left == SKIP_CYCLES_AFTER_RESUME
-    assert smartpi._skip_learning_cycles_left == 2  # Current default
 
     # Also verify timestamp is reset
     assert smartpi._learn_last_ts is None
@@ -655,7 +654,12 @@ def test_notify_resume_after_interruption_custom_skip():
 
 
 def test_update_learning_skips_when_resume_counter_active():
-    """Test that update_learning skips when skip counter is active."""
+    """Test that update_learning skips when skip counter is active.
+    
+    With SKIP_CYCLES_AFTER_RESUME = 1:
+    - First update_learning call should skip and decrement counter to 0
+    - Second call should proceed normally (counter is 0)
+    """
     smartpi = SmartPI(
         cycle_min=10,
         minimal_activation_delay=0,
@@ -669,7 +673,7 @@ def test_update_learning_skips_when_resume_counter_active():
 
     # Notify resume to set skip counter
     smartpi.notify_resume_after_interruption()
-    assert smartpi._skip_learning_cycles_left == 2
+    assert smartpi._skip_learning_cycles_left == 1  # SKIP_CYCLES_AFTER_RESUME = 1
 
     # First update_learning call should skip
     smartpi.update_learning(
@@ -681,41 +685,27 @@ def test_update_learning_skips_when_resume_counter_active():
         cycle_dt=10.0
     )
 
-    # Counter should decrement
-    assert smartpi._skip_learning_cycles_left == 1
+    # Counter should decrement to 0 (1 -> 0)
+    assert smartpi._skip_learning_cycles_left == 0
     # Learn count should NOT increase
     assert smartpi.est.learn_ok_count == initial_learn_count
     # Reason should indicate resume skip
     assert "skip:resume" in smartpi.est.learn_last_reason
 
-    # Second update_learning call should also skip
+    # Second call should proceed normally (counter is 0)
     smartpi.update_learning(
         current_temp=20.5,
         ext_current_temp=10.0,
         previous_temp=20.0,
-        previous_power=0.5,
-        hvac_mode=VThermHvacMode_HEAT,
-        cycle_dt=10.0
-    )
-
-    # Counter should decrement to 0
-    assert smartpi._skip_learning_cycles_left == 0
-    # Learn count should still NOT increase
-    assert smartpi.est.learn_ok_count == initial_learn_count
-
-    # Third call should proceed normally (counter is 0)
-    smartpi.update_learning(
-        current_temp=21.0,
-        ext_current_temp=10.0,
-        previous_temp=20.5,
         previous_power=0.0,  # OFF phase for b learning
         hvac_mode=VThermHvacMode_HEAT,
         cycle_dt=10.0
     )
 
-    # Now learning should happen (if conditions are met)
-    # Note: this may or may not increment learn_ok_count depending on data quality
+    # Counter stays 0
     assert smartpi._skip_learning_cycles_left == 0
+    # Now learning should proceed (if conditions met)
+    # Note: this may or may not increment learn_ok_count depending on data quality
 
 
 def test_skip_learning_cycles_persisted():
