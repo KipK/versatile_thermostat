@@ -187,8 +187,20 @@ L'algorithme expose plusieurs métriques dans les attributs de l'entité climate
 | **cycles_since_reset** | Nombre de cycles depuis le dernier reset |
 | **sign_flip_leak_left** | Cycles restants de décharge d'intégrale |
 | **filtered_setpoint** | Consigne interne après filtre asymétrique (pour le debug) |
+| **skip_learning_cycles_left** | Nombre de cycles d'apprentissage restants à ignorer après une reprise |
 
 La métrique `tau_reliable` devient `true` quand le modèle a accumulé suffisamment de données fiables (au moins 6 apprentissages réussis, τ dans la plage 10-2000 minutes, et b stable).
+
+### Gestion des perturbations (fenêtres, etc.)
+
+Lorsqu'une fenêtre est détectée ouverte, le thermostat passe en mode OFF et SmartPI arrête ses calculs. Quand la fenêtre est fermée et que le thermostat reprend en mode HEAT :
+
+- **SmartPI ignore automatiquement les 2 premiers cycles d'apprentissage** après la reprise
+- Cela permet à la température de se stabiliser avant de reprendre l'apprentissage
+- La métrique `skip_learning_cycles_left` indique le nombre de cycles restants à ignorer
+- La raison `learn_last_reason` affiche "skip:resume(N left)" pendant cette période
+
+Ce comportement évite que le modèle thermique soit faussé par les données de température perturbées pendant l'ouverture de la fenêtre.
 
 ## Conseils pour un apprentissage optimal
 

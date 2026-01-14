@@ -84,6 +84,9 @@ TAU_CAP_FOR_KI = 200.0
 INTEGRAL_LEAK = 0.995  # leak factor per cycle when inside deadband
 MAX_STEP_PER_CYCLE = 0.15  # max output change per minute (rate limit)
 
+# Skip cycles after resume from interruption (window, etc.)
+SKIP_CYCLES_AFTER_RESUME = 1
+
 # Default deadband around setpoint ("C)
 DEFAULT_DEADBAND_C = 0.05
 
@@ -431,6 +434,9 @@ class SmartPI:
         # Learning start timestamp
         self._learning_start_date: Optional[datetime] = datetime.now()
 
+        # Skip learning cycles after resume from interruption (window close, etc.)
+        self._skip_learning_cycles_left: int = 0
+
         if saved_state:
             self.load_state(saved_state)
         
@@ -458,7 +464,29 @@ class SmartPI:
         self._last_calculate_time = None
         self._learn_last_ts = None
         self._learning_start_date = datetime.now()
+        self._skip_learning_cycles_left = 0
         _LOGGER.info("%s - SmartPI learning and history reset", self._name)
+
+    def notify_resume_after_interruption(self, skip_cycles: int = None) -> None:
+        """Notify SmartPI that the thermostat is resuming after an interruption.
+
+        This is called when the thermostat resumes after a window close event
+        or similar interruption. It sets the skip counter so that learning
+        ignores the first N cycles, allowing temperature to stabilize.
+
+        Args:
+            skip_cycles: Number of cycles to skip. Defaults to SKIP_CYCLES_AFTER_RESUME.
+        """
+        if skip_cycles is None:
+            skip_cycles = SKIP_CYCLES_AFTER_RESUME
+        self._skip_learning_cycles_left = max(int(skip_cycles), 0)
+        # Also reset the learning timestamp to avoid using stale dt
+        self._learn_last_ts = None
+        _LOGGER.info(
+            "%s - SmartPI notified of resume after interruption, skipping %d cycles",
+            self._name,
+            self._skip_learning_cycles_left
+        )
 
     def load_state(self, state: Dict[str, Any]) -> None:
         """Load persistent state with validation."""
@@ -541,6 +569,9 @@ class SmartPI:
                 except (ValueError, TypeError):
                     self._initial_temp_for_filter = None
 
+            # Load skip cycles counter for resume after interruption
+            self._skip_learning_cycles_left = int(state.get("skip_learning_cycles_left", 0) or 0)
+
             # Mark that state was loaded (not fresh init)
             self.est.learn_last_reason = "loaded"
 
@@ -572,6 +603,7 @@ class SmartPI:
             "filtered_setpoint": self._filtered_setpoint,
             "last_raw_setpoint": self._last_raw_setpoint,
             "initial_temp_for_filter": self._initial_temp_for_filter,
+            "skip_learning_cycles_left": self._skip_learning_cycles_left,
         }
 
     # ------------------------------
@@ -599,6 +631,17 @@ class SmartPI:
             return
 
         if hvac_mode != VThermHvacMode_HEAT:
+            return
+
+        # Skip learning cycles after resume from interruption (e.g., window close)
+        if self._skip_learning_cycles_left > 0:
+            self._skip_learning_cycles_left -= 1
+            self.est.learn_last_reason = f"skip:resume({self._skip_learning_cycles_left + 1} left)"
+            _LOGGER.debug(
+                "%s - Skipping learning cycle after resume (%d cycles left)",
+                self._name,
+                self._skip_learning_cycles_left
+            )
             return
 
         # Ensure u is always in [0..1]
@@ -1146,4 +1189,6 @@ class SmartPI:
             "cycle_min": round(self._cycle_min, 3),
             # Setpoint filter
             "filtered_setpoint": None if self._filtered_setpoint is None else round(self._filtered_setpoint, 2),
+            # Resume skip
+            "skip_learning_cycles_left": int(self._skip_learning_cycles_left),
         }

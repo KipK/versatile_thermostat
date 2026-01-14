@@ -48,7 +48,9 @@ def test_smartpi_gain_adaptation():
     # Set a low b (long time constant)
     smartpi.est.b = 0.001  # tau = 1000 min
     # We need to ensure we have enough samples for reliability
+    # Both learn_ok_count and learn_ok_count_b must be sufficient
     smartpi.est.learn_ok_count = 20
+    smartpi.est.learn_ok_count_b = 20
     
     smartpi.calculate(
         target_temp=20,

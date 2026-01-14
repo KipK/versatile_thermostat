@@ -47,6 +47,10 @@ class ThermostatTPI(BaseThermostat[T], Generic[T]):
 
         self._auto_tpi_manager: AutoTpiManager | None = None
 
+        # Track previous hvac_mode to detect resume after interruption (window close, etc.)
+        # This enables notifying SmartPI to skip learning cycles after resume.
+        self._prev_hvac_mode_for_resume: str | None = None
+
         super().__init__(hass, unique_id, name, entry_infos)
 
     @property
@@ -436,8 +440,27 @@ class ThermostatTPI(BaseThermostat[T], Generic[T]):
                 self.vtherm_hvac_mode or VThermHvacMode_OFF,
             )
 
+    def _notify_prop_resume_after_off(self) -> None:
+        """Notify the proportional algorithm that thermostat is resuming after being OFF.
+
+        This is called when the thermostat transitions from OFF to HEAT/COOL
+        (e.g., after window close, manual reactivation, or leaving away mode).
+        It tells SmartPI to skip one learning cycle to let the temperature stabilize.
+        """
+        if (
+            self._proportional_function == PROPORTIONAL_FUNCTION_SMART_PI
+            and self._prop_algorithm is not None
+            and hasattr(self._prop_algorithm, "notify_resume_after_interruption")
+        ):
+            self._prop_algorithm.notify_resume_after_interruption()
+            _LOGGER.debug("%s - Notified prop algorithm of resume after interruption", self)
+
     async def update_states(self, force=False):
         """Update states and eventually start cycle loop"""
+        # Capture previous hvac_mode BEFORE calling super (which may change it)
+        prev_mode = self._prev_hvac_mode_for_resume
+        current_mode = self.vtherm_hvac_mode
+
         changed = await super().update_states(force)
 
         # If we have a change, we may need to start/stop the cycle loop
@@ -446,12 +469,20 @@ class ThermostatTPI(BaseThermostat[T], Generic[T]):
                 if self._auto_tpi_manager and self._proportional_function in [PROPORTIONAL_FUNCTION_TPI, PROPORTIONAL_FUNCTION_SMART_PI]:
                     # Start cycle loop for HEAT or COOL modes, regardless of learning_active
                     if self.vtherm_hvac_mode in [VThermHvacMode_HEAT, VThermHvacMode_COOL]:
+                        # Detect resume after interruption: OFF -> HEAT/COOL transition
+                        if prev_mode == VThermHvacMode_OFF:
+                            self._notify_prop_resume_after_off()
+
                         await self._auto_tpi_manager.start_cycle_loop(
                             self._get_tpi_data,
                             self._on_tpi_cycle_start
                         )
                     else:
                         self._auto_tpi_manager.stop_cycle_loop()
+
+        # Always track current mode for next transition detection
+        self._prev_hvac_mode_for_resume = self.vtherm_hvac_mode
+
         return changed
 
     async def _async_update_tpi_config_entry(self):

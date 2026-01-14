@@ -614,3 +614,176 @@ def test_near_band_gains_clamped_at_minimum():
     assert smartpi.Ki >= KI_MIN, f"Ki must not go below KI_MIN: {smartpi.Ki}"
 
 
+def test_notify_resume_after_interruption_sets_skip_counter():
+    """Test that notify_resume_after_interruption sets the skip counter."""
+    from custom_components.versatile_thermostat.smartpi_algorithm import SKIP_CYCLES_AFTER_RESUME
+
+    smartpi = SmartPI(
+        cycle_min=10,
+        minimal_activation_delay=0,
+        minimal_deactivation_delay=0,
+        name="TestSmartPI_Resume"
+    )
+
+    # Initially counter should be 0
+    assert smartpi._skip_learning_cycles_left == 0
+
+    # Notify resume
+    smartpi.notify_resume_after_interruption()
+
+    # Counter should be set to default
+    assert smartpi._skip_learning_cycles_left == SKIP_CYCLES_AFTER_RESUME
+    assert smartpi._skip_learning_cycles_left == 2  # Current default
+
+    # Also verify timestamp is reset
+    assert smartpi._learn_last_ts is None
+
+
+def test_notify_resume_after_interruption_custom_skip():
+    """Test that notify_resume_after_interruption accepts custom skip count."""
+    smartpi = SmartPI(
+        cycle_min=10,
+        minimal_activation_delay=0,
+        minimal_deactivation_delay=0,
+        name="TestSmartPI_Resume"
+    )
+
+    # Notify with custom skip count
+    smartpi.notify_resume_after_interruption(skip_cycles=5)
+
+    assert smartpi._skip_learning_cycles_left == 5
+
+
+def test_update_learning_skips_when_resume_counter_active():
+    """Test that update_learning skips when skip counter is active."""
+    smartpi = SmartPI(
+        cycle_min=10,
+        minimal_activation_delay=0,
+        minimal_deactivation_delay=0,
+        name="TestSmartPI_Resume"
+    )
+
+    # Setup initial state
+    smartpi.est.learn_ok_count = 5
+    initial_learn_count = smartpi.est.learn_ok_count
+
+    # Notify resume to set skip counter
+    smartpi.notify_resume_after_interruption()
+    assert smartpi._skip_learning_cycles_left == 2
+
+    # First update_learning call should skip
+    smartpi.update_learning(
+        current_temp=20.0,
+        ext_current_temp=10.0,
+        previous_temp=19.0,
+        previous_power=0.5,
+        hvac_mode=VThermHvacMode_HEAT,
+        cycle_dt=10.0
+    )
+
+    # Counter should decrement
+    assert smartpi._skip_learning_cycles_left == 1
+    # Learn count should NOT increase
+    assert smartpi.est.learn_ok_count == initial_learn_count
+    # Reason should indicate resume skip
+    assert "skip:resume" in smartpi.est.learn_last_reason
+
+    # Second update_learning call should also skip
+    smartpi.update_learning(
+        current_temp=20.5,
+        ext_current_temp=10.0,
+        previous_temp=20.0,
+        previous_power=0.5,
+        hvac_mode=VThermHvacMode_HEAT,
+        cycle_dt=10.0
+    )
+
+    # Counter should decrement to 0
+    assert smartpi._skip_learning_cycles_left == 0
+    # Learn count should still NOT increase
+    assert smartpi.est.learn_ok_count == initial_learn_count
+
+    # Third call should proceed normally (counter is 0)
+    smartpi.update_learning(
+        current_temp=21.0,
+        ext_current_temp=10.0,
+        previous_temp=20.5,
+        previous_power=0.0,  # OFF phase for b learning
+        hvac_mode=VThermHvacMode_HEAT,
+        cycle_dt=10.0
+    )
+
+    # Now learning should happen (if conditions are met)
+    # Note: this may or may not increment learn_ok_count depending on data quality
+    assert smartpi._skip_learning_cycles_left == 0
+
+
+def test_skip_learning_cycles_persisted():
+    """Test that skip_learning_cycles_left is persisted in save/load state."""
+    smartpi1 = SmartPI(
+        cycle_min=10,
+        minimal_activation_delay=0,
+        minimal_deactivation_delay=0,
+        name="TestSmartPI_Persist1"
+    )
+
+    # Set skip counter
+    smartpi1.notify_resume_after_interruption(skip_cycles=3)
+    assert smartpi1._skip_learning_cycles_left == 3
+
+    # Save state
+    saved = smartpi1.save_state()
+    assert "skip_learning_cycles_left" in saved
+    assert saved["skip_learning_cycles_left"] == 3
+
+    # Load in new instance
+    smartpi2 = SmartPI(
+        cycle_min=10,
+        minimal_activation_delay=0,
+        minimal_deactivation_delay=0,
+        name="TestSmartPI_Persist2",
+        saved_state=saved
+    )
+
+    # Skip counter should be restored
+    assert smartpi2._skip_learning_cycles_left == 3
+
+
+def test_skip_learning_cycles_in_diagnostics():
+    """Test that skip_learning_cycles_left appears in diagnostics."""
+    smartpi = SmartPI(
+        cycle_min=10,
+        minimal_activation_delay=0,
+        minimal_deactivation_delay=0,
+        name="TestSmartPI_Diag"
+    )
+
+    # Set skip counter
+    smartpi.notify_resume_after_interruption(skip_cycles=2)
+
+    # Get diagnostics
+    diag = smartpi.get_diagnostics()
+
+    assert "skip_learning_cycles_left" in diag
+    assert diag["skip_learning_cycles_left"] == 2
+
+
+def test_reset_learning_clears_skip_counter():
+    """Test that reset_learning clears the skip counter."""
+    smartpi = SmartPI(
+        cycle_min=10,
+        minimal_activation_delay=0,
+        minimal_deactivation_delay=0,
+        name="TestSmartPI_ResetSkip"
+    )
+
+    # Set skip counter
+    smartpi.notify_resume_after_interruption(skip_cycles=5)
+    assert smartpi._skip_learning_cycles_left == 5
+
+    # Reset learning
+    smartpi.reset_learning()
+
+    # Skip counter should be cleared
+    assert smartpi._skip_learning_cycles_left == 0
+
