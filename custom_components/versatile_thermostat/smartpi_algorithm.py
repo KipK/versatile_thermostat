@@ -1055,10 +1055,10 @@ class SmartPI:
 
         # --- PI control with anti-windup ---
         if abs(e) < self.deadband_c:
-            # In deadband: leak integral slowly (helps avoid chatter)
+            # In deadband: leak integral slowly and output zero (helps avoid chatter)
             self.integral *= INTEGRAL_LEAK
             self.integral = clamp(self.integral, -i_max, i_max)
-            u_pi = self.Kp * e_p + self.Ki * self.integral
+            u_pi = 0.0
             self._last_i_mode = "I:LEAK(deadband)"
         else:
             if integrator_hold:
