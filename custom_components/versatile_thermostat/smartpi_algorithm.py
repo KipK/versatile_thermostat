@@ -1001,7 +1001,7 @@ class SmartPI:
             # Recalculate Ki from the ORIGINAL Kp (avoids double reduction)
             if tau_info.reliable:
                 tau_capped = clamp(tau_info.tau_min, 10.0, TAU_CAP_FOR_KI)
-                ki = clamp(kp / tau_capped, KI_MIN, KI_MAX)
+                ki = clamp(kp_base / tau_capped, KI_MIN, KI_MAX)
 
             # Apply attenuation factor to Ki
             ki *= self.ki_near_factor
