@@ -504,8 +504,8 @@ def test_near_band_gain_scheduling():
     
     This test verifies:
     1. Gains are reduced inside the near-band
-    2. Ki is calculated from REDUCED Kp, then multiplied by ki_near_factor
-       (double attenuation - current behavior)
+    2. Ki is calculated from ORIGINAL Kp, then multiplied by ki_near_factor
+       (single attenuation - fixed behavior)
     3. Gains are re-clamped to stay within bounds after reduction
     """
     from custom_components.versatile_thermostat.smartpi_algorithm import KP_MIN, KI_MIN
@@ -566,15 +566,15 @@ def test_near_band_gain_scheduling():
     assert math.isclose(kp_inside, expected_kp_clamped, rel_tol=0.01), \
         f"Kp should be reduced: outside={kp_outside}, inside={kp_inside}, expected={expected_kp_clamped}"
 
-    # Current behavior: Ki is calculated from REDUCED Kp, then multiplied by ki_near_factor
-    # Ki = (kp_reduced / tau_capped) * ki_near_factor
-    # This results in double attenuation: kp_near_factor * ki_near_factor = 0.60 * 0.85 = 0.51
+    # Fixed behavior: Ki is calculated from ORIGINAL Kp, then multiplied by ki_near_factor
+    # Ki = (kp_original / tau_capped) * ki_near_factor
+    # This results in single attenuation: ki_near_factor = 0.85
     tau_capped = 200.0  # TAU_CAP_FOR_KI
-    ki_from_reduced_kp = (kp_inside / tau_capped) * 0.85
+    ki_from_original_kp = (kp_outside / tau_capped) * 0.85
 
-    # Ki should match the calculation from reduced Kp (current behavior)
-    assert math.isclose(ki_inside, ki_from_reduced_kp, rel_tol=0.01), \
-        f"Ki should be calculated from reduced Kp: ki_inside={ki_inside}, expected={ki_from_reduced_kp}"
+    # Ki should match the calculation from original Kp (fixed behavior)
+    assert math.isclose(ki_inside, ki_from_original_kp, rel_tol=0.01), \
+        f"Ki should be calculated from original Kp: ki_inside={ki_inside}, expected={ki_from_original_kp}"
 
     # Verify gains stay within bounds
     assert kp_inside >= KP_MIN, f"Kp should be >= KP_MIN after reduction: {kp_inside}"

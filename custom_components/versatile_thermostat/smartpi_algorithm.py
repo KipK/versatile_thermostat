@@ -1020,10 +1020,11 @@ class SmartPI:
             # Reduce Kp for softer proportional action
             kp = kp_base * self.kp_near_factor
 
-            # Recalculate Ki 
+            # Recalculate Ki from ORIGINAL Kp (kp_base), not reduced Kp
+            # This avoids double attenuation (kp_near_factor * ki_near_factor)
             if tau_info.reliable:
                 tau_capped = clamp(tau_info.tau_min, 10.0, TAU_CAP_FOR_KI)
-                ki = clamp(kp / tau_capped, KI_MIN, KI_MAX)
+                ki = clamp(kp_base / tau_capped, KI_MIN, KI_MAX)
 
             # Apply attenuation factor to Ki
             ki *= self.ki_near_factor
