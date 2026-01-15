@@ -517,8 +517,8 @@ def test_near_band_gain_scheduling():
         minimal_deactivation_delay=0,
         name="TestSmartPI_NearBand",
         near_band_deg=0.5,      # Enable near-band
-        kp_near_factor=0.60,    # Reduce Kp to 60%
-        ki_near_factor=0.85,    # Reduce Ki to 85%
+        kp_near_factor=0.70,    # Reduce Kp to 60%
+        ki_near_factor=0.50,    # Reduce Ki to 85%
         aggressiveness=1.0,     # No aggressiveness scaling
     )
 

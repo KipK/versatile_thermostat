@@ -144,8 +144,8 @@ class ABEstimator:
     learn_last_reason: str = "init"
 
     # Internal windows for robust median estimation
-    _a_hist: Deque[float] = field(default_factory=lambda: deque(maxlen=96))
-    _b_hist: Deque[float] = field(default_factory=lambda: deque(maxlen=96))
+    _a_hist: Deque[float] = field(default_factory=lambda: deque(maxlen=15))
+    _b_hist: Deque[float] = field(default_factory=lambda: deque(maxlen=30))
 
     # Robust bounds (conservative; tune to your installation)
     A_MIN: float = 1e-5
@@ -361,8 +361,8 @@ class SmartPI:
         # --- Servo overshoot suppression knobs ---
         setpoint_weight_b: float = 0.3,
         near_band_deg: float = 0.50,
-        kp_near_factor: float = 0.60,
-        ki_near_factor: float = 0.85,
+        kp_near_factor: float = 0.70,
+        ki_near_factor: float = 0.50,
         sign_flip_leak: float = 0.40,
         sign_flip_leak_cycles: int = 3,
         sign_flip_band_mult: float = 2.0,
