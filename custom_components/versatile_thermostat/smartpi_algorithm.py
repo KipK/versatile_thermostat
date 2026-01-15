@@ -1192,7 +1192,7 @@ class SmartPI:
         # This step re-aligns the integrator to the applied actuator command.
         # Only apply when NOT in deadband (deadband uses INTEGRAL_LEAK instead).
         # ------------------------------
-        if (not integrator_hold) and (self.Ki > KI_MIN) and (abs(e) >= self.deadband_c):
+        if (not integrator_hold) and (self.Ki > KI_MIN) and (not self._in_deadband):
             # Model-predicted command using current integrator state
             u_model = u_ff + (self.Kp * e_p + self.Ki * self.integral)
 
