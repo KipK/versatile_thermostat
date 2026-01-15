@@ -82,7 +82,7 @@ TAU_CAP_FOR_KI = 200.0
 
 # Anti-windup / integrator behavior
 INTEGRAL_LEAK = 0.995  # leak factor per cycle when inside deadband
-MAX_STEP_PER_CYCLE = 0.15  # max output change per minute (rate limit)
+MAX_STEP_PER_MINUTE = 0.15  # max output change per minute (rate limit)
 
 # Tracking anti-windup (back-calculation) tuned for slow thermal systems
 AW_TRACK_TAU_S = 120.0        # tracking time constant in seconds (typ. 60-180s)
@@ -1162,8 +1162,7 @@ class SmartPI:
         # ------------------------------
 
         # Rate limiting: bound command delta per cycle (prevents abrupt power changes)
-        # NOTE: MAX_STEP_PER_CYCLE is per minute, dt_min is in minutes
-        max_step = MAX_STEP_PER_CYCLE * dt_min
+        max_step = MAX_STEP_PER_MINUTE * dt_min
         u_limited = clamp(u_cmd, self.u_prev - max_step, self.u_prev + max_step)
 
         # Apply max_on_percent limit if configured
