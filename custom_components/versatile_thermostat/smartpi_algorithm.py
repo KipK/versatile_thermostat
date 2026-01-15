@@ -221,7 +221,8 @@ class ABEstimator:
                 self.learn_last_reason = "skip:b: measured b <= 0"
                 return
 
-            b_meas = clamp(b_meas, self.B_MIN, self.B_MAX)
+            # Store raw measurement for median calculation (no clamp here)
+            # Clamping before median would bias it toward bounds
             self._b_hist.append(b_meas)
 
             # Update b using EWMA with median for robustness
@@ -260,7 +261,8 @@ class ABEstimator:
                 self.learn_last_reason = "skip:a: measured a <= 0"
                 return
 
-            a_meas = clamp(a_meas, self.A_MIN, self.A_MAX)
+            # Store raw measurement for median calculation (no clamp here)
+            # Clamping before median would bias it toward bounds
             self._a_hist.append(a_meas)
 
             # Update a using EWMA with median for robustness

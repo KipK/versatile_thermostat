@@ -777,3 +777,95 @@ def test_reset_learning_clears_skip_counter():
     # Skip counter should be cleared
     assert smartpi._skip_learning_cycles_left == 0
 
+
+def test_abestimator_no_saturation_bias():
+    """Test that raw values in histogram prevent saturation bias.
+    
+    This test verifies the fix for the saturation issue where parameter 'a'
+    would drift toward A_MAX when many measurements exceed the limit.
+    
+    Before fix: Values were clamped BEFORE storing in histogram, so if >50%
+    of measurements exceeded A_MAX, the median would also be A_MAX.
+    
+    After fix: Raw values are stored, median reflects true center, and only
+    the final EWMA result is clamped.
+    """
+    est = ABEstimator()
+    
+    # First, set up a reasonable b value
+    est.b = 0.002  # tau = 500 min
+    
+    # Simulate several ON-phase measurements where SOME exceed A_MAX
+    # This mimics the real scenario where b*delta contributes significantly
+    # to a_meas calculation, causing some values to exceed 0.05
+    
+    measurements = [
+        # (dT_int_per_min, u, t_int, t_ext)
+        # a_meas = (dt + b*delta) / u
+        # With b=0.002 and delta=10, b*delta=0.02
+        (0.03, 0.5, 18.0, 8.0),   # a_meas = (0.03 + 0.02) / 0.5 = 0.10 (exceeds A_MAX)
+        (0.02, 0.5, 18.0, 8.0),   # a_meas = (0.02 + 0.02) / 0.5 = 0.08 (exceeds A_MAX)
+        (0.01, 0.5, 18.0, 8.0),   # a_meas = (0.01 + 0.02) / 0.5 = 0.06 (exceeds A_MAX)
+        (0.005, 0.5, 18.0, 8.0),  # a_meas = (0.005 + 0.02) / 0.5 = 0.05 (at A_MAX)
+        (0.003, 0.5, 18.0, 8.0),  # a_meas = (0.003 + 0.02) / 0.5 = 0.046 (below A_MAX)
+        (0.002, 0.5, 18.0, 8.0),  # a_meas = (0.002 + 0.02) / 0.5 = 0.044 (below A_MAX)
+        (0.001, 0.5, 18.0, 8.0),  # a_meas = (0.001 + 0.02) / 0.5 = 0.042 (below A_MAX)
+    ]
+    
+    for dt, u, t_int, t_ext in measurements:
+        est.learn(dT_int_per_min=dt, u=u, t_int=t_int, t_ext=t_ext)
+    
+    # With raw values stored, median of [0.10, 0.08, 0.06, 0.05, 0.046, 0.044, 0.042]
+    # = 0.05 (center value)
+    # But EWMA converges slowly, and with our values, the final 'a' should NOT be
+    # saturated at exactly A_MAX due to the unbiased median
+    
+    # Key assertion: a should be clamped at A_MAX (0.05) but the histogram
+    # should contain raw values, some exceeding A_MAX
+    assert est.a <= est.A_MAX, f"a should be clamped at A_MAX: {est.a}"
+    
+    # Verify that _a_hist contains raw values (some exceeding A_MAX)
+    # This is the key difference from the old behavior
+    raw_values_above_max = [v for v in est._a_hist if v > est.A_MAX]
+    assert len(raw_values_above_max) > 0, \
+        f"Histogram should contain raw values above A_MAX: {list(est._a_hist)}"
+    
+    # The median of the raw values should be calculated correctly
+    import statistics
+    actual_median = statistics.median(est._a_hist)
+    # With the measurements above, median is around 0.05-0.06
+    # The point is that the median is calculated on raw values, not clamped values
+    assert actual_median <= 0.07, f"Median should be reasonable: {actual_median}"
+
+
+def test_abestimator_b_no_saturation_bias():
+    """Test that raw values in histogram prevent saturation bias for b.
+    
+    Same principle as test_abestimator_no_saturation_bias but for parameter b.
+    """
+    est = ABEstimator()
+    
+    # Simulate OFF-phase measurements where SOME exceed B_MAX
+    # b_meas = -dT / delta
+    # Note: dT must be within outlier threshold (max_abs_dT_per_min=0.35)
+    # To get b_meas > 0.05 with dT within limits, we need smaller delta
+    measurements = [
+        # (dT_int_per_min, u, t_int, t_ext)
+        # With delta=5, dT=-0.3 gives b_meas=0.06 (exceeds B_MAX=0.05)
+        (-0.30, 0.0, 18.0, 13.0),  # b_meas = 0.30/5 = 0.06 (exceeds B_MAX)
+        (-0.28, 0.0, 18.0, 13.0),  # b_meas = 0.28/5 = 0.056 (exceeds B_MAX)
+        (-0.20, 0.0, 18.0, 13.0),  # b_meas = 0.20/5 = 0.04 (below B_MAX)
+        (-0.15, 0.0, 18.0, 13.0),  # b_meas = 0.15/5 = 0.03 (below B_MAX)
+        (-0.10, 0.0, 18.0, 13.0),  # b_meas = 0.10/5 = 0.02 (below B_MAX)
+    ]
+    
+    for dt, u, t_int, t_ext in measurements:
+        est.learn(dT_int_per_min=dt, u=u, t_int=t_int, t_ext=t_ext)
+    
+    # Key assertion: b should be clamped at B_MAX but histogram contains raw values
+    assert est.b <= est.B_MAX, f"b should be clamped at B_MAX: {est.b}"
+    
+    # Verify that _b_hist contains raw values (some exceeding B_MAX)
+    raw_values_above_max = [v for v in est._b_hist if v > est.B_MAX]
+    assert len(raw_values_above_max) > 0, \
+        f"Histogram should contain raw values above B_MAX: {list(est._b_hist)}"
