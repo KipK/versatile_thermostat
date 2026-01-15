@@ -443,6 +443,9 @@ class SmartPI:
         # Skip learning cycles after resume from interruption (window close, etc.)
         self._skip_learning_cycles_left: int = 0
 
+        # Deadband state tracking for bumpless transfer on exit
+        self._in_deadband: bool = False
+
         # Tracking anti-windup diagnostics
         self._last_u_cmd: float = 0.0       # command after [0,1] clamp
         self._last_u_limited: float = 0.0   # after rate-limit and max_on_percent
@@ -477,6 +480,7 @@ class SmartPI:
         self._learn_last_ts = None
         self._learning_start_date = datetime.now()
         self._skip_learning_cycles_left = 0
+        self._in_deadband = False
         _LOGGER.info("%s - SmartPI learning and history reset", self._name)
 
     def notify_resume_after_interruption(self, skip_cycles: int = None) -> None:
@@ -584,6 +588,9 @@ class SmartPI:
             # Load skip cycles counter for resume after interruption
             self._skip_learning_cycles_left = int(state.get("skip_learning_cycles_left", 0) or 0)
 
+            # Load deadband state
+            self._in_deadband = bool(state.get("in_deadband", False))
+
             # Mark that state was loaded (not fresh init)
             self.est.learn_last_reason = "loaded"
 
@@ -616,6 +623,7 @@ class SmartPI:
             "last_raw_setpoint": self._last_raw_setpoint,
             "initial_temp_for_filter": self._initial_temp_for_filter,
             "skip_learning_cycles_left": self._skip_learning_cycles_left,
+            "in_deadband": self._in_deadband,
         }
 
     # ------------------------------
@@ -1066,7 +1074,25 @@ class SmartPI:
             self.integral = clamp(self.integral, -i_max, i_max)
 
         # --- PI control with anti-windup ---
-        if abs(e) < self.deadband_c:
+        in_deadband_now = abs(e) < self.deadband_c
+
+        # Bumpless transfer: on deadband exit, re-initialize integral
+        # so that u_ff + Kp*e_p + Ki*I = u_prev (no output discontinuity)
+        if self._in_deadband and not in_deadband_now:
+            # Exiting deadband: compute integral for bumpless transfer
+            if self.Ki > KI_MIN:
+                # I_new = (u_prev - u_ff - Kp * e_p) / Ki
+                i_bumpless = (self.u_prev - u_ff - self.Kp * e_p) / self.Ki
+                self.integral = clamp(i_bumpless, -i_max, i_max)
+                _LOGGER.debug(
+                    "%s - Bumpless deadband exit: I adjusted to %.4f (u_prev=%.3f)",
+                    self._name, self.integral, self.u_prev
+                )
+
+        # Update deadband state
+        self._in_deadband = in_deadband_now
+
+        if in_deadband_now:
             # In deadband: leak integral slowly and output zero (helps avoid chatter)
             self.integral *= INTEGRAL_LEAK
             self.integral = clamp(self.integral, -i_max, i_max)
@@ -1255,4 +1281,6 @@ class SmartPI:
             "u_limited": round(self._last_u_limited, 6),
             "u_applied": round(self._last_u_applied, 6),
             "aw_du": round(self._last_aw_du, 6),
+            # Deadband state
+            "in_deadband": self._in_deadband,
         }
