@@ -1043,13 +1043,14 @@ class SmartPI:
             self._e_filt = (1 - self._ema_alpha) * self._e_filt + self._ema_alpha * e
 
         # Feed-forward calculation
+        # Use target_temp_internal for coherence with the PI controller (filtered setpoint)
         # For HEAT: positive command; For COOL: invert sign of error/FF (very simplistic)
         t_ext = ext_current_temp if ext_current_temp is not None else current_temp
         if a < 2e-4:
             u_ff = 0.0
         else:
             k_ff = clamp(b / a, 0.0, 3.0)
-            u_ff = clamp(k_ff * (target_temp - t_ext), 0.0, 1.0)
+            u_ff = clamp(k_ff * (target_temp_internal - t_ext), 0.0, 1.0)
 
         if hvac_mode == VThermHvacMode_COOL:
             # Cooling: map to "cooling effort" (this is kept for compatibility; tune as needed)
