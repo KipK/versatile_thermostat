@@ -84,6 +84,10 @@ TAU_CAP_FOR_KI = 200.0
 INTEGRAL_LEAK = 0.995  # leak factor per cycle when inside deadband
 MAX_STEP_PER_CYCLE = 0.15  # max output change per minute (rate limit)
 
+# Tracking anti-windup (back-calculation) tuned for slow thermal systems
+AW_TRACK_TAU_S = 120.0        # tracking time constant in seconds (typ. 60-180s)
+AW_TRACK_MAX_DELTA_I = 5.0    # safety clamp on integral correction per cycle
+
 # Skip cycles after resume from interruption (window, etc.)
 SKIP_CYCLES_AFTER_RESUME = 1
 
@@ -438,6 +442,12 @@ class SmartPI:
 
         # Skip learning cycles after resume from interruption (window close, etc.)
         self._skip_learning_cycles_left: int = 0
+
+        # Tracking anti-windup diagnostics
+        self._last_u_cmd: float = 0.0       # command after [0,1] clamp
+        self._last_u_limited: float = 0.0   # after rate-limit and max_on_percent
+        self._last_u_applied: float = 0.0   # after timing constraints
+        self._last_aw_du: float = 0.0       # tracking delta for diagnostics
 
         if saved_state:
             self.load_state(saved_state)
@@ -1095,25 +1105,72 @@ class SmartPI:
 
         # Combine FF and PI, then clamp to [0,1]
         u_raw = u_ff + u_pi
-        u = clamp(u_raw, 0.0, 1.0)
-        
-        # Store u_pi for diagnostics
+        u_cmd = clamp(u_raw, 0.0, 1.0)
+
+        # Store PI term for diagnostics
         self._last_u_pi = u_pi
+        self._last_u_cmd = u_cmd
+
+        # ------------------------------
+        # Apply constraints (rate-limit, max_on_percent), then timing enforcement
+        # ------------------------------
 
         # Rate limiting: bound command delta per cycle (prevents abrupt power changes)
-        max_step = MAX_STEP_PER_CYCLE
-        u = clamp(u, self.u_prev - max_step, self.u_prev + max_step)
+        # NOTE: MAX_STEP_PER_CYCLE is per minute, dt_min is in minutes
+        max_step = MAX_STEP_PER_CYCLE * dt_min
+        u_limited = clamp(u_cmd, self.u_prev - max_step, self.u_prev + max_step)
 
         # Apply max_on_percent limit if configured
-        if self._max_on_percent is not None and u > self._max_on_percent:
-            u = self._max_on_percent
+        if self._max_on_percent is not None and u_limited > self._max_on_percent:
+            u_limited = self._max_on_percent
 
-        # Store final command
-        self.u_prev = u
-        self._on_percent = u
+        self._last_u_limited = u_limited
 
-        # Update timings, ensuring percent matches the enforced timings
+        # Feed the timing layer with requested duty-cycle; it may enforce 0%/100%
+        # due to min ON/OFF constraints.
+        self._on_percent = u_limited
+
+        # Update timings; this function may change self._on_percent
         self._calculate_times()
+
+        # What is actually realized after timing enforcement
+        u_applied = self._on_percent
+        self._last_u_applied = u_applied
+
+        # ------------------------------
+        # Tracking anti-windup (back-calculation)
+        #
+        # Rationale: conditional integration prevents windup on [0..1] saturation,
+        # but does NOT account for extra constraints (rate limit, max_on_percent,
+        # min ON/OFF timing) that make applied command differ from PI+FF model.
+        # This step re-aligns the integrator to the applied actuator command.
+        # Only apply when NOT in deadband (deadband uses INTEGRAL_LEAK instead).
+        # ------------------------------
+        if (not integrator_hold) and (self.Ki > KI_MIN) and (abs(e) >= self.deadband_c):
+            # Model-predicted command using current integrator state
+            u_model = u_ff + (self.Kp * e_p + self.Ki * self.integral)
+
+            # Tracking error between applied command and model command
+            du = u_applied - u_model
+            self._last_aw_du = du
+
+            # Discrete tracking gain beta = dt / Tt (bounded 0..1)
+            dt_sec = dt_min * 60.0
+            beta = clamp(dt_sec / max(AW_TRACK_TAU_S, dt_sec), 0.0, 1.0)
+
+            # Update integral so that Ki * I compensates du
+            d_integral = beta * (du / self.Ki)
+
+            # Safety clamp (per cycle)
+            d_integral = clamp(d_integral, -AW_TRACK_MAX_DELTA_I, AW_TRACK_MAX_DELTA_I)
+
+            self.integral += d_integral
+            self.integral = clamp(self.integral, -i_max, i_max)
+        else:
+            self._last_aw_du = 0.0
+
+        # Store final applied command for next cycle rate-limiting
+        self.u_prev = u_applied
 
     # ------------------------------
     # Timings and diagnostics
@@ -1193,4 +1250,9 @@ class SmartPI:
             "filtered_setpoint": None if self._filtered_setpoint is None else round(self._filtered_setpoint, 2),
             # Resume skip
             "skip_learning_cycles_left": int(self._skip_learning_cycles_left),
+            # Anti-windup tracking diagnostics
+            "u_cmd": round(self._last_u_cmd, 6),
+            "u_limited": round(self._last_u_limited, 6),
+            "u_applied": round(self._last_u_applied, 6),
+            "aw_du": round(self._last_aw_du, 6),
         }

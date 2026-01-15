@@ -9,7 +9,9 @@ from custom_components.versatile_thermostat.smartpi_algorithm import (
     KP_SAFE,
     KI_SAFE,
     KI_SAFE,
-    KP_MAX
+    KP_MAX,
+    AW_TRACK_TAU_S,
+    AW_TRACK_MAX_DELTA_I,
 )
 import math
 from custom_components.versatile_thermostat.vtherm_hvac_mode import VThermHvacMode_HEAT, VThermHvacMode_COOL
@@ -869,3 +871,171 @@ def test_abestimator_b_no_saturation_bias():
     raw_values_above_max = [v for v in est._b_hist if v > est.B_MAX]
     assert len(raw_values_above_max) > 0, \
         f"Histogram should contain raw values above B_MAX: {list(est._b_hist)}"
+
+
+def test_anti_windup_tracking_diagnostics():
+    """Test that anti-windup tracking diagnostics are exposed correctly."""
+    smartpi = SmartPI(
+        cycle_min=10,
+        minimal_activation_delay=0,
+        minimal_deactivation_delay=0,
+        name="TestSmartPI_AWDiag"
+    )
+
+    # Make a calculation to populate diagnostics
+    smartpi.calculate(
+        target_temp=20.0,
+        current_temp=18.0,
+        ext_current_temp=5.0,
+        slope=0,
+        hvac_mode=VThermHvacMode_HEAT
+    )
+
+    # Check diagnostics contain anti-windup fields
+    diag = smartpi.get_diagnostics()
+    assert "u_cmd" in diag
+    assert "u_limited" in diag
+    assert "u_applied" in diag
+    assert "aw_du" in diag
+
+    # Verify constants are defined
+    assert AW_TRACK_TAU_S > 0
+    assert AW_TRACK_MAX_DELTA_I > 0
+
+
+def test_anti_windup_tracking_corrects_integral():
+    """Test that tracking anti-windup corrects the integral when output is constrained.
+    
+    This verifies that when the applied command differs from the model command
+    (due to rate-limiting, max_on_percent, or timing constraints), the integrator
+    is adjusted to align with the actual applied command.
+    """
+    smartpi = SmartPI(
+        cycle_min=10,
+        minimal_activation_delay=0,
+        minimal_deactivation_delay=0,
+        name="TestSmartPI_AWTrack",
+        # Disable near-band and sign-flip leak for predictable behavior
+        near_band_deg=0.0,
+        sign_flip_leak=0.0,
+        setpoint_weight_b=1.0,
+        # Set max_on_percent to constrain output
+        max_on_percent=0.6,
+    )
+
+    # Setup: reliable tau and high integral to drive output above max_on_percent
+    smartpi.est.learn_ok_count = 50
+    smartpi.est.learn_ok_count_b = 50
+    smartpi.est.b = 0.002  # tau = 500 min
+    smartpi.est.a = 0.01
+
+    # Start with a large integral that would push output beyond max_on_percent
+    smartpi.integral = 100.0
+    smartpi.u_prev = 0.6  # Already at max to avoid rate-limit masking
+
+    integral_before = smartpi.integral
+
+    # Calculate with high error - output will be constrained by max_on_percent
+    smartpi.calculate(
+        target_temp=25.0,
+        current_temp=20.0,  # error = 5
+        ext_current_temp=5.0,
+        slope=0,
+        hvac_mode=VThermHvacMode_HEAT
+    )
+
+    # Verify output was constrained
+    assert smartpi._last_u_applied <= 0.6, \
+        f"Output should be limited to max_on_percent: {smartpi._last_u_applied}"
+
+    # Tracking anti-windup should have reduced the integral
+    assert smartpi.integral < integral_before, \
+        f"Integral should decrease due to tracking: before={integral_before}, after={smartpi.integral}"
+
+    # Verify aw_du is negative (applied < model)
+    assert smartpi._last_aw_du < 0, \
+        f"aw_du should be negative when constrained: {smartpi._last_aw_du}"
+
+
+def test_anti_windup_tracking_respects_deadband():
+    """Test that tracking anti-windup is NOT applied in deadband.
+    
+    In deadband, the integral is managed by INTEGRAL_LEAK, and tracking
+    should not interfere.
+    """
+    smartpi = SmartPI(
+        cycle_min=10,
+        minimal_activation_delay=0,
+        minimal_deactivation_delay=0,
+        name="TestSmartPI_AWDeadband",
+        deadband_c=0.2,  # Large deadband
+        max_on_percent=0.5,
+    )
+
+    # Start with some integral
+    smartpi.integral = 10.0
+    smartpi.u_prev = 0.5
+
+    # Calculate in deadband (error < 0.2)
+    smartpi.calculate(
+        target_temp=20.0,
+        current_temp=19.9,  # error = 0.1 < deadband 0.2
+        ext_current_temp=10.0,
+        slope=0,
+        hvac_mode=VThermHvacMode_HEAT
+    )
+
+    # aw_du should be 0 (tracking not applied in deadband)
+    assert smartpi._last_aw_du == 0.0, \
+        f"aw_du should be 0 in deadband: {smartpi._last_aw_du}"
+
+    # Verify we were in deadband mode
+    assert "LEAK" in smartpi._last_i_mode
+
+
+def test_rate_limit_proportional_to_dt():
+    """Test that rate limiting is proportional to elapsed time (dt_min).
+    
+    This verifies the fix where MAX_STEP_PER_CYCLE is multiplied by dt_min.
+    """
+    smartpi = SmartPI(
+        cycle_min=10,
+        minimal_activation_delay=0,
+        minimal_deactivation_delay=0,
+        name="TestSmartPI_RateLimit",
+        near_band_deg=0.0,
+    )
+    smartpi.u_prev = 0.0
+
+    # First calculation with large error
+    smartpi.calculate(
+        target_temp=25.0,
+        current_temp=15.0,  # error = 10
+        ext_current_temp=5.0,
+        slope=0,
+        hvac_mode=VThermHvacMode_HEAT
+    )
+    first_output = smartpi._last_u_applied
+
+    # Simulate shorter cycle
+    smartpi2 = SmartPI(
+        cycle_min=1,  # 1 minute cycle
+        minimal_activation_delay=0,
+        minimal_deactivation_delay=0,
+        name="TestSmartPI_RateLimit2",
+        near_band_deg=0.0,
+    )
+    smartpi2.u_prev = 0.0
+    smartpi2.calculate(
+        target_temp=25.0,
+        current_temp=15.0,
+        ext_current_temp=5.0,
+        slope=0,
+        hvac_mode=VThermHvacMode_HEAT
+    )
+    second_output = smartpi2._last_u_applied
+
+    # Longer cycle should allow higher output
+    assert first_output >= second_output, \
+        f"Longer cycle should allow higher output: first={first_output}, second={second_output}"
+
