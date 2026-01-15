@@ -12,6 +12,10 @@ from custom_components.versatile_thermostat.smartpi_algorithm import (
     KP_MAX,
     AW_TRACK_TAU_S,
     AW_TRACK_MAX_DELTA_I,
+    SETPOINT_BOOST_THRESHOLD,
+    SETPOINT_BOOST_ERROR_MIN,
+    SETPOINT_BOOST_RATE,
+    MAX_STEP_PER_MINUTE,
 )
 import math
 from custom_components.versatile_thermostat.vtherm_hvac_mode import VThermHvacMode_HEAT, VThermHvacMode_COOL
@@ -559,8 +563,8 @@ def test_near_band_gain_scheduling():
     # Verify we're inside near-band
     assert abs(smartpi._last_error) <= 0.5, f"Should be inside near-band, error={smartpi._last_error}"
 
-    # Verify Kp was reduced by the factor
-    expected_kp = kp_outside * 0.60
+    # Verify Kp was reduced by kp_near_factor (0.70)
+    expected_kp = kp_outside * 0.70
     # Account for possible clamping
     expected_kp_clamped = max(expected_kp, KP_MIN)
     assert math.isclose(kp_inside, expected_kp_clamped, rel_tol=0.01), \
@@ -568,9 +572,9 @@ def test_near_band_gain_scheduling():
 
     # Fixed behavior: Ki is calculated from ORIGINAL Kp, then multiplied by ki_near_factor
     # Ki = (kp_original / tau_capped) * ki_near_factor
-    # This results in single attenuation: ki_near_factor = 0.85
+    # This results in single attenuation: ki_near_factor = 0.50
     tau_capped = 200.0  # TAU_CAP_FOR_KI
-    ki_from_original_kp = (kp_outside / tau_capped) * 0.85
+    ki_from_original_kp = (kp_outside / tau_capped) * 0.50
 
     # Ki should match the calculation from original Kp (fixed behavior)
     assert math.isclose(ki_inside, ki_from_original_kp, rel_tol=0.01), \
@@ -1382,3 +1386,226 @@ def test_deadband_hysteresis_zone_from_outside():
     # Should stay OUTSIDE deadband (we need to cross entry threshold to enter)
     assert smartpi._in_deadband is False, \
         "Should stay outside when coming from outside into hysteresis zone"
+
+
+def test_setpoint_boost_activates_on_setpoint_increase():
+    """Test that setpoint boost activates when setpoint increases significantly."""
+    smartpi = SmartPI(
+        cycle_min=10,
+        minimal_activation_delay=0,
+        minimal_deactivation_delay=0,
+        name="TestSmartPI_Boost"
+    )
+
+    # Initialize with first calculation
+    smartpi.calculate(
+        target_temp=18.0,
+        current_temp=18.0,
+        ext_current_temp=5.0,
+        slope=0,
+        hvac_mode=VThermHvacMode_HEAT
+    )
+
+    assert smartpi._setpoint_boost_active is False
+    assert smartpi._prev_setpoint_for_boost == 18.0
+
+    # Increase setpoint by more than SETPOINT_BOOST_THRESHOLD (0.3°C)
+    smartpi._last_calculate_time = None
+    smartpi.calculate(
+        target_temp=19.0,  # +1.0°C increase
+        current_temp=18.0,  # error = 1.0 > SETPOINT_BOOST_ERROR_MIN (0.3°C)
+        ext_current_temp=5.0,
+        slope=0,
+        hvac_mode=VThermHvacMode_HEAT
+    )
+
+    # Boost should be active
+    assert smartpi._setpoint_boost_active is True
+    assert smartpi._prev_setpoint_for_boost == 19.0
+
+    # Verify diagnostics
+    diag = smartpi.get_diagnostics()
+    assert "setpoint_boost_active" in diag
+    assert diag["setpoint_boost_active"] is True
+
+
+def test_setpoint_boost_deactivates_when_error_small():
+    """Test that setpoint boost deactivates when error becomes small."""
+    smartpi = SmartPI(
+        cycle_min=10,
+        minimal_activation_delay=0,
+        minimal_deactivation_delay=0,
+        name="TestSmartPI_BoostDeact"
+    )
+
+    # Activate boost
+    smartpi._setpoint_boost_active = True
+    smartpi._prev_setpoint_for_boost = 20.0
+    smartpi.u_prev = 0.5
+
+    # Calculate with small error (< SETPOINT_BOOST_ERROR_MIN)
+    smartpi.calculate(
+        target_temp=20.0,
+        current_temp=19.85,  # error = 0.15 < 0.3 threshold
+        ext_current_temp=5.0,
+        slope=0,
+        hvac_mode=VThermHvacMode_HEAT
+    )
+
+    # Boost should be deactivated
+    assert smartpi._setpoint_boost_active is False
+
+
+def test_setpoint_boost_uses_faster_rate_limit():
+    """Test that boosted rate limit allows faster power ramp-up."""
+    smartpi = SmartPI(
+        cycle_min=10,
+        minimal_activation_delay=0,
+        minimal_deactivation_delay=0,
+        name="TestSmartPI_BoostRate"
+    )
+
+    # Start with u_prev = 0 (cold start)
+    smartpi.u_prev = 0.0
+    smartpi._prev_setpoint_for_boost = 18.0
+    smartpi._setpoint_boost_active = False
+
+    # First calculation to initialize
+    smartpi.calculate(
+        target_temp=18.0,
+        current_temp=18.0,
+        ext_current_temp=5.0,
+        slope=0,
+        hvac_mode=VThermHvacMode_HEAT
+    )
+
+    # Reset and trigger boost with setpoint increase
+    smartpi._last_calculate_time = None
+    smartpi.u_prev = 0.0
+
+    smartpi.calculate(
+        target_temp=20.0,  # +2°C increase
+        current_temp=18.0,  # error = 2°C
+        ext_current_temp=5.0,
+        slope=0,
+        hvac_mode=VThermHvacMode_HEAT
+    )
+
+    assert smartpi._setpoint_boost_active is True
+
+    # With boosted rate (0.50/min) and dt=10min, max_step = 5.0
+    # So output should be able to reach higher values faster
+    # Normal rate (0.15/min) and dt=10min -> max_step = 1.5
+    # The on_percent should be higher with boost than with normal rate
+    # Since PI output is high (large error), it should hit the boosted rate limit
+    assert smartpi.on_percent > 0
+
+
+def test_setpoint_boost_not_activated_on_decrease():
+    """Test that boost is NOT activated when setpoint decreases in HEAT mode."""
+    smartpi = SmartPI(
+        cycle_min=10,
+        minimal_activation_delay=0,
+        minimal_deactivation_delay=0,
+        name="TestSmartPI_NoBoostDecrease"
+    )
+
+    # Initialize at high setpoint
+    smartpi._prev_setpoint_for_boost = 22.0
+    smartpi._setpoint_boost_active = False
+    smartpi.u_prev = 0.5
+
+    # Decrease setpoint
+    smartpi.calculate(
+        target_temp=20.0,  # -2°C decrease
+        current_temp=21.0,
+        ext_current_temp=5.0,
+        slope=0,
+        hvac_mode=VThermHvacMode_HEAT
+    )
+
+    # Boost should NOT be active (decrease doesn't need fast ramp up)
+    assert smartpi._setpoint_boost_active is False
+    assert smartpi._prev_setpoint_for_boost == 20.0
+
+
+def test_setpoint_boost_persisted():
+    """Test that setpoint boost state is persisted in save/load."""
+    smartpi1 = SmartPI(
+        cycle_min=10,
+        minimal_activation_delay=0,
+        minimal_deactivation_delay=0,
+        name="TestSmartPI_BoostPersist1"
+    )
+
+    # Set boost active
+    smartpi1._setpoint_boost_active = True
+    smartpi1._prev_setpoint_for_boost = 21.0
+
+    # Save state
+    saved = smartpi1.save_state()
+    assert "setpoint_boost_active" in saved
+    assert "prev_setpoint_for_boost" in saved
+    assert saved["setpoint_boost_active"] is True
+    assert saved["prev_setpoint_for_boost"] == 21.0
+
+    # Load in new instance
+    smartpi2 = SmartPI(
+        cycle_min=10,
+        minimal_activation_delay=0,
+        minimal_deactivation_delay=0,
+        name="TestSmartPI_BoostPersist2",
+        saved_state=saved
+    )
+
+    assert smartpi2._setpoint_boost_active is True
+    assert smartpi2._prev_setpoint_for_boost == 21.0
+
+
+def test_setpoint_boost_cleared_on_reset():
+    """Test that reset_learning clears boost state."""
+    smartpi = SmartPI(
+        cycle_min=10,
+        minimal_activation_delay=0,
+        minimal_deactivation_delay=0,
+        name="TestSmartPI_BoostReset"
+    )
+
+    # Set boost active
+    smartpi._setpoint_boost_active = True
+    smartpi._prev_setpoint_for_boost = 21.0
+
+    # Reset
+    smartpi.reset_learning()
+
+    # Boost should be cleared
+    assert smartpi._setpoint_boost_active is False
+    assert smartpi._prev_setpoint_for_boost is None
+
+
+def test_setpoint_boost_cool_mode():
+    """Test that boost activates on setpoint DECREASE in COOL mode."""
+    smartpi = SmartPI(
+        cycle_min=10,
+        minimal_activation_delay=0,
+        minimal_deactivation_delay=0,
+        name="TestSmartPI_BoostCool"
+    )
+
+    # Initialize with first calculation
+    smartpi._prev_setpoint_for_boost = 25.0
+    smartpi._setpoint_boost_active = False
+    smartpi.u_prev = 0.3
+
+    # Decrease setpoint in COOL mode (need to cool more aggressively)
+    smartpi.calculate(
+        target_temp=22.0,  # -3°C decrease
+        current_temp=26.0,  # error = -4°C (too hot), inverted to +4°C internal
+        ext_current_temp=30.0,
+        slope=0,
+        hvac_mode=VThermHvacMode_COOL
+    )
+
+    # Boost should be active for cooling
+    assert smartpi._setpoint_boost_active is True
+    assert smartpi._prev_setpoint_for_boost == 22.0

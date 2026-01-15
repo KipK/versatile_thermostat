@@ -84,6 +84,12 @@ TAU_CAP_FOR_KI = 200.0
 INTEGRAL_LEAK = 0.995  # leak factor per cycle when inside deadband
 MAX_STEP_PER_MINUTE = 0.15  # max output change per minute (rate limit)
 
+# Setpoint step boost: faster rate limit when setpoint changes significantly
+# This allows quick power ramp-up when user increases setpoint
+SETPOINT_BOOST_THRESHOLD = 0.3   # min setpoint change (°C) to trigger boost
+SETPOINT_BOOST_ERROR_MIN = 0.3   # min error (°C) to keep boost active
+SETPOINT_BOOST_RATE = 0.50       # boosted rate limit (/min) vs 0.15 normal
+
 # Tracking anti-windup (back-calculation) tuned for slow thermal systems
 AW_TRACK_TAU_S = 120.0        # tracking time constant in seconds (typ. 60-180s)
 AW_TRACK_MAX_DELTA_I = 5.0    # safety clamp on integral correction per cycle
@@ -456,6 +462,10 @@ class SmartPI:
         self._last_u_applied: float = 0.0   # after timing constraints
         self._last_aw_du: float = 0.0       # tracking delta for diagnostics
 
+        # Setpoint step boost state (for fast power ramp-up on setpoint change)
+        self._setpoint_boost_active: bool = False
+        self._prev_setpoint_for_boost: Optional[float] = None
+
         if saved_state:
             self.load_state(saved_state)
         
@@ -485,6 +495,8 @@ class SmartPI:
         self._learning_start_date = datetime.now()
         self._skip_learning_cycles_left = 0
         self._in_deadband = False
+        self._setpoint_boost_active = False
+        self._prev_setpoint_for_boost = None
         _LOGGER.info("%s - SmartPI learning and history reset", self._name)
 
     def notify_resume_after_interruption(self, skip_cycles: int = None) -> None:
@@ -595,6 +607,15 @@ class SmartPI:
             # Load deadband state
             self._in_deadband = bool(state.get("in_deadband", False))
 
+            # Load setpoint boost state
+            self._setpoint_boost_active = bool(state.get("setpoint_boost_active", False))
+            prev_sp = state.get("prev_setpoint_for_boost")
+            if prev_sp is not None:
+                try:
+                    self._prev_setpoint_for_boost = float(prev_sp)
+                except (ValueError, TypeError):
+                    self._prev_setpoint_for_boost = None
+
             # Mark that state was loaded (not fresh init)
             self.est.learn_last_reason = "loaded"
 
@@ -628,6 +649,8 @@ class SmartPI:
             "initial_temp_for_filter": self._initial_temp_for_filter,
             "skip_learning_cycles_left": self._skip_learning_cycles_left,
             "in_deadband": self._in_deadband,
+            "setpoint_boost_active": self._setpoint_boost_active,
+            "prev_setpoint_for_boost": self._prev_setpoint_for_boost,
         }
 
     # ------------------------------
@@ -1163,8 +1186,51 @@ class SmartPI:
         # Apply constraints (rate-limit, max_on_percent), then timing enforcement
         # ------------------------------
 
+        # Setpoint step boost: detect significant setpoint increase (HEAT) or decrease (COOL)
+        # and apply faster rate limit to allow quick power ramp-up
+        if self._prev_setpoint_for_boost is None:
+            self._prev_setpoint_for_boost = target_temp
+
+        sp_delta = target_temp - self._prev_setpoint_for_boost
+
+        # Detect setpoint change that should trigger boost
+        if hvac_mode == VThermHvacMode_HEAT and sp_delta >= SETPOINT_BOOST_THRESHOLD:
+            # Setpoint increased in HEAT mode - activate boost
+            self._setpoint_boost_active = True
+            self._prev_setpoint_for_boost = target_temp
+            _LOGGER.debug(
+                "%s - Setpoint boost activated: setpoint +%.2f°C",
+                self._name, sp_delta
+            )
+        elif hvac_mode == VThermHvacMode_COOL and sp_delta <= -SETPOINT_BOOST_THRESHOLD:
+            # Setpoint decreased in COOL mode - activate boost
+            self._setpoint_boost_active = True
+            self._prev_setpoint_for_boost = target_temp
+            _LOGGER.debug(
+                "%s - Setpoint boost activated: setpoint %.2f°C",
+                self._name, sp_delta
+            )
+        elif abs(sp_delta) > 0.01:
+            # Setpoint changed but not in boost direction - just track it
+            self._prev_setpoint_for_boost = target_temp
+            self._setpoint_boost_active = False
+
+        # Deactivate boost when error becomes small enough
+        if self._setpoint_boost_active and abs(e) < SETPOINT_BOOST_ERROR_MIN:
+            self._setpoint_boost_active = False
+            _LOGGER.debug(
+                "%s - Setpoint boost deactivated: error %.3f°C < threshold",
+                self._name, abs(e)
+            )
+
+        # Select rate limit based on boost state
+        if self._setpoint_boost_active:
+            rate_limit = SETPOINT_BOOST_RATE
+        else:
+            rate_limit = MAX_STEP_PER_MINUTE
+
         # Rate limiting: bound command delta per cycle (prevents abrupt power changes)
-        max_step = MAX_STEP_PER_MINUTE * dt_min
+        max_step = rate_limit * dt_min
         u_limited = clamp(u_cmd, self.u_prev - max_step, self.u_prev + max_step)
 
         # Apply max_on_percent limit if configured
@@ -1304,4 +1370,6 @@ class SmartPI:
             "aw_du": round(self._last_aw_du, 6),
             # Deadband state
             "in_deadband": self._in_deadband,
+            # Setpoint boost state
+            "setpoint_boost_active": self._setpoint_boost_active,
         }
