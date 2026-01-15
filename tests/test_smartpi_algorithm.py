@@ -1222,3 +1222,164 @@ def test_reset_learning_clears_in_deadband():
 
     # Should be cleared
     assert smartpi._in_deadband is False
+
+
+def test_deadband_hysteresis_entry_and_exit():
+    """Test that deadband uses hysteresis for entry and exit.
+    
+    Hysteresis behavior:
+    - Enter deadband when |e| < deadband_c
+    - Exit deadband only when |e| > deadband_c * DEADBAND_EXIT_MULT (1.5)
+    - In between (hysteresis zone), maintain previous state
+    """
+    from custom_components.versatile_thermostat.smartpi_algorithm import DEADBAND_EXIT_MULT
+
+    deadband_c = 0.10  # 0.1°C deadband
+    exit_threshold = deadband_c * DEADBAND_EXIT_MULT  # 0.15°C
+
+    smartpi = SmartPI(
+        cycle_min=10,
+        minimal_activation_delay=0,
+        minimal_deactivation_delay=0,
+        name="TestSmartPI_Hysteresis",
+        deadband_c=deadband_c,
+        near_band_deg=0.0,
+    )
+
+    # Start outside deadband (error = 0.3 > exit threshold)
+    smartpi._in_deadband = False
+    smartpi.u_prev = 0.4
+    smartpi.calculate(
+        target_temp=20.0,
+        current_temp=19.7,  # error = 0.3 > 0.15 (exit threshold)
+        ext_current_temp=10.0,
+        slope=0,
+        hvac_mode=VThermHvacMode_HEAT
+    )
+    assert smartpi._in_deadband is False, "Should stay outside deadband"
+
+    # Enter deadband (error = 0.05 < entry threshold 0.10)
+    smartpi._last_calculate_time = None
+    smartpi.calculate(
+        target_temp=20.0,
+        current_temp=19.95,  # error = 0.05 < 0.10 (entry threshold)
+        ext_current_temp=10.0,
+        slope=0,
+        hvac_mode=VThermHvacMode_HEAT
+    )
+    assert smartpi._in_deadband is True, "Should enter deadband"
+
+    # Move to hysteresis zone (0.10 <= error <= 0.15) - should STAY in deadband
+    smartpi._last_calculate_time = None
+    smartpi.calculate(
+        target_temp=20.0,
+        current_temp=19.88,  # error = 0.12, in hysteresis zone
+        ext_current_temp=10.0,
+        slope=0,
+        hvac_mode=VThermHvacMode_HEAT
+    )
+    assert smartpi._in_deadband is True, "Should stay in deadband (hysteresis zone)"
+
+    # Still in hysteresis zone, still should stay in deadband
+    smartpi._last_calculate_time = None
+    smartpi.calculate(
+        target_temp=20.0,
+        current_temp=19.86,  # error = 0.14, still in hysteresis zone
+        ext_current_temp=10.0,
+        slope=0,
+        hvac_mode=VThermHvacMode_HEAT
+    )
+    assert smartpi._in_deadband is True, "Should stay in deadband (hysteresis zone)"
+
+    # Exit deadband (error = 0.20 > exit threshold 0.15)
+    smartpi._last_calculate_time = None
+    smartpi.calculate(
+        target_temp=20.0,
+        current_temp=19.80,  # error = 0.20 > 0.15 (exit threshold)
+        ext_current_temp=10.0,
+        slope=0,
+        hvac_mode=VThermHvacMode_HEAT
+    )
+    assert smartpi._in_deadband is False, "Should exit deadband"
+
+
+def test_deadband_hysteresis_prevents_chattering():
+    """Test that hysteresis prevents rapid toggling at deadband boundary.
+    
+    Without hysteresis, oscillating between error=0.09 and 0.11 would cause
+    rapid entry/exit. With hysteresis (exit at 0.15), we stay in deadband.
+    """
+    smartpi = SmartPI(
+        cycle_min=10,
+        minimal_activation_delay=0,
+        minimal_deactivation_delay=0,
+        name="TestSmartPI_NoChatter",
+        deadband_c=0.10,  # Entry threshold
+        near_band_deg=0.0,
+    )
+
+    # Enter deadband
+    smartpi.calculate(
+        target_temp=20.0,
+        current_temp=19.95,  # error = 0.05 < 0.10
+        ext_current_temp=10.0,
+        slope=0,
+        hvac_mode=VThermHvacMode_HEAT
+    )
+    assert smartpi._in_deadband is True
+
+    # Simulate oscillation around old boundary (0.09 to 0.11)
+    # These should all stay in deadband due to hysteresis
+    for current_temp in [19.91, 19.89, 19.91, 19.89, 19.90]:
+        smartpi._last_calculate_time = None
+        smartpi.calculate(
+            target_temp=20.0,
+            current_temp=current_temp,  # errors: 0.09, 0.11, 0.09, 0.11, 0.10
+            ext_current_temp=10.0,
+            slope=0,
+            hvac_mode=VThermHvacMode_HEAT
+        )
+        # All should stay in deadband because none exceed exit threshold (0.15)
+        assert smartpi._in_deadband is True, \
+            f"Should stay in deadband during oscillation at temp={current_temp}"
+
+
+def test_deadband_hysteresis_zone_from_outside():
+    """Test that starting outside and entering hysteresis zone stays outside.
+    
+    If we start outside deadband and move into the hysteresis zone
+    (without crossing the entry threshold), we should stay outside.
+    """
+    smartpi = SmartPI(
+        cycle_min=10,
+        minimal_activation_delay=0,
+        minimal_deactivation_delay=0,
+        name="TestSmartPI_OutsideHyst",
+        deadband_c=0.10,
+        near_band_deg=0.0,
+    )
+
+    # Start clearly outside deadband
+    smartpi._in_deadband = False
+    smartpi.u_prev = 0.4
+    smartpi.calculate(
+        target_temp=20.0,
+        current_temp=19.7,  # error = 0.3 > exit threshold
+        ext_current_temp=10.0,
+        slope=0,
+        hvac_mode=VThermHvacMode_HEAT
+    )
+    assert smartpi._in_deadband is False
+
+    # Move into hysteresis zone (0.10 < error < 0.15) from outside
+    smartpi._last_calculate_time = None
+    smartpi.calculate(
+        target_temp=20.0,
+        current_temp=19.88,  # error = 0.12, in hysteresis zone
+        ext_current_temp=10.0,
+        slope=0,
+        hvac_mode=VThermHvacMode_HEAT
+    )
+    # Should stay OUTSIDE deadband (we need to cross entry threshold to enter)
+    assert smartpi._in_deadband is False, \
+        "Should stay outside when coming from outside into hysteresis zone"

@@ -91,8 +91,12 @@ AW_TRACK_MAX_DELTA_I = 5.0    # safety clamp on integral correction per cycle
 # Skip cycles after resume from interruption (window, etc.)
 SKIP_CYCLES_AFTER_RESUME = 1
 
-# Default deadband around setpoint ("C)
+# Default deadband around setpoint (°C)
 DEFAULT_DEADBAND_C = 0.05
+
+# Hysteresis multiplier for deadband exit (reduces oscillations at boundary)
+# Enter deadband at |e| < deadband_c, exit only when |e| > deadband_c * this factor
+DEADBAND_EXIT_MULT = 1.5
 
 # Asymmetric setpoint EMA filter parameters
 SP_ALPHA_SLOW = 0.05   # EMA alpha for small setpoint increases
@@ -1074,7 +1078,23 @@ class SmartPI:
             self.integral = clamp(self.integral, -i_max, i_max)
 
         # --- PI control with anti-windup ---
-        in_deadband_now = abs(e) < self.deadband_c
+        # Deadband with hysteresis to reduce oscillations at boundary:
+        # - Enter deadband when |e| < deadband_c
+        # - Exit deadband only when |e| > deadband_c * DEADBAND_EXIT_MULT
+        # - In the hysteresis zone, maintain previous state
+        abs_e = abs(e)
+        db_entry = self.deadband_c
+        db_exit = self.deadband_c * DEADBAND_EXIT_MULT
+
+        if abs_e < db_entry:
+            # Clearly inside deadband
+            in_deadband_now = True
+        elif abs_e > db_exit:
+            # Clearly outside deadband
+            in_deadband_now = False
+        else:
+            # In hysteresis zone: maintain previous state
+            in_deadband_now = self._in_deadband
 
         # Bumpless transfer: on deadband exit, re-initialize integral
         # so that u_ff + Kp*e_p + Ki*I = u_prev (no output discontinuity)
