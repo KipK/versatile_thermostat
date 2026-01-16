@@ -82,3 +82,46 @@ def test_smartpi_gain_adaptation():
     # Fast system should have lower Kp (it responds quickly)
     # Based on formula: Kp = 0.35 + 0.9 * sqrt(tau/200)
     assert kp_fast < kp_slow, f"Kp_fast ({kp_fast}) should be < Kp_slow ({kp_slow})"
+
+
+def test_smartpi_consistency_check():
+    """Test that consistency check rejects solar gain outliers but accepts drift."""
+    est = ABEstimator()
+
+    # 1. Warm-up phase (need CONSISTENCY_MIN_SAMPLES, default 10)
+    # Train 'b' to a stable value of 0.002
+    # dT = -b * delta. With delta=10, dT should be -0.02
+    for _ in range(50):
+        est.learn(dT_int_per_min=-0.02, u=0.0, t_int=20.0, t_ext=10.0)
+
+    assert est.learn_ok_count_b >= 10
+    stable_b = est.b
+    assert 0.0019 < stable_b < 0.0021
+
+    # 2. Solar Event (Outlier)
+    # Sun hits: effective losses drop to near zero or even negative (heating)
+    # Let's say effective b becomes 0.0001 (20x smaller)
+    # dT = -0.0001 * 10 = -0.001
+    # This implies b_meas = 0.0001
+    # Current b is ~0.002. Diff is 0.0019, which is ~95% of b.
+    # Threshold is 50%. So this should be REJECTED.
+    
+    prev_skip_count = est.learn_skip_count
+    est.learn(dT_int_per_min=-0.001, u=0.0, t_int=20.0, t_ext=10.0)
+    
+    assert est.learn_skip_count == prev_skip_count + 1
+    assert "consistency" in est.learn_last_reason
+    assert est.b == stable_b, "b should not change on outlier"
+
+    # 3. Small Drift (Acceptable)
+    # Insulation improves slightly, b drops by 10% (to 0.0018)
+    # dT = -0.0018 * 10 = -0.018
+    # This implies b_meas = 0.0018. Diff is 0.0002.
+    # 0.0002 / 0.002 = 10% change. << 50%. Should be ACCEPTED.
+    est.learn(dT_int_per_min=-0.018, u=0.0, t_int=20.0, t_ext=10.0)
+
+    assert est.learn_skip_count == prev_skip_count + 1, "Should not skip valid drift"
+    assert "update:b" in est.learn_last_reason
+    # NOTE: We do not assert est.b < stable_b here because the median filter (size 30)
+    # prevents a single sample from moving the estimate. The fact that it was NOT skipped
+    # (verified above) is sufficient to prove the consistency check allowed it.

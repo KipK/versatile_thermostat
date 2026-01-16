@@ -165,6 +165,11 @@ class ABEstimator:
     ALPHA_A: float = 0.15
     ALPHA_B: float = 0.12
 
+    # Consistency check: reject measurements deviating too much from stable value
+    CONSISTENCY_THRESHOLD: float = 0.5  # 50% max deviation allowed per sample
+    CONSISTENCY_MIN_SAMPLES: int = 10   # Min samples before applying consistency check
+
+
     def reset(self) -> None:
         """Reset learned parameters and history to initial values."""
         self.a = self.A_INIT
@@ -237,6 +242,17 @@ class ABEstimator:
                 self.learn_last_reason = "skip:b: measured b <= 0"
                 return
 
+            # Consistency check (outlier rejection for solar gain, etc.)
+            # If we have enough history, reject measurements that deviate too much
+            # from the current established model (e.g. > 50% change).
+            if self.learn_ok_count_b >= self.CONSISTENCY_MIN_SAMPLES:
+                diff = abs(b_meas - self.b)
+                threshold = self.b * self.CONSISTENCY_THRESHOLD
+                if diff > threshold:
+                    self.learn_skip_count += 1
+                    self.learn_last_reason = f"skip:b:consistency({b_meas:.6f} vs {self.b:.6f})"
+                    return
+
             # Store raw measurement for median calculation (no clamp here)
             # Clamping before median would bias it toward bounds
             self._b_hist.append(b_meas)
@@ -276,6 +292,15 @@ class ABEstimator:
                 self.learn_skip_count += 1
                 self.learn_last_reason = "skip:a: measured a <= 0"
                 return
+
+            # Consistency check (outlier rejection for solar gain, etc.)
+            if self.learn_ok_count_a >= self.CONSISTENCY_MIN_SAMPLES:
+                diff = abs(a_meas - self.a)
+                threshold = self.a * self.CONSISTENCY_THRESHOLD
+                if diff > threshold:
+                    self.learn_skip_count += 1
+                    self.learn_last_reason = f"skip:a:consistency({a_meas:.6f} vs {self.a:.6f})"
+                    return
 
             # Store raw measurement for median calculation (no clamp here)
             # Clamping before median would bias it toward bounds
