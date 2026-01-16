@@ -808,24 +808,24 @@ def test_abestimator_no_saturation_bias():
         # (dT_int_per_min, u, t_int, t_ext)
         # a_meas = (dt + b*delta) / u
         # With b=0.002 and delta=10, b*delta=0.02
-        (0.03, 0.5, 18.0, 8.0),   # a_meas = (0.03 + 0.02) / 0.5 = 0.10 (exceeds A_MAX)
-        (0.02, 0.5, 18.0, 8.0),   # a_meas = (0.02 + 0.02) / 0.5 = 0.08 (exceeds A_MAX)
-        (0.01, 0.5, 18.0, 8.0),   # a_meas = (0.01 + 0.02) / 0.5 = 0.06 (exceeds A_MAX)
-        (0.005, 0.5, 18.0, 8.0),  # a_meas = (0.005 + 0.02) / 0.5 = 0.05 (at A_MAX)
+        (0.05, 0.5, 18.0, 8.0),   # a_meas = (0.05 + 0.02) / 0.5 = 0.14 (exceeds A_MAX=0.1)
+        (0.04, 0.5, 18.0, 8.0),   # a_meas = (0.04 + 0.02) / 0.5 = 0.12 (exceeds A_MAX=0.1)
+        (0.03, 0.5, 18.0, 8.0),   # a_meas = (0.03 + 0.02) / 0.5 = 0.10 (at A_MAX)
+        (0.02, 0.5, 18.0, 8.0),   # a_meas = (0.02 + 0.02) / 0.5 = 0.08 (below A_MAX)
+        (0.01, 0.5, 18.0, 8.0),   # a_meas = (0.01 + 0.02) / 0.5 = 0.06 (below A_MAX)
+        (0.005, 0.5, 18.0, 8.0),  # a_meas = (0.005 + 0.02) / 0.5 = 0.05 (below A_MAX)
         (0.003, 0.5, 18.0, 8.0),  # a_meas = (0.003 + 0.02) / 0.5 = 0.046 (below A_MAX)
-        (0.002, 0.5, 18.0, 8.0),  # a_meas = (0.002 + 0.02) / 0.5 = 0.044 (below A_MAX)
-        (0.001, 0.5, 18.0, 8.0),  # a_meas = (0.001 + 0.02) / 0.5 = 0.042 (below A_MAX)
     ]
     
     for dt, u, t_int, t_ext in measurements:
         est.learn(dT_int_per_min=dt, u=u, t_int=t_int, t_ext=t_ext)
     
-    # With raw values stored, median of [0.10, 0.08, 0.06, 0.05, 0.046, 0.044, 0.042]
-    # = 0.05 (center value)
+    # With raw values stored, median of [0.14, 0.12, 0.10, 0.08, 0.06, 0.05, 0.046]
+    # = 0.08 (center value)
     # But EWMA converges slowly, and with our values, the final 'a' should NOT be
     # saturated at exactly A_MAX due to the unbiased median
     
-    # Key assertion: a should be clamped at A_MAX (0.05) but the histogram
+    # Key assertion: a should be clamped at A_MAX (0.1) but the histogram
     # should contain raw values, some exceeding A_MAX
     assert est.a <= est.A_MAX, f"a should be clamped at A_MAX: {est.a}"
     
@@ -838,9 +838,9 @@ def test_abestimator_no_saturation_bias():
     # The median of the raw values should be calculated correctly
     import statistics
     actual_median = statistics.median(est._a_hist)
-    # With the measurements above, median is around 0.05-0.06
+    # With the measurements above, median is around 0.08
     # The point is that the median is calculated on raw values, not clamped values
-    assert actual_median <= 0.07, f"Median should be reasonable: {actual_median}"
+    assert actual_median <= 0.10, f"Median should be reasonable: {actual_median}"
 
 
 def test_abestimator_b_no_saturation_bias():

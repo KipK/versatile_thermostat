@@ -155,7 +155,7 @@ class ABEstimator:
 
     # Robust bounds (conservative; tune to your installation)
     A_MIN: float = 1e-5
-    A_MAX: float = 0.05
+    A_MAX: float = 0.1
     B_MIN: float = 1e-5
     B_MAX: float = 0.05
 
@@ -213,11 +213,11 @@ class ABEstimator:
             self.learn_last_reason = "skip: slope outlier"
             return
 
-        # Noise rejection: slope too small to be informative
-        if abs(dt) < min_dT_per_min:
-            self.learn_skip_count += 1
-            self.learn_last_reason = "skip: slope too small (noise)"
-            return
+        # NOTE: No noise filter (min_dT_per_min) here anymore.
+        # Filtering small slopes created a systematic upward bias by excluding
+        # equilibrium measurements. The median + EWMA provide sufficient robustness
+        # against sensor noise. Existing guards (a_meas <= 0, b_meas <= 0, delta checks)
+        # still protect against invalid measurements.
 
         # === PHASE OFF: Learn b when u < 0.05 ===
         # Model simplifies to: dT/dt = -b * (T_int - T_ext)
