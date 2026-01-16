@@ -366,9 +366,9 @@ class SmartPI:
         ff_scale_unreliable_max: float = 0.30,
         # --- Servo overshoot suppression knobs ---
         setpoint_weight_b: float = 0.3,
-        near_band_deg: float = 0.50,
-        kp_near_factor: float = 0.70,
-        ki_near_factor: float = 0.50,
+        near_band_deg: float = 0.30,
+        kp_near_factor: float = 0.80,
+        ki_near_factor: float = 0.40,
         sign_flip_leak: float = 0.40,
         sign_flip_leak_cycles: int = 3,
         sign_flip_band_mult: float = 2.0,
