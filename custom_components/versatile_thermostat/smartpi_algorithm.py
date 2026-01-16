@@ -100,9 +100,11 @@ SKIP_CYCLES_AFTER_RESUME = 1
 # Default deadband around setpoint (°C)
 DEFAULT_DEADBAND_C = 0.05
 
-# Hysteresis multiplier for deadband exit (reduces oscillations at boundary)
-# Enter deadband at |e| < deadband_c, exit only when |e| > deadband_c * this factor
-DEADBAND_EXIT_MULT = 1.5
+# Absolute hysteresis for deadband exit (reduces oscillations at boundary)
+# Enter deadband at |e| < deadband_c, exit only when |e| > deadband_c + hysteresis
+# Using absolute value (not multiplicative) ensures consistent behavior across
+# different deadband configurations and typical sensor noise levels.
+DEADBAND_HYSTERESIS = 0.025
 
 # Asymmetric setpoint EMA filter parameters
 SP_ALPHA_SLOW = 0.05   # EMA alpha for small setpoint increases
@@ -1105,11 +1107,11 @@ class SmartPI:
         # --- PI control with anti-windup ---
         # Deadband with hysteresis to reduce oscillations at boundary:
         # - Enter deadband when |e| < deadband_c
-        # - Exit deadband only when |e| > deadband_c * DEADBAND_EXIT_MULT
+        # - Exit deadband only when |e| > deadband_c + DEADBAND_HYSTERESIS
         # - In the hysteresis zone, maintain previous state
         abs_e = abs(e)
         db_entry = self.deadband_c
-        db_exit = self.deadband_c * DEADBAND_EXIT_MULT
+        db_exit = self.deadband_c + DEADBAND_HYSTERESIS
 
         if abs_e < db_entry:
             # Clearly inside deadband
