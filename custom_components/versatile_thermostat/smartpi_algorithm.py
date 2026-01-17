@@ -82,7 +82,7 @@ TAU_CAP_FOR_KI = 200.0
 
 # Anti-windup / integrator behavior
 INTEGRAL_LEAK = 0.995  # leak factor per cycle when inside deadband
-MAX_STEP_PER_MINUTE = 0.15  # max output change per minute (rate limit)
+MAX_STEP_PER_MINUTE = 0.25  # max output change per minute (rate limit)
 
 # Setpoint step boost: faster rate limit when setpoint changes significantly
 # This allows quick power ramp-up when user increases setpoint
@@ -157,7 +157,7 @@ class ABEstimator:
 
     # Robust bounds (conservative; tune to your installation)
     A_MIN: float = 1e-5
-    A_MAX: float = 0.05
+    A_MAX: float = 0.1
     B_MIN: float = 1e-5
     B_MAX: float = 0.05
 
