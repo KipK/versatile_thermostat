@@ -2,6 +2,8 @@
 
 import logging
 import pytest
+import random
+import statistics
 from unittest.mock import MagicMock
 from custom_components.versatile_thermostat.smartpi_algorithm import (
     SmartPI,
@@ -174,48 +176,66 @@ def test_abestimator_learn_b_off():
     # With T_int = 20, T_ext = 10, delta = 10
     # If b = 0.001, then dT/dt = -0.001 * 10 = -0.01 (cooling)
     
-    est.learn(
-        dT_int_per_min=-0.01,  # Cooling
-        u=0.0,  # OFF phase (u < 0.05)
-        t_int=20.0,
-        t_ext=10.0
-    )
+    # Need > 5 points to start learning
+    # We vary t_ext AND dT to create a consistent slope AND add noise
+    # Noise is critical to allow 'mad' to be non-zero and permit initial bias to pass gating
+    random.seed(42)
+    b_target = 0.001
     
-    assert est.learn_ok_count == 1
-    assert "update:b(off)" in est.learn_last_reason
-    # b should be learned: b = -(-0.01) / 10 = 0.001
-    assert est.b > 0
+    for i in range(10): # More points to ensuring learning triggers
+        delta = 10.0 + i * 0.5
+        # Ideal dT = -b * delta
+        # Add noise to creating non-zero sigma
+        noise = random.uniform(-0.0005, 0.0005)
+        dt_val = -b_target * delta + noise
+        
+        est.learn(
+            dT_int_per_min=dt_val,  # Cooling
+            u=0.0,  # OFF phase
+            t_int=20.0,
+            t_ext=20.0 - delta
+        )
+    
+    assert est.learn_ok_count > 0
+    assert "learned b" in est.learn_last_reason
+    # b should be learned
+    assert math.isclose(est.b, b_target, rel_tol=0.20) # Looser tol due to noise
 
 
 def test_abestimator_learn_a_on():
     """Test learning of a during ON phases (u > 0.20)."""
     est = ABEstimator()
+    random.seed(42)
     
-    # First, learn b during OFF phase so it's not 0
-    est.learn(
-        dT_int_per_min=-0.01,
-        u=0.0,
-        t_int=20.0,
-        t_ext=10.0
-    )
-    assert est.b > 0, "b should be learned first"
+    # First, learn b manually or via loop
+    est.b = 0.001
+    est.learn_ok_count_b = 10
     
-    # ON phase: u = 0.5 (strong heating)
-    # Model: dT/dt = a*u - b*(T_int - T_ext)
-    # With b already learned, we can estimate a
-    # dT/dt = 0.01 (heating), u = 0.5, b = 0.001, delta = 10
-    # a = (dT/dt + b*delta) / u = (0.01 + 0.001*10) / 0.5 = 0.02 / 0.5 = 0.04
+    # ON phase
+    target_a = 0.04
+    b_used = est.b
     
-    est.learn(
-        dT_int_per_min=0.01,  # Heating
-        u=0.5,  # ON phase (u > 0.20)
-        t_int=20.0,
-        t_ext=10.0
-    )
+    for i in range(10):
+        # Vary u to get slope
+        u_val = 0.4 + i * 0.05
+        # const delta
+        t_ext = 10.0
+        delta = 20.0 - t_ext # 10
+        
+        # dT = a*u - b*delta
+        noise = random.uniform(-0.0005, 0.0005)
+        dt_val = target_a * u_val - b_used * delta + noise
+        
+        est.learn(
+            dT_int_per_min=dt_val,
+            u=u_val,
+            t_int=20.0,
+            t_ext=t_ext
+        )
     
-    assert est.learn_ok_count == 2
-    assert "update:a(on)" in est.learn_last_reason
-    assert est.a > 0
+    assert est.learn_ok_count_a > 0
+    assert "learned a" in est.learn_last_reason
+    assert math.isclose(est.a, target_a, rel_tol=0.20)
 
 
 def test_abestimator_skip_gray_zone():
@@ -230,29 +250,36 @@ def test_abestimator_skip_gray_zone():
     )
     
     assert est.learn_ok_count == 0
-    assert "gray zone" in est.learn_last_reason
+    assert "skip: low excitation" in est.learn_last_reason
 
 
 def test_abestimator_learn_b_off_phase():
     """Test that b is learned during OFF phase (u < 0.05)."""
     est = ABEstimator()
+    random.seed(42)
+    b_target = 0.001
     
-    est.learn(
-        dT_int_per_min=-0.01,  # Cooling
-        u=0.01,  # OFF phase (u < 0.05)
-        t_int=19.0,
-        t_ext=10.0
-    )
+    for i in range(10):
+        delta = 10.0 + i * 0.2
+        noise = random.uniform(-0.0005, 0.0005)
+        dt_val = -b_target * delta + noise
+        
+        est.learn(
+            dT_int_per_min=dt_val,  # Cooling
+            u=0.01,  # OFF phase (u < 0.05)
+            t_int=19.0,
+            t_ext=19.0 - delta
+        )
     
     # Should learn b in OFF phase, not skip
-    assert est.learn_ok_count == 1
-    assert "update:b(off)" in est.learn_last_reason
+    assert est.learn_ok_count > 0
+    assert "learned b" in est.learn_last_reason
 
 
 def test_tau_reliability_not_enough_learns():
     """Test tau reliability when not enough learns."""
     est = ABEstimator()
-    est.learn_ok_count = 5  # < 10 needed
+    est.learn_ok_count_b = 5  # < 10 needed
     
     tau_info = est.tau_reliability()
     
@@ -264,15 +291,18 @@ def test_tau_reliability_ok():
     """Test tau reliability when conditions are met."""
     est = ABEstimator()
     
-    # Inject reliable values
-    est.learn_ok_count = 15
+    # Inject reliable history manually to bypass learning logic
     est.learn_ok_count_b = 15
-    est.b = 0.002  # tau = 500
+    est.b = 0.002
+    
+    # Fill history with consistent b values
+    for _ in range(10):
+        est._b_hat_hist.append(0.002)
     
     tau_info = est.tau_reliability()
     
     assert tau_info.reliable
-    assert tau_info.tau_min == 500.0
+    assert math.isclose(tau_info.tau_min, 500.0, rel_tol=1e-3)
 
 
 def test_save_and_load_state():
@@ -288,8 +318,9 @@ def test_save_and_load_state():
     smartpi1.est.a = 0.015
     smartpi1.est.b = 0.003
     smartpi1.est.learn_ok_count = 10
-    smartpi1.est._b_hist.append(0.003)
-    smartpi1.est._b_hist.append(0.0031)
+    # _b_pts stores (delta, y)
+    smartpi1.est._b_pts.append((10.0, 0.03))
+    smartpi1.est._b_pts.append((10.0, 0.031))
     smartpi1.integral = 5.0
     smartpi1.u_prev = 0.6
     
@@ -307,7 +338,7 @@ def test_save_and_load_state():
     assert smartpi2.est.a == 0.015
     assert smartpi2.est.b == 0.003
     assert smartpi2.est.learn_ok_count == 10
-    assert len(smartpi2.est._b_hist) == 2
+    assert len(smartpi2.est._b_pts) == 2
     assert smartpi2.integral == 5.0
     assert smartpi2.u_prev == 0.6
 
@@ -407,6 +438,9 @@ def test_heuristic_gains_reliable_tau():
     smartpi.est.learn_ok_count = 15
     smartpi.est.learn_ok_count_b = 15
     smartpi.est.b = 0.002
+    # Populate history for robust check
+    for _ in range(10):
+        smartpi.est._b_hat_hist.append(0.002)
     
     # calculate() triggers tau_reliability check inside
     smartpi.calculate(
@@ -531,6 +565,9 @@ def test_near_band_gain_scheduling():
     smartpi.est.learn_ok_count = 15
     smartpi.est.learn_ok_count_b = 15
     smartpi.est.b = 0.002
+    # Populate history for robust check
+    for _ in range(10):
+        smartpi.est._b_hat_hist.append(0.002)
 
     # First calculate outside near-band to get baseline gains
     smartpi.calculate(
@@ -784,96 +821,108 @@ def test_reset_learning_clears_skip_counter():
 
 
 def test_abestimator_no_saturation_bias():
-    """Test that raw values in histogram prevent saturation bias.
+    """Test that raw points are stored, preventing clamping bias.
     
-    This test verifies the fix for the saturation issue where parameter 'a'
-    would drift toward A_MAX when many measurements exceed the limit.
-    
-    Before fix: Values were clamped BEFORE storing in histogram, so if >50%
-    of measurements exceeded A_MAX, the median would also be A_MAX.
-    
-    After fix: Raw values are stored, median reflects true center, and only
-    the final EWMA result is clamped.
+    In the new robust estimator, we store raw (u, y) points.
+    The regression calculates the slope 'a'.
+    If the slope > A_MAX, the result is clamped, BUT the points remain valid (raw).
+    This ensures that the estimator sees the "true" slope (even if high)
+    and simply limits the output, rather than modifying the internal history 
+    to match the limit (which would bias future estimates).
     """
     est = ABEstimator()
+    est.b = 0.002
     
-    # First, set up a reasonable b value
-    est.b = 0.002  # tau = 500 min
+    # Feed points that imply a slope > A_MAX (0.1)
+    # y = dT/dt + b*delta. 
+    # If we want a_meas ~ 0.2, and u=0.5, we need y = 0.1
+    # Let's say dT=0.08, b=0.002, delta=10 -> y = 0.08 + 0.02 = 0.10.
+    # a_slope = 0.10 / 0.5 = 0.20 > A_MAX(0.1)
     
-    # Simulate several ON-phase measurements where SOME exceed A_MAX
-    # This mimics the real scenario where b*delta contributes significantly
-    # to a_meas calculation, causing some values to exceed 0.05
+    for _ in range(7):
+        est.learn(
+            dT_int_per_min=0.08, 
+            u=0.5, 
+            t_int=18.0, 
+            t_ext=8.0 # delta=10
+        )
     
-    measurements = [
-        # (dT_int_per_min, u, t_int, t_ext)
-        # a_meas = (dt + b*delta) / u
-        # With b=0.002 and delta=10, b*delta=0.02
-        (0.03, 0.5, 18.0, 8.0),   # a_meas = (0.03 + 0.02) / 0.5 = 0.10 (exceeds A_MAX)
-        (0.02, 0.5, 18.0, 8.0),   # a_meas = (0.02 + 0.02) / 0.5 = 0.08 (exceeds A_MAX)
-        (0.01, 0.5, 18.0, 8.0),   # a_meas = (0.01 + 0.02) / 0.5 = 0.06 (exceeds A_MAX)
-        (0.005, 0.5, 18.0, 8.0),  # a_meas = (0.005 + 0.02) / 0.5 = 0.05 (at A_MAX)
-        (0.003, 0.5, 18.0, 8.0),  # a_meas = (0.003 + 0.02) / 0.5 = 0.046 (below A_MAX)
-        (0.002, 0.5, 18.0, 8.0),  # a_meas = (0.002 + 0.02) / 0.5 = 0.044 (below A_MAX)
-        (0.001, 0.5, 18.0, 8.0),  # a_meas = (0.001 + 0.02) / 0.5 = 0.042 (below A_MAX)
-    ]
+    # 1. est.a should be clamped
+    assert est.a <= est.A_MAX, f"a should be clamped: {est.a}"
     
-    for dt, u, t_int, t_ext in measurements:
-        est.learn(dT_int_per_min=dt, u=u, t_int=t_int, t_ext=t_ext)
-    
-    # With raw values stored, median of [0.10, 0.08, 0.06, 0.05, 0.046, 0.044, 0.042]
-    # = 0.05 (center value)
-    # But EWMA converges slowly, and with our values, the final 'a' should NOT be
-    # saturated at exactly A_MAX due to the unbiased median
-    
-    # Key assertion: a should be clamped at A_MAX (0.05) but the histogram
-    # should contain raw values, some exceeding A_MAX
-    assert est.a <= est.A_MAX, f"a should be clamped at A_MAX: {est.a}"
-    
-    # Verify that _a_hist contains raw values (some at or exceeding A_MAX)
-    # This is the key difference from the old behavior
-    raw_values_at_or_above_max = [v for v in est._a_hist if v >= est.A_MAX]
-    assert len(raw_values_at_or_above_max) > 0, \
-        f"Histogram should contain raw values at or above A_MAX: {list(est._a_hist)}"
-    
-    # The median of the raw values should be calculated correctly
-    import statistics
-    actual_median = statistics.median(est._a_hist)
-    # With the measurements above, median is around 0.05-0.06
-    # The point is that the median is calculated on raw values, not clamped values
-    assert actual_median <= 0.07, f"Median should be reasonable: {actual_median}"
+    # 2. _a_pts should contain raw points implying high slope
+    slope, _ = est._theil_sen(list(est._a_pts))
+    if slope is not None:
+         assert slope > est.A_MAX, f"Stored points should imply high slope: {slope}"
+    else:
+         # If slope is None, it means points were degenerate, which defeats test purpose
+         # But here we used same u=0.5. 
+         # We must vary u in the loop above to avoid slope=None
+         pass
+
+
+    # Re-run with varying U to properly test Theil-Sen return
+    est = ABEstimator()
+    est.b = 0.002
+    for i in range(7):
+        u_val = 0.5 + i * 0.01
+        # Target a=0.20
+        # dt = 0.20*u - 0.02
+        est.learn(
+            dT_int_per_min=(0.20 * u_val - 0.02),
+            u=u_val,
+            t_int=18.0,
+            t_ext=8.0
+        )
+    assert est.a <= est.A_MAX
+    slope, _ = est._theil_sen(list(est._a_pts))
+    assert slope > est.A_MAX
 
 
 def test_abestimator_b_no_saturation_bias():
-    """Test that raw values in histogram prevent saturation bias for b.
-    
-    Same principle as test_abestimator_no_saturation_bias but for parameter b.
-    """
+    """Test that raw points are stored for b, preventing clamping bias."""
     est = ABEstimator()
     
-    # Simulate OFF-phase measurements where SOME exceed B_MAX
-    # b_meas = -dT / delta
-    # Note: dT must be within outlier threshold (max_abs_dT_per_min=0.35)
-    # To get b_meas > 0.05 with dT within limits, we need smaller delta
-    measurements = [
-        # (dT_int_per_min, u, t_int, t_ext)
-        # With delta=5, dT=-0.3 gives b_meas=0.06 (exceeds B_MAX=0.05)
-        (-0.30, 0.0, 18.0, 13.0),  # b_meas = 0.30/5 = 0.06 (exceeds B_MAX)
-        (-0.28, 0.0, 18.0, 13.0),  # b_meas = 0.28/5 = 0.056 (exceeds B_MAX)
-        (-0.20, 0.0, 18.0, 13.0),  # b_meas = 0.20/5 = 0.04 (below B_MAX)
-        (-0.15, 0.0, 18.0, 13.0),  # b_meas = 0.15/5 = 0.03 (below B_MAX)
-        (-0.10, 0.0, 18.0, 13.0),  # b_meas = 0.10/5 = 0.02 (below B_MAX)
-    ]
+    # Feed points implying b > B_MAX (0.05)
+    # y = -dT/dt. x = delta.
+    # b_slope = y/x.
+    # If we want b=0.06, delta=10 -> y=0.6 -> dT = -0.6 (too high for outlier?)
+    # outlier check: max_abs_dT_per_min = 0.35.
+    # So we need smaller delta. delta=5. y=0.3. b=0.06.
+    # dT = -0.3. ok.
     
-    for dt, u, t_int, t_ext in measurements:
-        est.learn(dT_int_per_min=dt, u=u, t_int=t_int, t_ext=t_ext)
+    for _ in range(7):
+        est.learn(
+            dT_int_per_min=-0.3,
+            u=0.0,
+            t_int=20.0,
+            t_ext=15.0 # delta=5
+        )
+        
+    # 1. est.b should be clamped
+    assert est.b <= est.B_MAX, f"b should be clamped: {est.b}"
     
-    # Key assertion: b should be clamped at B_MAX but histogram contains raw values
-    assert est.b <= est.B_MAX, f"b should be clamped at B_MAX: {est.b}"
+    # 2. _b_pts should contain raw points
+    # Need varying delta in input to get valid slope
     
-    # Verify that _b_hist contains raw values (some exceeding B_MAX)
-    raw_values_above_max = [v for v in est._b_hist if v > est.B_MAX]
-    assert len(raw_values_above_max) > 0, \
-        f"Histogram should contain raw values above B_MAX: {list(est._b_hist)}"
+    # Re-run with varying delta
+    est = ABEstimator()
+    for i in range(7):
+        # b = 0.06
+        # dt = -0.06 * delta
+        # delta = 10 + i
+        delta = 10.0 + i
+        est.learn(
+            dT_int_per_min=(-0.06 * delta),
+            u=0.0,
+            t_int=20.0,
+            t_ext=20.0 - delta,
+            max_abs_dT_per_min=5.0
+        )
+    
+    assert est.b <= est.B_MAX
+    slope, _ = est._theil_sen(list(est._b_pts))
+    assert slope > est.B_MAX, f"Stored points should imply high slope: {slope}"
 
 
 def test_anti_windup_tracking_diagnostics():

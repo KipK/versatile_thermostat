@@ -117,6 +117,24 @@ SP_BAND = 1.0          # Band for alpha interpolation (°C)
 SP_BYPASS_ERROR_THRESHOLD = 0.8  # Bypass filter when error > this (°C) to avoid slow heating
 
 
+# --- Robust learning / gating constants ---
+# Window sizes
+B_POINTS_MAX = 40        # OFF samples for b (tau)
+A_POINTS_MAX = 25        # ON samples for a
+RESIDUAL_HIST_MAX = 60   # Residual history for MAD estimation
+
+# Robust gating
+RESIDUAL_GATE_K = 3.5   # |r| > k * sigma_r  -> freeze learning
+
+# Intercept coherence checks (dimensionless ratios)
+INTERCEPT_SIGMA_FACTOR = 2.0   # |c| <= factor * sigma_r
+INTERCEPT_SCALE_FACTOR = 0.30  # |c| <= factor * median(|y|)
+
+# Tau stability check
+B_STABILITY_MAD_RATIO_MAX = 0.60   # MAD(b) / median(b)
+LEARN_BOOTSTRAP_COUNT = 10      # Number of learn cycles before applying strict residual gating
+
+
 @dataclass(frozen=True)
 class TauReliability:
     """Result of tau (time constant) reliability check."""
@@ -124,55 +142,46 @@ class TauReliability:
     tau_min: float  # minutes (min of candidates used)
 
 
-@dataclass
 class ABEstimator:
     """
-    Online estimator for a and b in:
-
-        dT_int approx a*u - b*(T_int - T_ext)
-
-    Learning strategy (ON/OFF separation):
-    - b is learned during OFF phases (u < 0.05) when cooling is observable
-    - a is learned during ON phases (u > 0.20) when heating is significant
-    - Gray zone (0.05 <= u <= 0.20) is skipped as data quality is poor
-
-    This separation avoids circular coupling between a and b estimates.
+    Robust Online Estimator for a and b using Theil-Sen regression and outlier gating.
+    
+    Model: dT/dt = a*u - b*(T_int - T_ext)
+    
+    Improvements over basic EWMA:
+    - Uses sliding windows of points (Theil-Sen regression) for robust slope estimation.
+    - Residual gating: skips learning if current point deviates too much from model (r > 3.5*sigma).
+    - Intercept checks: ensures the linear fit passes near origin (physics constraint).
+    - Checks stability of 'b' estimate logic.
     """
 
-    # Initial values for faster convergence (matching regul6.py)
-    # A_INIT: heating effectiveness ~0.05°C/min at 100% for typical radiator
-    # B_INIT: loss coefficient giving tau ~ 1000 min (reasonable room)
-    A_INIT: float = 0.0005
-    B_INIT: float = 0.0010
+    def __init__(self, a_init: float = 0.0005, b_init: float = 0.0010):
+        self.A_INIT = a_init
+        self.B_INIT = b_init
 
-    a: float = 0.0005  # = A_INIT
-    b: float = 0.0010  # = B_INIT
+        self.a = a_init
+        self.b = b_init
 
-    # Learning diagnostics
-    learn_ok_count: int = 0
-    learn_ok_count_a: int = 0
-    learn_ok_count_b: int = 0
-    learn_skip_count: int = 0
-    learn_last_reason: str = "init"
+        # Robust bounds (conservative defaults, can be overridden by learn call)
+        self.A_MIN: float = 1e-5
+        self.A_MAX: float = 0.1
+        self.B_MIN: float = 1e-5
+        self.B_MAX: float = 0.05
 
-    # Internal windows for robust median estimation
-    _a_hist: Deque[float] = field(default_factory=lambda: deque(maxlen=15))
-    _b_hist: Deque[float] = field(default_factory=lambda: deque(maxlen=30))
+        # Robust learning buffers (Type: deque[Tuple[float, float]])
+        # stored as (x, y)
+        self._b_pts: Deque[Tuple[float, float]] = deque(maxlen=B_POINTS_MAX)
+        self._a_pts: Deque[Tuple[float, float]] = deque(maxlen=A_POINTS_MAX)
+        self._r_hist: Deque[float] = deque(maxlen=RESIDUAL_HIST_MAX)
 
-    # Robust bounds (conservative; tune to your installation)
-    A_MIN: float = 1e-5
-    A_MAX: float = 0.1
-    B_MIN: float = 1e-5
-    B_MAX: float = 0.05
+        # Stability tracking for b (tau)
+        self._b_hat_hist: Deque[float] = deque(maxlen=20)
 
-    # EWMA smoothing factor for parameter updates
-    ALPHA_A: float = 0.15
-    ALPHA_B: float = 0.12
-
-    # Consistency check: reject measurements deviating too much from stable value
-    CONSISTENCY_THRESHOLD: float = 0.5  # 50% max deviation allowed per sample
-    CONSISTENCY_MIN_SAMPLES: int = 10   # Min samples before applying consistency check
-
+        self.learn_ok_count = 0  # Total successful updates
+        self.learn_ok_count_a = 0
+        self.learn_ok_count_b = 0
+        self.learn_skip_count = 0
+        self.learn_last_reason: Optional[str] = "init"
 
     def reset(self) -> None:
         """Reset learned parameters and history to initial values."""
@@ -183,9 +192,52 @@ class ABEstimator:
         self.learn_ok_count_b = 0
         self.learn_skip_count = 0
         self.learn_last_reason = "reset"
-        self._a_hist.clear()
-        self._b_hist.clear()
+        self._b_pts.clear()
+        self._a_pts.clear()
+        self._r_hist.clear()
+        self._b_hat_hist.clear()
 
+    # ---------- Robust helpers ----------
+
+    @staticmethod
+    def _mad(values):
+        if len(values) < 3:
+            return None
+        med = statistics.median(values)
+        try:
+            return statistics.median(abs(v - med) for v in values)
+        except statistics.StatisticsError:
+            return None
+
+    @staticmethod
+    def _theil_sen(points):
+        """
+        Robust Theil–Sen slope + intercept.
+        points: list of (x, y)
+        """
+        slopes = []
+        n = len(points)
+        # Check for strictly identical x values to avoid division by zero
+        # Although in physical systems noise usually prevents this.
+        for i in range(n):
+            x_i, y_i = points[i]
+            for j in range(i + 1, n):
+                x_j, y_j = points[j]
+                dx = x_j - x_i
+                if abs(dx) < 1e-6:
+                    continue
+                slopes.append((y_j - y_i) / dx)
+
+        if not slopes:
+            return None, None
+
+        slope = statistics.median(slopes)
+        intercepts = [y - slope * x for x, y in points]
+        intercept = statistics.median(intercepts)
+
+        return slope, intercept
+
+    # ---------- Main learning ----------
 
     def learn(
         self,
@@ -198,168 +250,166 @@ class ABEstimator:
         min_dT_per_min: float = 0.003,
     ) -> None:
         """
-        Update (a,b) using a single observation with ON/OFF separation.
-
-        Parameters
-        ----------
-        dT_int_per_min:
-            Indoor temperature slope over the last cycle (°C/min)
-        u:
-            Applied power duty-cycle over the last cycle in [0,1]
-        t_int:
-            Current indoor temperature (°C)
-        t_ext:
-            External/ambient temperature (°C)
-        max_abs_dT_per_min:
-            Outlier rejection threshold for impossible slopes
-        min_dT_per_min:
-            Minimum slope magnitude to consider (below = noise)
+        Update (a,b) using robust regression.
+        
+        Args:
+            dT_int_per_min: dT/dt in °C/min
+            u: Duty cycle [0,1]
+            t_int: Indoor temp °C
+            t_ext: Outdoor temp °C
         """
-        dt = float(dT_int_per_min)
+        dTdt = float(dT_int_per_min)
         delta = float(t_int - t_ext)
-
+        
         # Outlier rejection: slope too large (sensor glitch)
-        if abs(dt) > max_abs_dT_per_min:
+        if abs(dTdt) > max_abs_dT_per_min:
             self.learn_skip_count += 1
             self.learn_last_reason = "skip: slope outlier"
             return
 
         # Noise rejection: slope too small to be informative
-        if abs(dt) < min_dT_per_min:
+        if abs(dTdt) < min_dT_per_min:
             self.learn_skip_count += 1
-            self.learn_last_reason = "skip: slope too small (noise)"
+            self.learn_last_reason = "skip: slope too small"
             return
 
-        # === PHASE OFF: Learn b when u < 0.05 ===
-        # Model simplifies to: dT/dt = -b * (T_int - T_ext)
-        # => b = -dT/dt / (T_int - T_ext)
-        if u < 0.05:
-            if abs(delta) < 0.5:
+        # Residual (model mismatch detector)
+        # r = dTdt - (a*u - b*delta)
+        # We use current a, b for this check
+        r = dTdt - (self.a * u - self.b * delta)
+        self._r_hist.append(r)
+
+        mad_r = self._mad(self._r_hist)
+        sigma_r = 0.0
+        if mad_r is not None:
+            sigma_r = 1.4826 * mad_r
+
+        # Only gate if we have some confidence in the model (learned at least a few times)
+        if mad_r is not None and self.learn_ok_count > LEARN_BOOTSTRAP_COUNT:
+            if abs(r) > RESIDUAL_GATE_K * sigma_r:
                 self.learn_skip_count += 1
-                self.learn_last_reason = "skip:b: |Tin-Text| too small"
+                self.learn_last_reason = "skip: residual outlier"
                 return
 
-            b_meas = -dt / delta
+        # ---------- OFF phase : learn b ----------
+        # b is loss coeff. OFF means u ~ 0.
+        # dT/dt = -b * delta  =>  -dT/dt = b * delta
+        # y = -dT/dt, x = delta. Slope is b.
+        if u < 0.05 and abs(delta) >= 0.5:
+            y = -dTdt
+            self._b_pts.append((delta, y))
 
-            if b_meas <= 0:
+            if len(self._b_pts) < 6:
                 self.learn_skip_count += 1
-                self.learn_last_reason = "skip:b: measured b <= 0"
+                self.learn_last_reason = "skip: collecting b points"
                 return
 
-            # Consistency check (outlier rejection for solar gain, etc.)
-            # If we have enough history, reject measurements that deviate too much
-            # from the current established model (e.g. > 50% change).
-            if self.learn_ok_count_b >= self.CONSISTENCY_MIN_SAMPLES:
-                diff = abs(b_meas - self.b)
-                threshold = self.b * self.CONSISTENCY_THRESHOLD
-                if diff > threshold:
+            b_hat, c = self._theil_sen(self._b_pts)
+            if b_hat is None or b_hat <= 0:
+                self.learn_skip_count += 1
+                self.learn_last_reason = "skip: invalid b estimate"
+                return
+
+            # Intercept coherence check
+            # Ideally linear fit passes through origin.
+            # Intercept c represents offset error.
+            if self.learn_ok_count > LEARN_BOOTSTRAP_COUNT:
+                if mad_r is not None:
+                    if abs(c) > INTERCEPT_SIGMA_FACTOR * sigma_r:
+                        self.learn_skip_count += 1
+                        self.learn_last_reason = "skip: b intercept > sigma"
+                        return
+                        
+                y_vals = [p[1] for p in self._b_pts]
+                med_y = abs(statistics.median(y_vals))
+                if med_y > 1e-4 and abs(c) > INTERCEPT_SCALE_FACTOR * med_y:
                     self.learn_skip_count += 1
-                    self.learn_last_reason = f"skip:b:consistency({b_meas:.6f} vs {self.b:.6f})"
+                    self.learn_last_reason = "skip: b intercept scale mismatch"
                     return
 
-            # Store raw measurement for median calculation (no clamp here)
-            # Clamping before median would bias it toward bounds
-            self._b_hist.append(b_meas)
-
-            # Update b using EWMA with median for robustness
-            if len(self._b_hist) >= 3:
-                b_median = float(statistics.median(self._b_hist))
-                self.b = clamp(
-                    (1 - self.ALPHA_B) * self.b + self.ALPHA_B * b_median,
-                    self.B_MIN,
-                    self.B_MAX,
-                )
-            else:
-                # Warmup: direct EWMA
-                self.b = clamp(
-                    (1 - self.ALPHA_B) * self.b + self.ALPHA_B * b_meas,
-                    self.B_MIN,
-                    self.B_MAX,
-                )
-
+            b_hat = clamp(b_hat, self.B_MIN, self.B_MAX)
+            self.b = b_hat
+            self._b_hat_hist.append(b_hat)
             self.learn_ok_count += 1
             self.learn_ok_count_b += 1
-            self.learn_last_reason = "update:b(off)"
+            self.learn_last_reason = "learned b"
             return
 
-        # === PHASE ON: Learn a when u > 0.20 ===
-        # Using known b: a = (dT/dt + b * (T_int - T_ext)) / u
-        if u > 0.20:
-            if abs(delta) < 0.2:
+        # ---------- ON phase : learn a ----------
+        # dT/dt = a*u - b*delta  =>  dT/dt + b*delta = a*u
+        # y = dT/dt + b*delta, x = u. Slope is a.
+        if u > 0.20 and abs(delta) >= 0.2:
+            y = dTdt + self.b * delta
+            self._a_pts.append((u, y))
+
+            if len(self._a_pts) < 6:
                 self.learn_skip_count += 1
-                self.learn_last_reason = "skip:a: |Tin-Text| too small"
+                self.learn_last_reason = "skip: collecting a points"
                 return
 
-            a_meas = (dt + self.b * delta) / u
-
-            if a_meas <= 0:
+            a_hat, c = self._theil_sen(self._a_pts)
+            if a_hat is None or a_hat <= 0:
                 self.learn_skip_count += 1
-                self.learn_last_reason = "skip:a: measured a <= 0"
+                self.learn_last_reason = "skip: invalid a estimate"
                 return
 
-            # Consistency check (outlier rejection for solar gain, etc.)
-            if self.learn_ok_count_a >= self.CONSISTENCY_MIN_SAMPLES:
-                diff = abs(a_meas - self.a)
-                threshold = self.a * self.CONSISTENCY_THRESHOLD
-                if diff > threshold:
+            if self.learn_ok_count > LEARN_BOOTSTRAP_COUNT:
+                if mad_r is not None:
+                    if abs(c) > INTERCEPT_SIGMA_FACTOR * sigma_r:
+                        self.learn_skip_count += 1
+                        self.learn_last_reason = "skip: a intercept > sigma"
+                        return
+                
+                y_vals = [p[1] for p in self._a_pts]
+                med_y = abs(statistics.median(y_vals))
+                if med_y > 1e-4 and abs(c) > INTERCEPT_SCALE_FACTOR * med_y:
                     self.learn_skip_count += 1
-                    self.learn_last_reason = f"skip:a:consistency({a_meas:.6f} vs {self.a:.6f})"
+                    self.learn_last_reason = "skip: a intercept scale mismatch"
                     return
 
-            # Store raw measurement for median calculation (no clamp here)
-            # Clamping before median would bias it toward bounds
-            self._a_hist.append(a_meas)
-
-            # Update a using EWMA with median for robustness
-            if len(self._a_hist) >= 3:
-                a_median = float(statistics.median(self._a_hist))
-                self.a = clamp(
-                    (1 - self.ALPHA_A) * self.a + self.ALPHA_A * a_median,
-                    self.A_MIN,
-                    self.A_MAX,
-                )
-            else:
-                # Warmup: direct EWMA
-                self.a = clamp(
-                    (1 - self.ALPHA_A) * self.a + self.ALPHA_A * a_meas,
-                    self.A_MIN,
-                    self.A_MAX,
-                )
-
+            a_hat = clamp(a_hat, self.A_MIN, self.A_MAX)
+            self.a = a_hat
             self.learn_ok_count += 1
             self.learn_ok_count_a += 1
-            self.learn_last_reason = "update:a(on)"
+            self.learn_last_reason = "learned a"
             return
 
-        # === GRAY ZONE: 0.05 <= u <= 0.20 ===
-        # Data quality is poor, skip learning
         self.learn_skip_count += 1
-        self.learn_last_reason = "skip: gray zone (0.05 <= u <= 0.20)"
+        self.learn_last_reason = "skip: low excitation"
 
     def tau_reliability(self) -> TauReliability:
         """
-        Determine whether the estimated tau (=1/b) is reliable.
-
-        Heuristic:
-        - Need enough valid samples
-        - b must be in a plausible range
-        - tau must be within reasonable bounds
-
-        Returns
-        -------
-        TauReliability
+        Check if tau (1/b) is statistically stable and within bounds.
         """
+        # Enough updates?
         if self.learn_ok_count_b < 10:
+             return TauReliability(reliable=False, tau_min=9999.0)
+        
+        # Enough history for stability check?
+        if len(self._b_hat_hist) < 6:
+            # Fallback to simple bounds check if history not full but count ok (should match)
+            # But let's require robust history
             return TauReliability(reliable=False, tau_min=9999.0)
 
-        b = self.b
-        if b < self.B_MIN or b > self.B_MAX:
+        med_b = statistics.median(self._b_hat_hist)
+        mad_b = self._mad(self._b_hat_hist)
+        
+        if mad_b is None or med_b <= 0:
             return TauReliability(reliable=False, tau_min=9999.0)
 
-        tau = 1.0 / max(b, 1e-9)  # minutes
-        # Plausible thermal tau for a room is usually tens to hundreds of minutes.
+        # Stability check: Relative dispersion of b estimates
+        if (mad_b / med_b) > B_STABILITY_MAD_RATIO_MAX:
+             return TauReliability(reliable=False, tau_min=9999.0)
+             
+        # Value bounds check
+        if med_b < self.B_MIN or med_b > self.B_MAX:
+            return TauReliability(reliable=False, tau_min=9999.0)
+
+        tau = 1.0 / med_b
+        # 10 min to ~66 hours (4000 min)
         reliable = 10.0 <= tau <= 4000.0
         return TauReliability(reliable=reliable, tau_min=tau)
+
 
 
 class SmartPI:
@@ -578,13 +628,28 @@ class SmartPI:
             self.est.learn_ok_count_b = int(state.get("learn_ok_count_b", 0) or 0)
             self.est.learn_skip_count = int(state.get("learn_skip_count", 0) or 0)
 
-            # Load history queues
-            a_hist = state.get("a_hist", [])
-            b_hist = state.get("b_hist", [])
+            # Load history queues - Robust estimator uses points (x,y) and residual hist
+            a_pts_data = state.get("a_pts", [])
+            b_pts_data = state.get("b_pts", [])
+            r_hist_data = state.get("r_hist", [])
+            b_hat_hist_data = state.get("b_hat_hist", [])
 
-            # Reconstruct deque objects
-            self.est._a_hist = deque(a_hist, maxlen=self.est._a_hist.maxlen)
-            self.est._b_hist = deque(b_hist, maxlen=self.est._b_hist.maxlen)
+            # Safe loading of tuples for points
+            def to_dq_tuples(data, dq_maxlen):
+                d = deque(maxlen=dq_maxlen)
+                if not data:
+                    return d
+                for item in data:
+                    if isinstance(item, (list, tuple)) and len(item) == 2:
+                        d.append(tuple(item))
+                return d
+
+            self.est._a_pts = to_dq_tuples(a_pts_data, self.est._a_pts.maxlen)
+            self.est._b_pts = to_dq_tuples(b_pts_data, self.est._b_pts.maxlen)
+            
+            # Simple float queues
+            self.est._r_hist = deque(r_hist_data, maxlen=self.est._r_hist.maxlen)
+            self.est._b_hat_hist = deque(b_hat_hist_data, maxlen=self.est._b_hat_hist.maxlen)
 
             # Load PI state with validation
             integral_val = float(state.get("integral", 0.0) or 0.0)
@@ -669,8 +734,10 @@ class SmartPI:
             "learn_ok_count_a": self.est.learn_ok_count_a,
             "learn_ok_count_b": self.est.learn_ok_count_b,
             "learn_skip_count": self.est.learn_skip_count,
-            "a_hist": list(self.est._a_hist),
-            "b_hist": list(self.est._b_hist),
+            "a_pts": list(self.est._a_pts),
+            "b_pts": list(self.est._b_pts),
+            "r_hist": list(self.est._r_hist),
+            "b_hat_hist": list(self.est._b_hat_hist),
             "integral": self.integral,
             "u_prev": self.u_prev,
             "cycles_since_reset": self._cycles_since_reset,
