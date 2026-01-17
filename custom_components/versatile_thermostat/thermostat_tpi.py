@@ -12,6 +12,7 @@ from homeassistant.components.climate import HVACMode
 from homeassistant.components.recorder import history, get_instance
 from homeassistant.util import dt as dt_util
 from homeassistant.exceptions import ServiceValidationError
+from homeassistant.helpers.event import async_call_later
 
 from .base_thermostat import BaseThermostat, ConfigData
 from .vtherm_api import VersatileThermostatAPI
@@ -20,7 +21,7 @@ from .auto_tpi_manager import AutoTpiManager
 from .const import *  # pylint: disable=wildcard-import, unused-wildcard-import
 from .vtherm_hvac_mode import VThermHvacMode_OFF, VThermHvacMode_HEAT, VThermHvacMode_COOL
 from .commons import write_event_log
-from .smartpi_algorithm import SmartPI
+from .smartpi_algorithm import SmartPI, SMARTPI_RECALC_INTERVAL_SEC
 from homeassistant.helpers.storage import Store
 
 
@@ -50,6 +51,12 @@ class ThermostatTPI(BaseThermostat[T], Generic[T]):
         # Track previous hvac_mode to detect resume after interruption (window close, etc.)
         # This enables notifying SmartPI to skip learning cycles after resume.
         self._prev_hvac_mode_for_resume: str | None = None
+
+        # Periodic recalculation timer for SmartPI (ensures rate-limit progresses even without sensor updates)
+        self._smartpi_recalc_timer_remove: callable | None = None
+
+        # Track if cycle was interrupted by load shedding
+        self._current_cycle_interrupted: bool = False
 
         super().__init__(hass, unique_id, name, entry_infos)
 
@@ -256,9 +263,14 @@ class ThermostatTPI(BaseThermostat[T], Generic[T]):
                 self._get_tpi_data,
                 self._on_tpi_cycle_start
             )
+            # Start SmartPI periodic recalculation timer
+            self._start_smartpi_recalc_timer()
 
     def remove_thermostat(self):
         """Called when the thermostat will be removed"""
+        # Stop SmartPI periodic recalculation timer
+        self._stop_smartpi_recalc_timer()
+
         if self._auto_tpi_manager:
             self._auto_tpi_manager.stop_cycle_loop()
             self.hass.async_create_task(self._auto_tpi_manager.async_save_data())
@@ -268,6 +280,63 @@ class ThermostatTPI(BaseThermostat[T], Generic[T]):
             self.hass.async_create_task(self._smart_pi_storage.async_save(data))
 
         super().remove_thermostat()
+
+    def _start_smartpi_recalc_timer(self) -> None:
+        """Start the periodic recalculation timer for SmartPI.
+
+        This timer ensures the rate-limit progresses even when temperature sensors
+        don't update frequently, allowing power to ramp up between cycles.
+        """
+        if self._proportional_function != PROPORTIONAL_FUNCTION_SMART_PI:
+            return
+
+        # Stop existing timer if any
+        self._stop_smartpi_recalc_timer()
+
+        # Schedule periodic recalculation
+        self._smartpi_recalc_timer_remove = async_call_later(
+            self.hass,
+            SMARTPI_RECALC_INTERVAL_SEC,
+            self._on_smartpi_recalc_timer
+        )
+        _LOGGER.debug(
+            "%s - SmartPI periodic recalc timer started (interval: %ds)",
+            self, SMARTPI_RECALC_INTERVAL_SEC
+        )
+
+    def _stop_smartpi_recalc_timer(self) -> None:
+        """Stop the periodic recalculation timer for SmartPI."""
+        if self._smartpi_recalc_timer_remove:
+            self._smartpi_recalc_timer_remove()
+            self._smartpi_recalc_timer_remove = None
+            _LOGGER.debug("%s - SmartPI periodic recalc timer stopped", self)
+
+    async def _on_smartpi_recalc_timer(self, _) -> None:
+        """Callback for SmartPI periodic recalculation timer.
+
+        Recalculates the power output to allow rate-limit progression,
+        then reschedules the timer.
+        """
+        if self._is_removed:
+            return
+
+        # Only recalculate if in active mode
+        if self.vtherm_hvac_mode in [VThermHvacMode_HEAT, VThermHvacMode_COOL]:
+            self.recalculate()
+            self.update_custom_attributes()
+            self.async_write_ha_state()
+            _LOGGER.debug(
+                "%s - SmartPI periodic recalc: on_percent=%.1f%%",
+                self, self.safe_on_percent * 100
+            )
+
+        # Reschedule if still active
+        if self.vtherm_hvac_mode in [VThermHvacMode_HEAT, VThermHvacMode_COOL]:
+            self._smartpi_recalc_timer_remove = async_call_later(
+                self.hass,
+                SMARTPI_RECALC_INTERVAL_SEC,
+                self._on_smartpi_recalc_timer
+            )
 
     def _is_central_boiler_off(self) -> bool:
         """Check if the central boiler is configured but currently off.
@@ -472,10 +541,13 @@ class ThermostatTPI(BaseThermostat[T], Generic[T]):
 
         # If we have a change, we may need to start/stop the cycle loop
         if changed:
-            if self._state_manager.current_state.is_hvac_mode_changed:
+            # Issue 83: checks if hvac_mode has changed.
+            # We cannot check self._state_manager.current_state.is_hvac_mode_changed because checks are reset in super().update_states()
+            if current_mode != self.vtherm_hvac_mode:
                 if self._auto_tpi_manager and self._proportional_function in [PROPORTIONAL_FUNCTION_TPI, PROPORTIONAL_FUNCTION_SMART_PI]:
                     # Start cycle loop for HEAT or COOL modes, regardless of learning_active
                     if self.vtherm_hvac_mode in [VThermHvacMode_HEAT, VThermHvacMode_COOL]:
+                        _LOGGER.debug("%s - TPI update_states - hvac_mode is %s. Starting cycle loop", self, self.vtherm_hvac_mode)
                         # Detect resume after interruption: OFF -> HEAT/COOL transition
                         if prev_mode == VThermHvacMode_OFF:
                             self._notify_prop_resume_after_off()
@@ -484,8 +556,12 @@ class ThermostatTPI(BaseThermostat[T], Generic[T]):
                             self._get_tpi_data,
                             self._on_tpi_cycle_start
                         )
+                        # Start SmartPI periodic recalculation timer
+                        self._start_smartpi_recalc_timer()
                     else:
                         self._auto_tpi_manager.stop_cycle_loop()
+                        # Stop SmartPI periodic recalculation timer
+                        self._stop_smartpi_recalc_timer()
 
         # Always track current mode for next transition detection
         self._prev_hvac_mode_for_resume = self.vtherm_hvac_mode

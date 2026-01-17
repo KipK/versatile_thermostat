@@ -97,6 +97,10 @@ AW_TRACK_MAX_DELTA_I = 5.0    # safety clamp on integral correction per cycle
 # Skip cycles after resume from interruption (window, etc.)
 SKIP_CYCLES_AFTER_RESUME = 1
 
+# Periodic recalculation interval (seconds) for SmartPI
+# This ensures the rate-limit progresses even when temperature sensors don't update frequently
+SMARTPI_RECALC_INTERVAL_SEC = 60
+
 # Default deadband around setpoint (°C)
 DEFAULT_DEADBAND_C = 0.05
 
