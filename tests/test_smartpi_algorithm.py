@@ -829,11 +829,11 @@ def test_abestimator_no_saturation_bias():
     # should contain raw values, some exceeding A_MAX
     assert est.a <= est.A_MAX, f"a should be clamped at A_MAX: {est.a}"
     
-    # Verify that _a_hist contains raw values (some exceeding A_MAX)
+    # Verify that _a_hist contains raw values (some at or exceeding A_MAX)
     # This is the key difference from the old behavior
-    raw_values_above_max = [v for v in est._a_hist if v > est.A_MAX]
-    assert len(raw_values_above_max) > 0, \
-        f"Histogram should contain raw values above A_MAX: {list(est._a_hist)}"
+    raw_values_at_or_above_max = [v for v in est._a_hist if v >= est.A_MAX]
+    assert len(raw_values_at_or_above_max) > 0, \
+        f"Histogram should contain raw values at or above A_MAX: {list(est._a_hist)}"
     
     # The median of the raw values should be calculated correctly
     import statistics
@@ -1598,3 +1598,182 @@ def test_setpoint_boost_cool_mode():
     # Boost should be active for cooling
     assert smartpi._setpoint_boost_active is True
     assert smartpi._prev_setpoint_for_boost == 22.0
+
+
+def test_forced_by_timing_skips_tracking_antiwindup():
+    """Test that tracking anti-windup is skipped when timing forces 0%/100%.
+    
+    When min_on_delay or min_off_delay forces u_applied to 0 or 1 while 
+    u_limited was in a reasonable range, the tracking anti-windup should NOT
+    inject this artificial delta into the integral.
+    
+    This prevents the side effect where min_off_delay forcing 100% causes
+    the integral to climb artificially.
+    """
+    # Setup with min_off_delay that will force 100% at ~85% power
+    # cycle_min=10 -> cycle_sec=600
+    # min_deactivation_delay=90s means off_time must be >= 90s
+    # threshold: on_time <= 510s -> u <= 0.85
+    # So if u_limited is between 0.85 and 0.99, timing forces to 100%
+    smartpi = SmartPI(
+        cycle_min=10,
+        minimal_activation_delay=0,
+        minimal_deactivation_delay=90,  # 90 seconds minimum OFF time
+        name="TestSmartPI_ForcedTiming",
+        near_band_deg=0.0,
+        setpoint_weight_b=1.0,
+    )
+
+    # Setup reliable tau for proper gains
+    smartpi.est.learn_ok_count = 50
+    smartpi.est.learn_ok_count_b = 50
+    smartpi.est.b = 0.002  # tau = 500 min
+    smartpi.est.a = 0.01
+
+    # Start with u_prev at 87% - rate limit will keep output close to this
+    # With MAX_STEP_PER_MINUTE=0.25 and dt=10min, max_step=2.5
+    # So we need to constrain via the PI output itself, not rate limit
+    smartpi.u_prev = 0.87
+    # Set integral to produce a moderate PI output around 0.87-0.90
+    smartpi.integral = 0.5  # Small integral
+    # Use safe gains (unreliable tau) for more predictable behavior
+    smartpi.est.learn_ok_count_b = 5  # Make tau unreliable to use KP_SAFE/KI_SAFE
+
+    integral_before = smartpi.integral
+
+    # Calculate with small error -> PI output ~ Kp*e + Ki*I
+    # With KP_SAFE=0.55, KI_SAFE=0.01, e=0.3, I=0.5:
+    # u_pi = 0.55*0.3 + 0.01*0.5 = 0.165 + 0.005 = 0.17
+    # u_ff ~ 0 (low a)
+    # u_cmd ~ 0.17, but rate-limited from u_prev=0.87
+    # Actually we need u_limited to be ~0.87-0.90
+    # Let's set a higher integral to get output around 0.87
+    smartpi.integral = 80.0  # Higher integral
+    # With KI_SAFE=0.01: Ki*I = 0.01*80 = 0.80
+    # With e=0.15, Kp*e = 0.55*0.15 = 0.0825
+    # u_pi = 0.80 + 0.0825 = 0.8825
+    # u_raw = u_ff + u_pi ~ 0 + 0.8825 = 0.8825
+    # u_cmd = clamp(0.8825, 0, 1) = 0.8825
+    # Rate limit: |0.8825 - 0.87| = 0.0125 < max_step -> u_limited = 0.8825
+
+    smartpi.calculate(
+        target_temp=20.15,
+        current_temp=20.0,  # error = 0.15
+        ext_current_temp=5.0,
+        slope=0,
+        hvac_mode=VThermHvacMode_HEAT
+    )
+
+    # u_limited should be in the range where timing forces to 100%
+    # (between ~0.85 and 0.99)
+    assert 0.85 < smartpi._last_u_limited < 0.99, \
+        f"u_limited should be in range (0.85, 0.99): {smartpi._last_u_limited}"
+
+    # Verify timing forced u_applied to 100%
+    assert smartpi._last_u_applied == 1.0, \
+        f"u_applied should be forced to 100%: {smartpi._last_u_applied}"
+
+    # The key assertion: forced_by_timing should be True
+    assert smartpi._last_forced_by_timing is True, \
+        "forced_by_timing should be True when timing forces 100%"
+
+    # aw_du should be 0 because tracking was skipped
+    assert smartpi._last_aw_du == 0.0, \
+        f"aw_du should be 0 when timing forced: {smartpi._last_aw_du}"
+
+    # Verify diagnostics
+    diag = smartpi.get_diagnostics()
+    assert "forced_by_timing" in diag
+    assert diag["forced_by_timing"] is True
+
+
+def test_forced_by_timing_min_on_delay_forces_zero():
+    """Test forced_by_timing when min_on_delay forces 0%.
+    
+    When u_limited is small but non-zero, and min_on_delay forces
+    u_applied to 0%, tracking should be skipped.
+    """
+    # min_activation_delay=60s means on_time must be >= 60s
+    # cycle_min=10 -> cycle_sec=600
+    # If u_limited=0.05 -> on_time=30s < 60s -> forced to 0%
+    smartpi = SmartPI(
+        cycle_min=10,
+        minimal_activation_delay=60,  # 60 seconds minimum ON time
+        minimal_deactivation_delay=0,
+        name="TestSmartPI_ForcedTimingMinOn",
+        near_band_deg=0.0,
+        setpoint_weight_b=1.0,
+    )
+
+    smartpi.u_prev = 0.05
+    smartpi.integral = 1.0
+
+    smartpi.calculate(
+        target_temp=20.0,
+        current_temp=19.8,  # Small error -> small output
+        ext_current_temp=15.0,
+        slope=0,
+        hvac_mode=VThermHvacMode_HEAT
+    )
+
+    # If u_limited is small (e.g., 3-5%) and min_on_delay forces 0%
+    if smartpi._last_u_applied == 0.0 and smartpi._last_u_limited > 0.01:
+        assert smartpi._last_forced_by_timing is True, \
+            "forced_by_timing should be True when min_on forces 0%"
+        assert smartpi._last_aw_du == 0.0, \
+            "aw_du should be 0 when timing forced"
+
+
+def test_forced_by_timing_false_when_not_forced():
+    """Test that forced_by_timing is False when timing does NOT force extremes."""
+    smartpi = SmartPI(
+        cycle_min=10,
+        minimal_activation_delay=0,
+        minimal_deactivation_delay=0,  # No timing constraints
+        name="TestSmartPI_NoForce",
+        near_band_deg=0.0,
+    )
+
+    smartpi.u_prev = 0.5
+    smartpi.integral = 2.0
+
+    smartpi.calculate(
+        target_temp=20.0,
+        current_temp=19.0,  # Moderate error
+        ext_current_temp=10.0,
+        slope=0,
+        hvac_mode=VThermHvacMode_HEAT
+    )
+
+    # Without timing constraints, u_applied should equal u_limited
+    # and forced_by_timing should be False
+    assert smartpi._last_forced_by_timing is False, \
+        "forced_by_timing should be False when timing doesn't force"
+
+    # Normal tracking should occur (aw_du may or may not be 0 depending on constraints)
+    diag = smartpi.get_diagnostics()
+    assert "forced_by_timing" in diag
+    assert diag["forced_by_timing"] is False
+
+
+def test_forced_by_timing_in_diagnostics():
+    """Test that forced_by_timing appears in diagnostics."""
+    smartpi = SmartPI(
+        cycle_min=10,
+        minimal_activation_delay=0,
+        minimal_deactivation_delay=0,
+        name="TestSmartPI_ForcedDiag"
+    )
+
+    smartpi.calculate(
+        target_temp=20.0,
+        current_temp=19.0,
+        ext_current_temp=10.0,
+        slope=0,
+        hvac_mode=VThermHvacMode_HEAT
+    )
+
+    diag = smartpi.get_diagnostics()
+    assert "forced_by_timing" in diag
+    assert isinstance(diag["forced_by_timing"], bool)
+

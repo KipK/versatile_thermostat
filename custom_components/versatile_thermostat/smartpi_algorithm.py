@@ -488,6 +488,7 @@ class SmartPI:
         self._last_u_limited: float = 0.0   # after rate-limit and max_on_percent
         self._last_u_applied: float = 0.0   # after timing constraints
         self._last_aw_du: float = 0.0       # tracking delta for diagnostics
+        self._last_forced_by_timing: bool = False  # True when timing forced 0%/100%
 
         # Setpoint step boost state (for fast power ramp-up on setpoint change)
         self._setpoint_boost_active: bool = False
@@ -1286,26 +1287,43 @@ class SmartPI:
         # This step re-aligns the integrator to the applied actuator command.
         # Only apply when NOT in deadband (deadband uses INTEGRAL_LEAK instead).
         # ------------------------------
+
+        # Detect if timing constraints forced an extreme value (Option A fix).
+        # When _calculate_times() pushes _on_percent to 0 or 1 due to min ON/OFF
+        # constraints while u_limited was in a "reasonable" range, we should NOT
+        # inject this artificial delta into the integral. This prevents integral
+        # windup caused by timing quantization artifacts (e.g., min_off_delay
+        # forcing 100% when u_limited was ~89%).
+        forced_by_timing = (
+            (u_applied == 0.0 and u_limited > 0.01) or  # min_on_delay forced 0%
+            (u_applied == 1.0 and u_limited < 0.99)     # min_off_delay forced 100%
+        )
+        self._last_forced_by_timing = forced_by_timing
+
         if (not integrator_hold) and (self.Ki > KI_MIN) and (not self._in_deadband):
-            # Model-predicted command using current integrator state
-            u_model = u_ff + (self.Kp * e_p + self.Ki * self.integral)
+            if forced_by_timing:
+                # Skip tracking: timing quantization should not influence integral
+                self._last_aw_du = 0.0
+            else:
+                # Model-predicted command using current integrator state
+                u_model = u_ff + (self.Kp * e_p + self.Ki * self.integral)
 
-            # Tracking error between applied command and model command
-            du = u_applied - u_model
-            self._last_aw_du = du
+                # Tracking error between applied command and model command
+                du = u_applied - u_model
+                self._last_aw_du = du
 
-            # Discrete tracking gain beta = dt / Tt (bounded 0..1)
-            dt_sec = dt_min * 60.0
-            beta = clamp(dt_sec / max(AW_TRACK_TAU_S, dt_sec), 0.0, 1.0)
+                # Discrete tracking gain beta = dt / Tt (bounded 0..1)
+                dt_sec = dt_min * 60.0
+                beta = clamp(dt_sec / max(AW_TRACK_TAU_S, dt_sec), 0.0, 1.0)
 
-            # Update integral so that Ki * I compensates du
-            d_integral = beta * (du / self.Ki)
+                # Update integral so that Ki * I compensates du
+                d_integral = beta * (du / self.Ki)
 
-            # Safety clamp (per cycle)
-            d_integral = clamp(d_integral, -AW_TRACK_MAX_DELTA_I, AW_TRACK_MAX_DELTA_I)
+                # Safety clamp (per cycle)
+                d_integral = clamp(d_integral, -AW_TRACK_MAX_DELTA_I, AW_TRACK_MAX_DELTA_I)
 
-            self.integral += d_integral
-            self.integral = clamp(self.integral, -i_max, i_max)
+                self.integral += d_integral
+                self.integral = clamp(self.integral, -i_max, i_max)
         else:
             self._last_aw_du = 0.0
 
@@ -1395,6 +1413,7 @@ class SmartPI:
             "u_limited": round(self._last_u_limited, 6),
             "u_applied": round(self._last_u_applied, 6),
             "aw_du": round(self._last_aw_du, 6),
+            "forced_by_timing": self._last_forced_by_timing,
             # Deadband state
             "in_deadband": self._in_deadband,
             # Setpoint boost state
