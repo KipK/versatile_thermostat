@@ -114,8 +114,8 @@ STEP_CENTRAL_MAIN_DATA_SCHEMA = vol.Schema(  # pylint: disable=invalid-name
         ),
         vol.Required(CONF_TEMP_MIN, default=7): vol.Coerce(float),
         vol.Required(CONF_TEMP_MAX, default=35): vol.Coerce(float),
-
         vol.Required(CONF_STEP_TEMPERATURE, default=0.1): vol.Coerce(float),
+        # vol.Required(CONF_CYCLE_MIN, default=5): selector.NumberSelector(selector.NumberSelectorConfig(min=1, max=1000, step=1, mode=selector.NumberSelectorMode.BOX)),
     }
 )
 
@@ -126,8 +126,8 @@ STEP_CENTRAL_SPEC_MAIN_DATA_SCHEMA = vol.Schema(  # pylint: disable=invalid-name
         ),
         vol.Required(CONF_TEMP_MIN, default=7): vol.Coerce(float),
         vol.Required(CONF_TEMP_MAX, default=35): vol.Coerce(float),
-
         vol.Required(CONF_STEP_TEMPERATURE, default=0.1): vol.Coerce(float),
+        # vol.Required(CONF_CYCLE_MIN, default=5): selector.NumberSelector(selector.NumberSelectorConfig(min=1, max=1000, step=1, mode=selector.NumberSelectorMode.BOX)),
     }
 )
 
@@ -150,6 +150,7 @@ STEP_THERMOSTAT_SWITCH = vol.Schema(  # pylint: disable=invalid-name
         vol.Required(CONF_PROP_FUNCTION, default=PROPORTIONAL_FUNCTION_TPI): vol.In(
             [
                 PROPORTIONAL_FUNCTION_TPI,
+                PROPORTIONAL_FUNCTION_SMART_PI,
             ]
         ),
         vol.Optional(CONF_AC_MODE, default=False): cv.boolean,
@@ -198,6 +199,7 @@ STEP_THERMOSTAT_VALVE = vol.Schema(  # pylint: disable=invalid-name
         vol.Required(CONF_PROP_FUNCTION, default=PROPORTIONAL_FUNCTION_TPI): vol.In(
             [
                 PROPORTIONAL_FUNCTION_TPI,
+                PROPORTIONAL_FUNCTION_SMART_PI,
             ]
         ),
         vol.Optional(CONF_AC_MODE, default=False): cv.boolean,
@@ -231,6 +233,7 @@ STEP_VALVE_REGULATION = vol.Schema(  # pylint: disable=invalid-name
         vol.Required(CONF_PROP_FUNCTION, default=PROPORTIONAL_FUNCTION_TPI): vol.In(
             [
                 PROPORTIONAL_FUNCTION_TPI,
+                PROPORTIONAL_FUNCTION_SMART_PI,
             ]
         ),
         vol.Optional(CONF_OPENING_THRESHOLD_DEGREE, default=0): cv.positive_int,
@@ -546,5 +549,51 @@ STEP_AUTO_TPI_EMA_SETTINGS_SCHEMA = vol.Schema(
                 min=0.0, max=1.0, step=0.01, mode=selector.NumberSelectorMode.BOX
             )
         ),
+    }
+)
+
+# SmartPI specific configuration (visible only when SmartPI algorithm is selected)
+# First step: checkbox for central config
+STEP_SMART_PI_SCHEMA = vol.Schema(
+    {
+        vol.Optional(CONF_USE_SMART_PI_CENTRAL_CONFIG, default=False): cv.boolean,
+    }
+)
+
+# Second step: specific SmartPI parameters (if not using central config)
+STEP_SMART_PI_PARAMS_SCHEMA = vol.Schema(
+    {
+        vol.Optional(CONF_SMART_PI_DEADBAND, default=0.05): selector.NumberSelector(
+            selector.NumberSelectorConfig(
+                min=0.0, max=1.0, step=0.01, mode=selector.NumberSelectorMode.BOX
+            )
+        ),
+        vol.Optional(CONF_SMART_PI_AGGRESSIVENESS, default=1.0): selector.NumberSelector(
+            selector.NumberSelectorConfig(
+                min=0.1, max=2.0, step=0.1, mode=selector.NumberSelectorMode.BOX
+            )
+        ),
+        vol.Optional(CONF_SMART_PI_USE_SETPOINT_FILTER, default=True): cv.boolean,
+        vol.Optional(CONF_MINIMAL_ACTIVATION_DELAY, default=0): cv.positive_int,
+        vol.Optional(CONF_MINIMAL_DEACTIVATION_DELAY, default=0): cv.positive_int,
+    }
+)
+
+# Central SmartPI configuration schema (for central config thermostat)
+STEP_SMART_PI_CENTRAL_SCHEMA = vol.Schema(
+    {
+        vol.Optional(CONF_SMART_PI_DEADBAND, default=0.05): selector.NumberSelector(
+            selector.NumberSelectorConfig(
+                min=0.0, max=1.0, step=0.01, mode=selector.NumberSelectorMode.BOX
+            )
+        ),
+        vol.Optional(CONF_SMART_PI_AGGRESSIVENESS, default=1.0): selector.NumberSelector(
+            selector.NumberSelectorConfig(
+                min=0.1, max=2.0, step=0.1, mode=selector.NumberSelectorMode.BOX
+            )
+        ),
+        vol.Optional(CONF_SMART_PI_USE_SETPOINT_FILTER, default=True): cv.boolean,
+        vol.Optional(CONF_MINIMAL_ACTIVATION_DELAY, default=0): cv.positive_int,
+        vol.Optional(CONF_MINIMAL_DEACTIVATION_DELAY, default=0): cv.positive_int,
     }
 )

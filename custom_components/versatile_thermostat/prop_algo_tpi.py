@@ -19,7 +19,6 @@ class TpiAlgorithm:
 
     def __init__(
         self,
-
         tpi_coef_int,
         tpi_coef_ext,
         vtherm_entity_id: str = None,
@@ -31,7 +30,6 @@ class TpiAlgorithm:
         _LOGGER.debug(
             "%s - Creation new TpiAlgorithm tpi_coef_int: %s, tpi_coef_ext: %s, tpi_threshold_low=%s, tpi_threshold_high=%s",  # pylint: disable=line-too-long
             vtherm_entity_id,
-
             tpi_coef_int,
             tpi_coef_ext,
             tpi_threshold_low,
@@ -74,6 +72,7 @@ class TpiAlgorithm:
         ext_current_temp: float | None,
         slope: float | None,
         hvac_mode: VThermHvacMode,
+        power_shedding: bool = False,
     ):
         """Do the calculation of the duration"""
         if target_temp is None or current_temp is None:

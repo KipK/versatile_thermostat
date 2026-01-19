@@ -19,6 +19,7 @@ from .const import (
     CONF_VSWITCH_ON_CMD_LIST,
     CONF_VSWITCH_OFF_CMD_LIST,
     PROPORTIONAL_FUNCTION_TPI,
+    PROPORTIONAL_FUNCTION_SMART_PI,
     overrides,
 )
 
@@ -47,6 +48,7 @@ class ThermostatOverSwitch(ThermostatProp[UnderlyingSwitch]):
         self._is_inversed: bool | None = None
         self._lst_vswitch_on: list[str] = []
         self._lst_vswitch_off: list[str] = []
+        self._lst_vswitch_off: list[str] = []
         super().__init__(hass, unique_id, name, config_entry)
 
     @property
@@ -58,6 +60,9 @@ class ThermostatOverSwitch(ThermostatProp[UnderlyingSwitch]):
     def is_inversed(self) -> bool:
         """True if the switch is inversed (for pilot wire and diode)"""
         return self._is_inversed is True
+
+
+
 
     @overrides
     def post_init(self, config_entry: ConfigData):
@@ -158,6 +163,14 @@ class ThermostatOverSwitch(ThermostatProp[UnderlyingSwitch]):
                 "tpi_threshold_high": self._tpi_threshold_high,
                 "minimal_activation_delay": self._minimal_activation_delay,
                 "minimal_deactivation_delay": self._minimal_deactivation_delay,
+            })
+
+        # Add SmartPI attributes if active
+        if self._proportional_function == PROPORTIONAL_FUNCTION_SMART_PI:
+            vtherm_over_switch_attr.update({
+                "calculated_on_percent": self._prop_algorithm.calculated_on_percent,
+                "minimal_activation_delay": self._minimal_activation_delay,
+                "minimal_deactivation_delay": self._minimal_deactivation_delay
             })
 
         attributes["vtherm_over_switch"] = vtherm_over_switch_attr

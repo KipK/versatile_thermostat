@@ -195,6 +195,18 @@ async def async_setup_entry(
     )
 
     platform.async_register_entity_service(
+        SERVICE_RESET_SMART_PI_LEARNING,
+        {},
+        "service_reset_smart_pi_learning",
+    )
+
+    platform.async_register_entity_service(
+        SERVICE_FORCE_SMARTPI_CALIBRATION,
+        {},
+        "service_force_smartpi_calibration",
+    )
+
+    platform.async_register_entity_service(
         SERVICE_SET_TIMED_PRESET,
         {
             vol.Required("preset"): cv.string,
