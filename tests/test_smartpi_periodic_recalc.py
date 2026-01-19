@@ -34,7 +34,7 @@ from custom_components.versatile_thermostat.const import (
     CONF_MINIMAL_ACTIVATION_DELAY,
     CONF_MINIMAL_DEACTIVATION_DELAY,
 )
-from custom_components.versatile_thermostat.smartpi_algorithm import SMARTPI_RECALC_INTERVAL_SEC
+from custom_components.versatile_thermostat.prop_algo_smartpi import SMARTPI_RECALC_INTERVAL_SEC
 
 from .commons import create_thermostat
 
