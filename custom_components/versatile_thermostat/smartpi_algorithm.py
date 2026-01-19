@@ -592,6 +592,8 @@ class SmartPI:
         # Current gains
         self.Kp: float = KP_SAFE
         self.Ki: float = KI_SAFE
+        self._kp: float = KP_SAFE
+        self._ki: float = KI_SAFE
 
         # Outputs (duty-cycle and realized timings)
         self._on_percent: float = 0.0
@@ -1039,6 +1041,14 @@ class SmartPI:
     def integral_error(self) -> float:
         """Current integral accumulator value."""
         return self.integral
+        
+    @property
+    def kp(self) -> float:
+        return self._kp
+        
+    @property
+    def ki(self) -> float:
+        return self._ki
 
     @property
     def u_ff(self) -> float:
@@ -1278,6 +1288,9 @@ class SmartPI:
         # Apply global aggressiveness
         kp *= max(self.aggressiveness, 0.0)
         ki *= max(self.aggressiveness, 0.0)
+        
+        self._kp = kp
+        self._ki = ki
 
         # Apply asymmetric setpoint filter to reduce overshoot on setpoint changes
         # Always call _filter_setpoint() to keep _filtered_setpoint synchronized for diagnostics
