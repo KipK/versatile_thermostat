@@ -47,7 +47,7 @@ class SmartPIHandler:
         entry = t._entry_infos
 
         # Initialize storage
-        self._store = Store(t.hass, STORAGE_VERSION, STORAGE_KEY.format(t.unique_id))
+        self._store = Store(t._hass, STORAGE_VERSION, STORAGE_KEY.format(t.unique_id))
 
         # Read config (mirroring how it was done for TPI, but for SmartPI params)
         cycle_min = entry.get(CONF_CYCLE_MIN, 5)
@@ -180,16 +180,16 @@ class SmartPIHandler:
         """Add SmartPI-specific attributes."""
         t = self._thermostat
         if t._prop_algorithm and isinstance(t._prop_algorithm, SmartPI):
-            t._attr_extra_state_attributes["specific_attributes"].update({
+            t._attr_extra_state_attributes["specific_states"]["smartpi"] = {
                 "smartpi_a": t._prop_algorithm.a,
                 "smartpi_b": t._prop_algorithm.b,
                 "smartpi_on_percent": t._prop_algorithm.on_percent,
                 "smartpi_params": {
-                    "kp": t._prop_algorithm.Kp,
-                    "ki": t._prop_algorithm.Ki,
+                    "kp": t._prop_algorithm.kp,
+                    "ki": t._prop_algorithm.ki,
                     "integral": t._prop_algorithm.integral_error,
                 }
-            })
+            }
 
     async def service_reset_smart_pi_learning(self):
         """Reset learning data."""
