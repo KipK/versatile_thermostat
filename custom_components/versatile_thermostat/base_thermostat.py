@@ -1417,7 +1417,7 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
             return True
 
         # Call specific control heating
-        await self._control_heating_specific(force)
+        await self._control_heating_specific(timestamp, force)
 
         # Check for heating/cooling failures (only for TPI VTherms)
         await self._heating_failure_detection_manager.refresh_state()
@@ -1427,7 +1427,7 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
         self.async_write_ha_state()
         return True
 
-    async def _control_heating_specific(self, force=False):
+    async def _control_heating_specific(self, timestamp: datetime | None, force: bool = False):
         """To be overridden by subclasses"""
         pass
 
