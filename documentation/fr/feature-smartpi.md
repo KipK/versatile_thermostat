@@ -1,0 +1,126 @@
+# L'algorithme SmartPI (v2)
+
+- [L'algorithme SmartPI](#lalgorithme-smartpi-v2)
+  - [Principe de fonctionnement](#principe-de-fonctionnement)
+  - [Phases de fonctionnement](#phases-de-fonctionnement)
+  - [Fonctionnalités Avancées (Smart-PI v2)](#fonctionnalités-avancées-smart-pi-v2)
+  - [Configuration](#configuration)
+  - [Métriques de diagnostic](#métriques-de-diagnostic)
+  - [Services](#services)
+
+## Principe de fonctionnement
+
+L'algorithme **SmartPI** est un régulateur adaptatif qui apprend automatiquement le comportement thermique de votre pièce. Il est conçu pour remplacer le casse-tête du réglage manuel des coefficients PID/TPI par une approche auto-apprenante.
+
+### Comment ça marche ?
+
+1.  **Apprentissage continu (Heartbeat)** : SmartPI analyse la réponse de la pièce en continu (toutes les minutes) via une fenêtre glissante, sans attendre la fin des cycles de chauffe.
+2.  **Modélisation thermique** : Il construit un modèle interne robuste (utilisant une méthode statistique Médiane + MAD) caractérisé par :
+    *   **a** (Efficacité) : Gain de température par minute à 100% de puissance.
+    *   **b** (Déperdition) : Perte de température par minute et par degré d'écart avec l'extérieur.
+    *   **L** (Temps mort) : Délai entre l'allumage du radiateur et le début de chauffage réel.
+3.  **Adaptation des gains** : Les coefficients (Kp, Ki) sont recalculés dynamiquement en fonction de l'inertie de la pièce (Tau) et du temps mort détecté.
+
+## Phases de fonctionnement
+
+### Phase 1 : Hystérésis (Bootstrap et Apprentissage initial)
+
+Au tout premier démarrage (ou après un reset de l'apprentissage), le modèle thermique est vide. Pour garantir un confort immédiat tout en générant des données d'apprentissage de qualité, SmartPI commence **obligatoirement** par une phase de **Bootstrap** en mode **Hystérésis** :
+
+*   **ON** : Quand la température passe sous `Consigne - 0.3°C`.
+*   **OFF** : Quand la température dépasse `Consigne + 0.5°C`.
+*   **Maintien** : Entre les deux seuils, l'état précédent est conservé.
+
+Cette phase génère des cycles de chauffe francs et nets, essentiels pour identifier les paramètres `a` et `b` mais aussi et surtout pour apprendre le **Temps Mort** (Dead Time) initial.
+
+> **Transition** : L'algorithme passe automatiquement en phase **STABLE** dès qu'il a collecté assez de mesures fiables (11 mesures fiables minimum).
+> **Note** : En mode Hystérésis, la coupure est **instantanée** dès que la température dépasse le seuil haut, interrompant le cycle PWM en cours pour éviter toute surchauffe.
+
+### Phase 2 : Stable (Régulation PI adaptative)
+
+Une fois le modèle fiable, SmartPI active son régulateur PI avancé :
+
+*   **Feed-Forward (Prédiction)** : Calcule la puissance de base nécessaire pour compenser les pertes thermiques (basé sur la température extérieure).
+*   **PI (Correction)** : Ajoute ou retire de la puissance pour corriger l'écart exact avec la consigne.
+*   **Raffinage continu** : L'algorithme continue d'affiner son modèle en permanence pour s'adapter aux changements de saison ou d'isolation (via estimation robuste Médiane/MAD).
+
+### Phase 3 : Calibration Forcée (Maintenance du modèle)
+
+Si l'algorithme détecte que ses données de **Temps Mort** ne sont plus fiables ou si aucune calibration n'a eu lieu depuis plus de 48h, il peut déclencher une phase de **Calibration Forcée**.
+
+*   Le thermostat repasse temporairement en mode hystérésis pour effectuer un cycle complet (Refroidissement -> Chauffe -> Refroidissement).
+*   Cela permet de recalibrer précisément les délais de réaction du système.
+*   Cette phase peut aussi être déclenchée manuellement via un service.
+
+## Fonctionnalités Avancées (Smart-PI v2)
+
+La version v2 de SmartPI introduit plusieurs raffinements pour améliorer la stabilité et le confort :
+
+### 1. Estimation du Temps Mort (Dead Time)
+SmartPI détecte automatiquement le délai (**L**) entre l'ordre d'allumage et la réaction effective de la température.
+*   Cela permet d'utiliser des règles de réglage plus fines (IMC - Internal Model Control) pour éviter les oscillations sur les systèmes à retard (ex: planchers chauffants, bains d'huile).
+*   La détection est active même en mode **Hystérésis** (sur les oscillations naturelles).
+
+### 2. Auto-adaptation de la Bande Proche (Auto Near-Band)
+Pour éviter les dépassements (overshoot), SmartPI réduit ses gains lorsqu'il approche de la consigne.
+*   Cette "zone de douceur" est calculée automatiquement en fonction de l'inertie et du temps mort de la pièce.
+*   En mode Chauffage, cette zone est asymétrique : elle commence plus tôt "sous" la consigne pour atterrir en douceur, et serre plus fort "au-dessus" pour couper vite en cas de dépassement.
+
+### 3. Boost à la reprise (Setpoint Boost)
+Si vous augmentez la consigne de plus de **0.3°C** (ex: passage de mode Eco à Confort), SmartPI active temporairement un mode "Boost" :
+*   Le limiteur de vitesse (rate-limiter) est relâché pour permettre une montée en puissance rapide.
+*   L'action proportionnelle est rendue plus agressive pour atteindre la cible au plus vite.
+
+### 4. Filtre de Consigne Asymétrique (Soft Landing)
+Pour éviter de dépasser la cible lors d'une montée en température, SmartPI applique un filtre intelligent sur la consigne interne :
+*   **Montée** : La consigne interne grimpe progressivement une fois passée la mi-course, forçant le régulateur à ralentir avant l'impact.
+*   **Descente** : La consigne est suivie instantanément pour couper le chauffage sans délai (économie d'énergie).
+
+### 5. Protection Thermique (Thermal Guard)
+Si vous baissez la consigne (ex: passage Confort à Eco), une "garde thermique" s'active :
+*   Elle empêche l'intégrale (la mémoire des erreurs passées) de continuer à monter même si la température est encore sous l'ancienne consigne.
+*   Cela évite de stocker de la "chaleur virtuelle" qui provoquerait un dépassement une fois la nouvelle consigne atteinte.
+
+## Configuration
+
+Les paramètres par défaut conviennent à la majorité des cas.
+
+| Paramètre | Description | Valeur conseillée |
+|-----------|-------------|-------------------|
+| **Bande morte** | Zone de tolérance autour de la consigne (±X°C). | 0.05°C |
+| **Agressivité** | Facteur multiplicateur des gains PI. | 0.5 (défaut) à 1.0 (réactif) |
+| **Filtre de consigne** | Active le "Soft Landing". | Activé |
+
+> **Astuce** : Si la température oscille trop, baissez l'agressivité à 0.3. Si elle est trop lente à rejoindre la consigne, montez à 0.8 ou 1.0.
+
+## Métriques de diagnostic
+
+Pour les utilisateurs avancés, l'entité climate expose des attributs détaillés :
+
+| Attribut | Description |
+|----------|-------------|
+| `regulation_mode` | Mode actuel : `hysteresis` (apprentissage) ou `smartpi` (régulé) |
+| `hysteresis_state`| État en phase hystérésis : `on`, `off` ou `band` |
+| `tau_min` | Inertie thermique de la pièce (minutes). Ex: 600 = 10h |
+| `deadtime_heat_s` | Temps mort estimé en secondes (délai de réaction chauffage) |
+| `deadtime_cool_s` | Temps mort estimé en secondes (délai de réaction refroidissement) |
+| `deadtime_reliable`| `true` si le temps mort a été correctement identifié |
+| `a` | Efficacité de chauffage (°C/min à 100%) |
+| `b` | Coefficient de perte (1/min) |
+| `learn_ok_count` | Nombre d'apprentissages validés |
+| `learn_last_reason` | Raison de la dernière tentative d'apprentissage (succès ou motif de rejet) |
+| `error` | Écart Consigne - Température |
+| `u_ff` | Part de puissance "Feed-Forward" (anticipation météo) |
+| `u_pi` | Part de puissance "PI" (correction d'erreur) |
+| `on_percent` | Puissance totale appliquée (0.0 à 1.0) |
+
+
+## Services
+
+### `reset_smart_pi_learning`
+
+Utilisez ce service si vous changez de radiateur ou d'isolation. Il remet à zéro tous les paramètres appris (`a`, `b`, `deadtime`, etc.) et force un retour en phase **Bootstrap / Hystérésis** pour un nouvel apprentissage propre.
+
+### `force_smart_pi_calibration`
+
+Force le thermostat à entrer immédiatement en phase de **Calibration Forcée**. Utile si vous constatez que la régulation pompe ou si le temps mort affiché semble incorrect.

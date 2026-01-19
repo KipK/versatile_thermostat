@@ -3,6 +3,7 @@
 """ Some common resources """
 import asyncio
 import logging
+import time
 from typing import Any, Dict, Callable
 from unittest.mock import patch, MagicMock  # pylint: disable=unused-import
 import pytest  # pylint: disable=unused-import
@@ -54,6 +55,7 @@ from custom_components.versatile_thermostat.underlyings import overrides, Underl
 
 from custom_components.versatile_thermostat.vtherm_api import VersatileThermostatAPI
 from custom_components.versatile_thermostat.vtherm_hvac_mode import VThermHvacMode, VThermHvacMode_OFF, VThermHvacMode_HEAT, VThermHvacMode_COOL, VThermHvacMode_SLEEP
+from custom_components.versatile_thermostat.prop_algo_smartpi import AB_HISTORY_SIZE
 from custom_components.versatile_thermostat.vtherm_preset import VThermPreset
 
 from .const import (  # pylint: disable=unused-import
@@ -1538,3 +1540,24 @@ def set_entity_states_from_entity(hass, entity: Entity):
         new_state=entity.state,
         attributes=entity.attributes,
     )
+
+
+def force_smartpi_stable_mode(smartpi):
+    """Force SmartPI into STABLE phase by populating measurement history."""
+    # Populate with dummy data to pass the length check
+    if not hasattr(smartpi, "est"):
+        return
+
+    # Fill to required size + 1 to be safe
+    for _ in range(AB_HISTORY_SIZE + 1):
+        smartpi.est.a_meas_hist.append(0.01)
+        smartpi.est.b_meas_hist.append(0.002)
+
+    # Force deadtime reliability to avoid automatic CALIBRATION phase
+    if hasattr(smartpi, "dt_est"):
+        smartpi.dt_est.deadtime_heat_s = 600.0
+        smartpi.dt_est.deadtime_cool_s = 600.0
+        smartpi.dt_est.deadtime_heat_reliable = True
+        smartpi.dt_est.deadtime_cool_reliable = True
+        smartpi._last_calibration_time = time.time()
+

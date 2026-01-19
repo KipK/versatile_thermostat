@@ -272,6 +272,12 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
             if cfg.get(CONF_USE_LOCK_CENTRAL_CONFIG) is True:
                 clean_one(cfg, STEP_CENTRAL_LOCK_DATA_SCHEMA)
 
+            if cfg.get(CONF_USE_SMART_PI_CENTRAL_CONFIG) is True:
+                clean_one(cfg, STEP_SMART_PI_CENTRAL_SCHEMA)
+
+            if cfg.get(CONF_USE_HEATING_FAILURE_DETECTION_CENTRAL_CONFIG) is True:
+                clean_one(cfg, STEP_CENTRAL_HEATING_FAILURE_DETECTION_SCHEMA)
+
             # take all central config
             entry_infos = central_config.data.copy()
             # and merge with cleaned config_entry
@@ -1178,6 +1184,7 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
         """Get the eventual ProportionalAlgorithm"""
         return None
 
+
     @property
     def last_temperature_measure(self) -> datetime | None:
         """Get the last temperature datetime"""
@@ -1571,7 +1578,7 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
             return True
 
         # Call specific control heating
-        await self._control_heating_specific(force)
+        await self._control_heating_specific(timestamp, force)
 
         # Check for heating/cooling failures (only for TPI VTherms)
         await self._heating_failure_detection_manager.refresh_state()
@@ -1581,7 +1588,7 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
         self.async_write_ha_state()
         return True
 
-    async def _control_heating_specific(self, force=False):
+    async def _control_heating_specific(self, timestamp: datetime | None, force: bool = False):
         """To be overridden by subclasses"""
         pass
 
