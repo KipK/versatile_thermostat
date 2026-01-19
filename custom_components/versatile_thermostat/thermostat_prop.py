@@ -81,7 +81,13 @@ class ThermostatProp(BaseThermostat[T], Generic[T]):
         """
         # Import here to avoid circular imports
         from .prop_handler_tpi import TPIHandler  # pylint: disable=import-outside-toplevel
-        self._algo_handler = TPIHandler(self)
+        from .prop_algo_smartpi import SmartPIHandler  # pylint: disable=import-outside-toplevel
+        from .const import PROPORTIONAL_FUNCTION_SMART_PI
+
+        if self._proportional_function == PROPORTIONAL_FUNCTION_SMART_PI:
+            self._algo_handler = SmartPIHandler(self)
+        else:
+            self._algo_handler = TPIHandler(self)
         self._algo_handler.init_algorithm()
 
     async def async_added_to_hass(self):
@@ -212,6 +218,13 @@ class ThermostatProp(BaseThermostat[T], Generic[T]):
                 allow_kint_boost=allow_kint_boost,
                 allow_kext_overshoot=allow_kext_overshoot,
             )
+
+    async def service_reset_smart_pi_learning(self):
+        """Service: reset SmartPI learning."""
+        if hasattr(self._algo_handler, 'service_reset_smart_pi_learning'):
+            await self._algo_handler.service_reset_smart_pi_learning()
+        else:
+            raise ServiceValidationError(f"{self} - This service is only available for SmartPI algorithm.")
     async def _on_prop_cycle_start(self, params: dict[str, Any]):
         """Called by Algorithm Handler when a new cycle starts.
         
