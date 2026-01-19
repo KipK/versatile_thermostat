@@ -57,7 +57,7 @@ class SmartPIHandler:
         
         # SmartPI specific
         deadband = entry.get(CONF_SMART_PI_DEADBAND, 0.05)
-        aggressiveness = entry.get(CONF_SMART_PI_AGGRESSIVENESS, 1.0)
+        aggressiveness = entry.get(CONF_SMART_PI_AGGRESSIVENESS, 0.5)
         use_setpoint_filter = entry.get(CONF_SMART_PI_USE_SETPOINT_FILTER, True)
 
         # Create SmartPI instance
