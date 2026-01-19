@@ -1,0 +1,199 @@
+# pylint: disable=line-too-long, abstract-method
+"""Smart PI algorithm handler for ThermostatProp."""
+
+import logging
+from typing import Any, TYPE_CHECKING
+from homeassistant.helpers.storage import Store
+from homeassistant.exceptions import ServiceValidationError
+
+from .smartpi_algorithm import SmartPI
+from .const import (
+    CONF_CYCLE_MIN,
+    CONF_MINIMAL_ACTIVATION_DELAY,
+    CONF_MINIMAL_DEACTIVATION_DELAY,
+    CONF_MAX_ON_PERCENT,
+    CONF_SMART_PI_DEADBAND,
+    CONF_SMART_PI_AGGRESSIVENESS,
+    CONF_SMART_PI_USE_SETPOINT_FILTER,
+    EventType,
+)
+from .vtherm_hvac_mode import VThermHvacMode_OFF
+from .commons import write_event_log
+
+if TYPE_CHECKING:
+    from .thermostat_prop import ThermostatProp
+
+_LOGGER = logging.getLogger(__name__)
+
+STORAGE_VERSION = 1
+STORAGE_KEY = "versatile_thermostat.smartpi.{}"
+
+class SmartPIHandler:
+    """Handler for SmartPI-specific logic."""
+
+    def __init__(self, thermostat: "ThermostatProp"):
+        """Initialize handler with parent thermostat reference."""
+        self._thermostat = thermostat
+        self._store: Store | None = None
+        # State for learning
+        self._last_temp = None
+        self._last_ext_temp = None
+        self._last_time = None
+        self._last_on_percent = 0.0
+
+    def init_algorithm(self):
+        """Initialize SmartPI algorithm."""
+        t = self._thermostat
+        entry = t._entry_infos
+
+        # Initialize storage
+        self._store = Store(t.hass, STORAGE_VERSION, STORAGE_KEY.format(t.unique_id))
+
+        # Read config (mirroring how it was done for TPI, but for SmartPI params)
+        cycle_min = entry.get(CONF_CYCLE_MIN, 5)
+        minimal_activation_delay = entry.get(CONF_MINIMAL_ACTIVATION_DELAY, 0)
+        minimal_deactivation_delay = entry.get(CONF_MINIMAL_DEACTIVATION_DELAY, 0)
+        max_on_percent = entry.get(CONF_MAX_ON_PERCENT, 1.0)
+        
+        # SmartPI specific
+        deadband = entry.get(CONF_SMART_PI_DEADBAND, 0.05)
+        aggressiveness = entry.get(CONF_SMART_PI_AGGRESSIVENESS, 1.0)
+        use_setpoint_filter = entry.get(CONF_SMART_PI_USE_SETPOINT_FILTER, True)
+
+        # Create SmartPI instance
+        # Note: saved_state is loaded asynchronously later
+        t._prop_algorithm = SmartPI(
+            cycle_min=cycle_min,
+            minimal_activation_delay=minimal_activation_delay,
+            minimal_deactivation_delay=minimal_deactivation_delay,
+            name=t.name,
+            max_on_percent=max_on_percent,
+            deadband_c=deadband,
+            aggressiveness=aggressiveness,
+            use_setpoint_filter=use_setpoint_filter,
+        )
+        
+        _LOGGER.info("%s - SmartPI Algorithm initialized", t)
+
+    async def async_added_to_hass(self):
+        """Load persistent data."""
+        t = self._thermostat
+        if self._store:
+            try:
+                data = await self._store.async_load()
+                if data and t._prop_algorithm:
+                    t._prop_algorithm.load_state(data)
+                    _LOGGER.debug("%s - SmartPI state loaded", t)
+            except Exception as e:
+                _LOGGER.error("%s - Failed to load SmartPI state: %s", t, e)
+
+    async def async_startup(self):
+        """Startup actions."""
+        # SmartPI doesn't need a specific background loop like AutoTPI, 
+        # but we might want to ensure everything is ready.
+        pass
+
+    def remove(self):
+        """Cleanup and save state on removal."""
+        t = self._thermostat
+        if self._store and t._prop_algorithm:
+            try:
+                data = t._prop_algorithm.save_state()
+                t.hass.async_create_task(self._store.async_save(data))
+                _LOGGER.debug("%s - SmartPI state saved", t)
+            except Exception as e:
+                _LOGGER.error("%s - Failed to save SmartPI state: %s", t, e)
+
+    async def control_heating(self, force=False):
+        """Control heating using SmartPI."""
+        t = self._thermostat
+        from datetime import datetime
+        import time
+
+        if t._prop_algorithm:
+             # Learning update
+             # We need current values
+             current_temp = t._cur_temp
+             current_ext_temp = t._cur_ext_temp
+             now = time.time()
+             
+             if (
+                 current_temp is not None 
+                 and self._last_temp is not None 
+                 and self._last_time is not None
+                 # Ensure we have a valid previous power (default 0.0)
+             ):
+                 dt_m = (now - self._last_time) / 60.0
+                 # Only learn if we are heating? SmartPI handles this check (hvac_mode check)
+                 # We simply pass data
+                 t._prop_algorithm.update_learning(
+                     current_temp=current_temp,
+                     ext_current_temp=current_ext_temp if current_ext_temp is not None else 0.0, # fallback
+                     previous_temp=self._last_temp,
+                     previous_power=self._last_on_percent,
+                     hvac_mode=t.vtherm_hvac_mode,
+                     cycle_dt=dt_m,
+                     ext_previous_temp=self._last_ext_temp
+                 )
+
+             # Calculate uses current temp, ext temp, etc.
+             t._prop_algorithm.calculate(
+                target_temp=t.target_temperature,
+                current_temp=t._cur_temp,
+                ext_current_temp=t._cur_ext_temp,
+                slope=t.last_temperature_slope,
+                hvac_mode=t.vtherm_hvac_mode,
+            )
+             
+             # Update last state
+             if current_temp is not None:
+                 self._last_temp = current_temp
+                 self._last_time = now
+                 self._last_ext_temp = current_ext_temp
+                 self._last_on_percent = t._prop_algorithm.on_percent
+
+        # Stop here if we are off
+        if t.vtherm_hvac_mode == VThermHvacMode_OFF:
+            _LOGGER.debug("%s - End of cycle (HVAC_MODE_OFF)", t)
+            if t.is_device_active:
+                await t.async_underlying_entity_turn_off()
+        else:
+            for under in t._underlyings:
+                await under.start_cycle(
+                    t.vtherm_hvac_mode,
+                    t._prop_algorithm.on_time_sec if t._prop_algorithm else None,
+                    t._prop_algorithm.off_time_sec if t._prop_algorithm else None,
+                    t._prop_algorithm.on_percent if t._prop_algorithm else None,
+                    force,
+                )
+
+    async def on_state_changed(self):
+        """Handle state changes."""
+        # SmartPI executes on calculate(), which is triggered by thermostat update_events.
+        # No special loop start/stop needed unless we want periodic recalc?
+        # The prompt mentioned "SmartPi Call Frequency Verification" in history.
+        # If we need periodic recalc, we might need a timer here.
+        # But base ThermostatProp typically triggers recalculate on temp change.
+        pass
+
+    def update_attributes(self):
+        """Add SmartPI-specific attributes."""
+        t = self._thermostat
+        if t._prop_algorithm and isinstance(t._prop_algorithm, SmartPI):
+            t._attr_extra_state_attributes["specific_attributes"].update({
+                "smartpi_a": t._prop_algorithm.a,
+                "smartpi_b": t._prop_algorithm.b,
+                "smartpi_on_percent": t._prop_algorithm.on_percent,
+                "smartpi_params": {
+                    "kp": t._prop_algorithm.Kp,
+                    "ki": t._prop_algorithm.Ki,
+                    "integral": t._prop_algorithm.integral_error,
+                }
+            })
+
+    async def service_reset_smart_pi_learning(self):
+        """Reset learning data."""
+        t = self._thermostat
+        if t._prop_algorithm and isinstance(t._prop_algorithm, SmartPI):
+             t._prop_algorithm.reset_learning()
+             write_event_log(_LOGGER, t, "SmartPI learning reset")

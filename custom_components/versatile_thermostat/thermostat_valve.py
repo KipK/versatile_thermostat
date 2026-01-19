@@ -14,10 +14,18 @@ from homeassistant.core import Event, HomeAssistant, callback
 from .base_thermostat import BaseThermostat, ConfigData
 from .thermostat_prop import ThermostatProp
 
-from .const import *  # pylint: disable=wildcard-import, unused-wildcard-import
+from .const import (
+    CONF_AUTO_REGULATION_DTEMP,
+    CONF_AUTO_REGULATION_PERIOD_MIN,
+    CONF_UNDERLYING_LIST,
+    PROPORTIONAL_FUNCTION_TPI,
+    PROPORTIONAL_FUNCTION_SMART_PI,
+    overrides,
+)
 from .commons import write_event_log
 
 from .underlyings import UnderlyingValve
+from .vtherm_hvac_mode import VThermHvacMode_OFF
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -125,34 +133,54 @@ class ThermostatOverValve(ThermostatProp[UnderlyingValve]):  # pylint: disable=a
         """Custom attributes"""
         super().update_custom_attributes()
 
-        self._attr_extra_state_attributes.update(
-            {
-                "is_over_valve": self.is_over_valve,
-                "on_percent": self.safe_on_percent,
-                "power_percent": self.power_percent,
-                "valve_open_percent": self.valve_open_percent,
-                "vtherm_over_valve": {
-                    "valve_open_percent": self.valve_open_percent,
-                    "underlying_entities": [underlying.entity_id for underlying in self._underlyings],
-                    "on_percent": self.safe_on_percent,
-                    "function": self._proportional_function,
-                    "tpi_coef_int": self._tpi_coef_int,
-                    "tpi_coef_ext": self._tpi_coef_ext,
-                    "tpi_threshold_low": self._tpi_threshold_low,
-                    "tpi_threshold_high": self._tpi_threshold_high,
-                    "minimal_activation_delay": self._minimal_activation_delay,
-                    "minimal_deactivation_delay": self._minimal_deactivation_delay,
-                    "auto_regulation_dpercent": self._auto_regulation_dpercent,
-                    "auto_regulation_period_min": self._auto_regulation_period_min,
-                    "last_calculation_timestamp": (self._last_calculation_timestamp.astimezone(self._current_tz).isoformat() if self._last_calculation_timestamp else None),
-                    "calculated_on_percent": (
-                        self._prop_algorithm.calculated_on_percent
-                        if self._prop_algorithm
-                        else None
-                    ),
-                },
-            }
-        )
+        # Standard attributes
+        attributes = {
+            "is_over_valve": self.is_over_valve,
+            "on_percent": self.safe_on_percent,
+            "power_percent": self.power_percent,
+            "valve_open_percent": self.valve_open_percent,
+        }
+
+        vtherm_over_valve_attr = {
+            "valve_open_percent": self.valve_open_percent,
+            "underlying_entities": [underlying.entity_id for underlying in self._underlyings],
+            "on_percent": self.safe_on_percent,
+            "function": self._proportional_function,
+            "auto_regulation_dpercent": self._auto_regulation_dpercent,
+            "auto_regulation_period_min": self._auto_regulation_period_min,
+            "last_calculation_timestamp": (self._last_calculation_timestamp.astimezone(self._current_tz).isoformat() if self._last_calculation_timestamp else None),
+        }
+
+        # Add TPI attributes if active
+        if self._proportional_function == PROPORTIONAL_FUNCTION_TPI:
+            vtherm_over_valve_attr.update({
+                "tpi_coef_int": self._tpi_coef_int,
+                "tpi_coef_ext": self._tpi_coef_ext,
+                "tpi_threshold_low": self._tpi_threshold_low,
+                "tpi_threshold_high": self._tpi_threshold_high,
+                "minimal_activation_delay": self._minimal_activation_delay,
+                "minimal_deactivation_delay": self._minimal_deactivation_delay,
+                "calculated_on_percent": (
+                    self._prop_algorithm.calculated_on_percent
+                    if self._prop_algorithm
+                    else None
+                ),
+            })
+            
+        # Add SmartPI attributes if active
+        if self._proportional_function == PROPORTIONAL_FUNCTION_SMART_PI:
+            vtherm_over_valve_attr.update({
+                "calculated_on_percent": (
+                    self._prop_algorithm.calculated_on_percent
+                    if self._prop_algorithm
+                    else None
+                ),
+                "minimal_activation_delay": self._minimal_activation_delay,
+                "minimal_deactivation_delay": self._minimal_deactivation_delay
+            })
+
+        attributes["vtherm_over_valve"] = vtherm_over_valve_attr
+        self._attr_extra_state_attributes.update(attributes)
 
         _LOGGER.debug("%s - Calling update_custom_attributes: %s", self, self._attr_extra_state_attributes)
 

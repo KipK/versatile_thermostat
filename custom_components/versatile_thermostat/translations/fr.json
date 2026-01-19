@@ -36,6 +36,7 @@
           "auto_tpi_configuration": "Auto TPI - Configuration",
           "auto_tpi_avg_settings": "Auto TPI - Moyenne pondérée",
           "auto_tpi_ema_settings": "Auto TPI - EWMA",
+          "smart_pi": "SmartPI",
           "finalize": "Finaliser la création",
           "configuration_not_complete": "Configuration incomplète"
         }
@@ -328,6 +329,22 @@
           "auto_tpi_ema_decay_rate": "Taux auquel Alpha diminue avec le temps (stabilisation)"
         }
       },
+      "smart_pi": {
+        "title": "Paramètres du contrôleur SmartPI",
+        "description": "Configuration des paramètres du contrôleur SmartPI adaptatif.",
+        "data": {
+          "use_smart_pi_central_config": "Utiliser la configuration SmartPI centrale",
+          "smart_pi_deadband": "Bande morte (°C)",
+          "smart_pi_aggressiveness": "Agressivité",
+          "smart_pi_use_setpoint_filter": "Utiliser le filtre de consigne"
+        },
+        "data_description": {
+          "use_smart_pi_central_config": "Cochez pour utiliser la configuration SmartPI centrale. Décochez pour utiliser une configuration SmartPI spécifique pour ce VTherm",
+          "smart_pi_deadband": "Bande morte autour de la consigne. Aucune action de régulation dans cette plage. Évite les oscillations près de la cible.",
+          "smart_pi_aggressiveness": "Vitesse de réponse du contrôleur (0.1=très rapide, 0.5=équilibré, 1.0=lent, 2.0=très lent)",
+          "smart_pi_use_setpoint_filter": "Activez le filtre de consigne asymétrique pour réduire le dépassement lors de l'augmentation de la consigne. Décochez si vous voulez que le thermostat réagisse immédiatement aux changements de consigne."
+        }
+      },
       "sync_device_internal_temp": {
         "title": "Synchronisation de la température interne des sous-jacents",
         "description": "Configuration de la synchronisation des températures internes des sous-jacents&nbsp;[![?](https://img.icons8.com/color/18/help.png)](https://github.com/jmcollin78/versatile_thermostat/blob/main/documentation/fr/feature-sync_device_temp.md)",
@@ -413,6 +430,7 @@
           "sync_device_internal_temp": "Synchronisation de la température de l'appareil",
           "lock": "Verrouillage",
           "heating_failure_detection": "Détection de panne de chauffage",
+          "smart_pi": "SmartPI",
           "finalize": "Finaliser les modifications",
           "configuration_not_complete": "Configuration incomplète"
         }
@@ -709,6 +727,22 @@
           "auto_tpi_ema_decay_rate": "Taux auquel Alpha diminue avec le temps (stabilisation)"
         }
       },
+      "smart_pi": {
+        "title": "Paramètres du contrôleur SmartPI - {name}",
+        "description": "Configuration des paramètres du contrôleur SmartPI adaptatif.",
+        "data": {
+          "use_smart_pi_central_config": "Utiliser la configuration SmartPI centrale",
+          "smart_pi_deadband": "Bande morte (°C)",
+          "smart_pi_aggressiveness": "Agressivité",
+          "smart_pi_use_setpoint_filter": "Utiliser le filtre de consigne"
+        },
+        "data_description": {
+          "use_smart_pi_central_config": "Cochez pour utiliser la configuration SmartPI centrale. Décochez pour utiliser une configuration SmartPI spécifique pour ce VTherm",
+          "smart_pi_deadband": "Bande morte autour de la consigne. Aucune action de régulation dans cette plage. Évite les oscillations près de la cible.",
+          "smart_pi_aggressiveness": "Vitesse de réponse du contrôleur (0.1=très rapide, 0.5=équilibré, 1.0=lent, 2.0=très lent)",
+          "smart_pi_use_setpoint_filter": "Activez le filtre de consigne asymétrique pour réduire le dépassement lors de l'augmentation de la consigne. Décochez si vous voulez que le thermostat réagisse immédiatement aux changements de consigne."
+        }
+      },
       "sync_device_internal_temp": {
         "title": "Synchronisation de la température interne des sous-jacents",
         "description": "Configuration de la synchronisation des températures internes des sous-jacents&nbsp;[![?](https://img.icons8.com/color/18/help.png)](https://github.com/jmcollin78/versatile_thermostat/blob/main/documentation/fr/feature-sync_device_temp.md)",
@@ -961,6 +995,10 @@
           "description": "Pourcentage de puissance minimum pour considérer un cycle comme saturé (par défaut 95%). Des valeurs plus basses incluront plus de cycles mais peuvent être moins précises."
         }
       }
+    },
+    "reset_smart_pi_learning": {
+      "name": "Réinitialiser l'apprentissage SmartPI",
+      "description": "Réinitialiser l'apprentissage de l'algorithme SmartPI aux valeurs par défaut."
     },
     "set_tpi_parameters": {
       "name": "Définir les paramètres TPI",
