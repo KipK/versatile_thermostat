@@ -1055,6 +1055,106 @@ class SmartPI:
         """Last feed-forward value."""
         return self._last_u_ff
 
+    @property
+    def u_pi(self) -> float:
+        return self._last_u_pi
+        
+    @property
+    def tau_min(self) -> float:
+        return self.est.tau_reliability().tau_min
+
+    @property
+    def tau_reliable(self) -> bool:
+        return self._tau_reliable
+
+    @property
+    def learn_ok_count(self) -> int:
+        return self.est.learn_ok_count
+
+    @property
+    def learn_ok_count_a(self) -> int:
+        return self.est.learn_ok_count_a
+
+    @property
+    def learn_ok_count_b(self) -> int:
+        return self.est.learn_ok_count_b
+
+    @property
+    def learn_skip_count(self) -> int:
+        return self.est.learn_skip_count
+        
+    @property
+    def learn_last_reason(self) -> str:
+        return self.est.learn_last_reason
+
+    @property
+    def learning_start_dt(self) -> str:
+         return self._learning_start_date.isoformat() if self._learning_start_date else None
+
+    @property
+    def i_mode(self) -> str:
+        return self._last_i_mode
+        
+    @property
+    def sat(self) -> str:
+        return self._last_sat
+
+    @property
+    def error(self) -> float:
+        return self._last_error
+        
+    @property
+    def error_p(self) -> float:
+        return self._last_error_p
+        
+    @property
+    def error_filtered(self) -> float:
+        return self._e_filt if self._e_filt is not None else 0.0
+
+    @property
+    def sign_flip_active(self) -> bool:
+        return self._sign_flip_active
+
+    @property
+    def cycles_since_reset(self) -> int:
+         return self._cycles_since_reset
+
+    @property
+    def filtered_setpoint(self) -> float:
+        return self._filtered_setpoint
+
+    @property
+    def learning_resume_ts(self) -> float:
+        return self._learning_resume_ts
+
+    @property
+    def u_cmd(self) -> float:
+        return self._last_u_cmd
+        
+    @property
+    def u_limited(self) -> float:
+        return self._last_u_limited
+        
+    @property
+    def u_applied(self) -> float:
+        return self._last_u_applied
+        
+    @property
+    def aw_du(self) -> float:
+        return self._last_aw_du
+        
+    @property
+    def forced_by_timing(self) -> bool:
+        return self._last_forced_by_timing
+        
+    @property
+    def in_deadband(self) -> bool:
+        return self._in_deadband
+        
+    @property
+    def setpoint_boost_active(self) -> bool:
+        return self._setpoint_boost_active
+
     # ------------------------------
     # Asymmetric setpoint filter
     # ------------------------------

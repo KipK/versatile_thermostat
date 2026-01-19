@@ -180,15 +180,51 @@ class SmartPIHandler:
         """Add SmartPI-specific attributes."""
         t = self._thermostat
         if t._prop_algorithm and isinstance(t._prop_algorithm, SmartPI):
-            t._attr_extra_state_attributes["specific_states"]["smartpi"] = {
-                "smartpi_a": t._prop_algorithm.a,
-                "smartpi_b": t._prop_algorithm.b,
-                "smartpi_on_percent": t._prop_algorithm.on_percent,
-                "smartpi_params": {
-                    "kp": t._prop_algorithm.kp,
-                    "ki": t._prop_algorithm.ki,
-                    "integral": t._prop_algorithm.integral_error,
-                }
+            algo = t._prop_algorithm
+            t._attr_extra_state_attributes["specific_states"]["smart_pi"] = {
+                "a": algo.a,
+                "b": algo.b,
+                "tau_min": algo.tau_min,
+                "tau_reliable": algo.tau_reliable,
+                "learn_ok_count": algo.learn_ok_count,
+                "learn_ok_count_a": algo.learn_ok_count_a,
+                "learn_ok_count_b": algo.learn_ok_count_b,
+                "learn_skip_count": algo.learn_skip_count,
+                "learn_last_reason": algo.learn_last_reason,
+                "learning_start_dt": algo.learning_start_dt,
+                "Kp": algo.kp,
+                "Ki": algo.ki,
+                "integral_error": algo.integral_error,
+                "i_mode": algo.i_mode,
+                "sat": algo.sat,
+                "error": algo.error,
+                "error_p": algo.error_p,
+                "error_filtered": algo.error_filtered,
+                "setpoint_weight_b": algo.setpoint_weight_b,
+                "near_band_deg": algo.near_band_deg,
+                "kp_near_factor": algo.kp_near_factor,
+                "ki_near_factor": algo.ki_near_factor,
+                "sign_flip_leak": algo.sign_flip_leak,
+                "sign_flip_active": algo.sign_flip_active,
+                "u_ff": algo.u_ff,
+                "u_pi": algo.u_pi,
+                "ff_warmup_ok_count": algo.ff_warmup_ok_count,
+                "ff_warmup_cycles": algo.ff_warmup_cycles,
+                "ff_scale_unreliable_max": algo.ff_scale_unreliable_max,
+                "cycles_since_reset": algo.cycles_since_reset,
+                "on_percent": algo.on_percent,
+                "on_time_sec": algo.on_time_sec,
+                "off_time_sec": algo.off_time_sec,
+                "cycle_min": algo._cycle_min,
+                "filtered_setpoint": algo.filtered_setpoint,
+                "learning_resume_ts": algo.learning_resume_ts,
+                "u_cmd": algo.u_cmd,
+                "u_limited": algo.u_limited,
+                "u_applied": algo.u_applied,
+                "aw_du": algo.aw_du,
+                "forced_by_timing": algo.forced_by_timing,
+                "in_deadband": algo.in_deadband,
+                "setpoint_boost_active": algo.setpoint_boost_active,
             }
 
     async def service_reset_smart_pi_learning(self):
