@@ -19,7 +19,6 @@ class TpiAlgorithm:
 
     def __init__(
         self,
-
         tpi_coef_int,
         tpi_coef_ext,
         cycle_min: int,
@@ -34,7 +33,6 @@ class TpiAlgorithm:
         _LOGGER.debug(
             "%s - Creation new TpiAlgorithm tpi_coef_int: %s, tpi_coef_ext: %s, cycle_min:%d, minimal_activation_delay:%d, minimal_deactivation_delay:%d, tpi_threshold_low=%s, tpi_threshold_high=%s",  # pylint: disable=line-too-long
             vtherm_entity_id,
-
             tpi_coef_int,
             tpi_coef_ext,
             cycle_min,
