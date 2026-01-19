@@ -81,7 +81,7 @@ class ThermostatProp(BaseThermostat[T], Generic[T]):
         """
         # Import here to avoid circular imports
         from .prop_handler_tpi import TPIHandler  # pylint: disable=import-outside-toplevel
-        from .prop_algo_smartpi import SmartPIHandler  # pylint: disable=import-outside-toplevel
+        from .prop_handler_smartpi import SmartPIHandler  # pylint: disable=import-outside-toplevel
         from .const import PROPORTIONAL_FUNCTION_SMART_PI
 
         if self._proportional_function == PROPORTIONAL_FUNCTION_SMART_PI:
