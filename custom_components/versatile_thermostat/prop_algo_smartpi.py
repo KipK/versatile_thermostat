@@ -57,7 +57,7 @@ class SmartPIHandler:
         
         # SmartPI specific
         deadband = entry.get(CONF_SMART_PI_DEADBAND, 0.05)
-        aggressiveness = entry.get(CONF_SMART_PI_AGGRESSIVENESS, 0.5)
+        aggressiveness = entry.get(CONF_SMART_PI_AGGRESSIVENESS, 1.0)
         use_setpoint_filter = entry.get(CONF_SMART_PI_USE_SETPOINT_FILTER, True)
 
         # Create SmartPI instance
@@ -112,29 +112,17 @@ class SmartPIHandler:
 
         if t._prop_algorithm:
              # Learning update
-             # We need current values
              current_temp = t._cur_temp
              current_ext_temp = t._cur_ext_temp
-             now = time.time()
              
              # Trigger learning only on cycle timer (timestamp is not None)
-             if timestamp is not None and (
-                 current_temp is not None 
-                 and self._last_temp is not None 
-                 and self._last_time is not None
-                 # Ensure we have a valid previous power (default 0.0)
-             ):
-                 dt_m = (now - self._last_time) / 60.0
-                 # Only learn if we are heating? SmartPI handles this check (hvac_mode check)
-                 # We simply pass data
+             if timestamp is not None and current_temp is not None:
+                 # We simply pass current data. SmartPI determines dt and deltas against its internal snapshot.
                  t._prop_algorithm.update_learning(
                      current_temp=current_temp,
-                     ext_current_temp=current_ext_temp if current_ext_temp is not None else 0.0, # fallback
-                     previous_temp=self._last_temp,
-                     previous_power=self._last_on_percent,
+                     ext_current_temp=current_ext_temp if current_ext_temp is not None else 0.0,
                      hvac_mode=t.vtherm_hvac_mode,
-                     cycle_dt=dt_m,
-                     ext_previous_temp=self._last_ext_temp
+                     current_temp_ts=time.time()
                  )
 
              # Calculate uses current temp, ext temp, etc.
@@ -145,20 +133,6 @@ class SmartPIHandler:
                 slope=t.last_temperature_slope,
                 hvac_mode=t.vtherm_hvac_mode,
             )
-             
-             # Update last state (only if we just learned/completed a cycle)
-             # This ensures dt matches the cycle duration next time
-             if timestamp is not None and current_temp is not None:
-                 self._last_temp = current_temp
-                 self._last_time = now
-                 self._last_ext_temp = current_ext_temp
-                 self._last_on_percent = t._prop_algorithm.on_percent
-             elif self._last_time is None and current_temp is not None:
-                 # Initialize on first run
-                 self._last_temp = current_temp
-                 self._last_time = now
-                 self._last_ext_temp = current_ext_temp
-                 self._last_on_percent = t._prop_algorithm.on_percent
 
         # Stop here if we are off
         if t.vtherm_hvac_mode == VThermHvacMode_OFF:
