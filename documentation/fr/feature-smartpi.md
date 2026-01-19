@@ -124,7 +124,7 @@ Une fois le modèle fiable, les gains sont calculés via une heuristique simple 
 ### 5. Application de la commande
 Enfin, il calcule la puissance à envoyer au radiateur :
 $$ u = u_{ff} + u_{pi} $$
-- **$u_{ff}$ (Feed-forward)** : La puissance nécessaire pour compenser les pertes thermiques. Ce terme monte progressivement au démarrage (rampe de warmup) et est capé à 30% tant que le modèle n'est pas fiable.
+- **$u_{ff}$ (Feed-forward)** : La puissance nécessaire pour compenser les pertes thermiques. Ce terme monte progressivement au démarrage (rampe de warmup) et est désactivé tant que le modèle n'est pas fiable.
 - **$u_{pi}$ (Correction)** : Le surplus pour corriger l'écart actuel par rapport à la consigne. Utilise une erreur pondérée (2-DOF) pour l'action proportionnelle.
 
 ### Anti-windup : Conditional Integration
