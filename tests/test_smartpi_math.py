@@ -15,7 +15,7 @@ from custom_components.versatile_thermostat.const import (
     CONF_EXTERNAL_TEMP_SENSOR,
     CONF_TEMP_SENSOR,
 )
-from custom_components.versatile_thermostat.smartpi_algorithm import SmartPI
+from custom_components.versatile_thermostat.prop_algo_smartpi import SmartPI
 
 from .commons import create_thermostat, send_temperature_change_event
 

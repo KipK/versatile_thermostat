@@ -8,7 +8,7 @@ import pytest
 from unittest.mock import MagicMock
 from collections import deque
 
-from custom_components.versatile_thermostat.smartpi_algorithm import (
+from custom_components.versatile_thermostat.prop_algo_smartpi import (
     SmartPI,
     ABEstimator,
     KP_SAFE,
