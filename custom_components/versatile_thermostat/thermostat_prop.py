@@ -123,10 +123,10 @@ class ThermostatProp(BaseThermostat[T], Generic[T]):
                 self.vtherm_hvac_mode or VThermHvacMode_OFF,
             )
 
-    async def _control_heating_specific(self, force=False):
+    async def _control_heating_specific(self, timestamp, force=False):
         """Control heating using the algorithm handler."""
         if self._algo_handler:
-            await self._algo_handler.control_heating(force)
+            await self._algo_handler.control_heating(timestamp, force)
 
     async def update_states(self, force=False):
         """Update states and delegate to handler."""

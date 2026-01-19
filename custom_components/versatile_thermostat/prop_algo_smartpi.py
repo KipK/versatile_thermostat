@@ -104,7 +104,7 @@ class SmartPIHandler:
             except Exception as e:
                 _LOGGER.error("%s - Failed to save SmartPI state: %s", t, e)
 
-    async def control_heating(self, force=False):
+    async def control_heating(self, timestamp=None, force=False):
         """Control heating using SmartPI."""
         t = self._thermostat
         from datetime import datetime
@@ -117,7 +117,8 @@ class SmartPIHandler:
              current_ext_temp = t._cur_ext_temp
              now = time.time()
              
-             if (
+             # Trigger learning only on cycle timer (timestamp is not None)
+             if timestamp is not None and (
                  current_temp is not None 
                  and self._last_temp is not None 
                  and self._last_time is not None
@@ -145,8 +146,15 @@ class SmartPIHandler:
                 hvac_mode=t.vtherm_hvac_mode,
             )
              
-             # Update last state
-             if current_temp is not None:
+             # Update last state (only if we just learned/completed a cycle)
+             # This ensures dt matches the cycle duration next time
+             if timestamp is not None and current_temp is not None:
+                 self._last_temp = current_temp
+                 self._last_time = now
+                 self._last_ext_temp = current_ext_temp
+                 self._last_on_percent = t._prop_algorithm.on_percent
+             elif self._last_time is None and current_temp is not None:
+                 # Initialize on first run
                  self._last_temp = current_temp
                  self._last_time = now
                  self._last_ext_temp = current_ext_temp
