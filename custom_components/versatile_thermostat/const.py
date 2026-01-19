@@ -16,6 +16,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.util import dt as dt_util
 
 PROPORTIONAL_FUNCTION_TPI = "tpi"
+PROPORTIONAL_FUNCTION_SMART_PI = "smart_pi"
 
 from .vtherm_preset import VThermPreset, VThermPresetWithAC, VThermPresetWithAway, VThermPresetWithACAway, PRESET_TEMP_SUFFIX, PRESET_AWAY_SUFFIX  # pylint: disable=unused-import
 from .vtherm_hvac_mode import (
@@ -184,6 +185,12 @@ CONF_AUTO_TPI_AGGRESSIVENESS = "auto_tpi_aggressiveness"
 
 CONF_AUTO_TPI_EMA_DECAY_RATE = "auto_tpi_ema_decay_rate"
 
+# SmartPI specific parameters
+CONF_SMART_PI_DEADBAND = "smart_pi_deadband"
+CONF_SMART_PI_AGGRESSIVENESS = "smart_pi_aggressiveness"
+CONF_SMART_PI_USE_SETPOINT_FILTER = "smart_pi_use_setpoint_filter"
+
+CONF_USE_SMART_PI_CENTRAL_CONFIG = "use_smart_pi_central_config"
 
 # Global params into configuration.yaml
 CONF_SHORT_EMA_PARAMS = "short_ema_params"
@@ -403,6 +410,7 @@ ALL_CONF = (
 
 CONF_FUNCTIONS = [
     PROPORTIONAL_FUNCTION_TPI,
+    PROPORTIONAL_FUNCTION_SMART_PI,
 ]
 
 CONF_AUTO_REGULATION_MODES = [
@@ -459,6 +467,8 @@ SERVICE_UNLOCK = "unlock"
 SERVICE_SET_TPI_PARAMETERS = "set_tpi_parameters"
 SERVICE_SET_AUTO_TPI_MODE = "set_auto_tpi_mode"
 SERVICE_AUTO_TPI_CALIBRATE_CAPACITY = "auto_tpi_calibrate_capacity"
+SERVICE_RESET_SMART_PI_LEARNING = "reset_smart_pi_learning"
+
 SERVICE_SET_TIMED_PRESET = "set_timed_preset"
 SERVICE_CANCEL_TIMED_PRESET = "cancel_timed_preset"
 SERVICE_RECALIBRATE_VALVES = "recalibrate_valves"
@@ -587,6 +597,7 @@ class EventType(Enum):
     WINDOW_AUTO_EVENT = "versatile_thermostat_window_auto_event"
     AUTO_START_STOP_EVENT = "versatile_thermostat_auto_start_stop_event"
     AUTO_TPI_EVENT = "versatile_thermostat_auto_tpi_event"
+    SMART_PI_EVENT = "versatile_thermostat_smart_pi_event"
     TIMED_PRESET_EVENT = "versatile_thermostat_timed_preset_event"
     HEATING_FAILURE_EVENT = "versatile_thermostat_heating_failure_event"
 

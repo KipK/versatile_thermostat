@@ -1,0 +1,4 @@
+# SmartPI Report Script Dependencies
+
+requests>=2.25.0
+matplotlib>=3.5.0

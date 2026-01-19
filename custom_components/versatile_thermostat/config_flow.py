@@ -559,6 +559,10 @@ class VersatileThermostatBaseConfigFlow(FlowHandler):
         ):
             menu_options.append("tpi")
 
+        # SmartPI menu visible when SmartPI algorithm is selected OR in central config
+        if self._infos.get(CONF_PROP_FUNCTION) == PROPORTIONAL_FUNCTION_SMART_PI or is_central_config:
+            menu_options.append("smart_pi")
+
         if self._infos.get(CONF_THERMOSTAT_TYPE) in [
             CONF_THERMOSTAT_SWITCH,
             CONF_THERMOSTAT_VALVE,
@@ -889,6 +893,40 @@ class VersatileThermostatBaseConfigFlow(FlowHandler):
         schema = STEP_AUTO_TPI_EMA_SETTINGS_SCHEMA
         next_step = self.async_step_menu
         return await self.generic_step("auto_tpi_ema_settings", schema, user_input, next_step)
+
+    async def async_step_smart_pi(self, user_input: dict | None = None) -> FlowResult:
+        """Handle the SmartPI configuration step (checkbox for central config)"""
+        _LOGGER.debug(
+            "Into ConfigFlow.async_step_smart_pi user_input=%s", user_input
+        )
+
+        next_step = self.async_step_menu
+        if self._infos[CONF_THERMOSTAT_TYPE] == CONF_THERMOSTAT_CENTRAL_CONFIG:
+            # Central config: show parameters directly
+            schema = STEP_SMART_PI_CENTRAL_SCHEMA
+        else:
+            # VTherm: show checkbox first
+            schema = STEP_SMART_PI_SCHEMA
+
+            if user_input:
+                if user_input.get(CONF_USE_SMART_PI_CENTRAL_CONFIG, False) is False:
+                    if self._infos.get(COMES_FROM) == "async_step_spec_smart_pi":
+                        schema = STEP_SMART_PI_PARAMS_SCHEMA
+                        del self._infos[COMES_FROM]
+                    else:
+                        next_step = self.async_step_spec_smart_pi
+
+        return await self.generic_step("smart_pi", schema, user_input, next_step)
+
+    async def async_step_spec_smart_pi(self, user_input: dict | None = None) -> FlowResult:
+        """Handle the specific SmartPI parameters step"""
+        _LOGGER.debug("Into ConfigFlow.async_step_spec_smart_pi user_input=%s", user_input)
+
+        schema = STEP_SMART_PI_PARAMS_SCHEMA
+        self._infos[COMES_FROM] = "async_step_spec_smart_pi"
+        next_step = self.async_step_menu
+
+        return await self.generic_step("smart_pi", schema, user_input, next_step)
 
     async def async_step_presets(self, user_input: dict | None = None) -> FlowResult:
         """Handle the presets flow steps"""
