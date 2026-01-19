@@ -100,8 +100,8 @@ class SmartPIHandler:
         # Check if we need to start the periodic recalculation timer
         await self.on_state_changed()
 
-    def remove(self):
-        """Cleanup and save state on removal."""
+    async def _async_save(self):
+        """Save SmartPI state to storage."""
         t = self._thermostat
         if self._store and t._prop_algorithm:
             try:
@@ -109,10 +109,14 @@ class SmartPIHandler:
                 t.hass.async_create_task(self._store.async_save(data))
                 _LOGGER.debug("%s - SmartPI state saved", t)
             except Exception as e:
-                t.hass.async_create_task(self._store.async_save(data))
-                _LOGGER.debug("%s - SmartPI state saved", t)
-            except Exception as e:
                 _LOGGER.error("%s - Failed to save SmartPI state: %s", t, e)
+
+    def remove(self):
+        """Cleanup and save state on removal."""
+        t = self._thermostat
+        if self._store and t._prop_algorithm:
+             # We can't await here easily, but we schedule save
+             t.hass.async_create_task(self._async_save())
         
         self._stop_recalc_timer()
 
@@ -158,8 +162,12 @@ class SmartPIHandler:
                     t._prop_algorithm.on_time_sec if t._prop_algorithm else None,
                     t._prop_algorithm.off_time_sec if t._prop_algorithm else None,
                     t._prop_algorithm.on_percent if t._prop_algorithm else None,
+                    t._prop_algorithm.on_percent if t._prop_algorithm else None,
                     force,
                 )
+        
+        # Save state after cycle to persist learning data
+        await self._async_save()
 
     async def on_state_changed(self):
         """Handle state changes."""
