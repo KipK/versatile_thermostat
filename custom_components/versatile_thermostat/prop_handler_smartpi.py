@@ -6,6 +6,7 @@ from typing import Any, TYPE_CHECKING
 from homeassistant.helpers.storage import Store
 from homeassistant.exceptions import ServiceValidationError
 
+from homeassistant.util import slugify
 from homeassistant.helpers.storage import Store
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers.event import async_track_time_interval
@@ -51,8 +52,10 @@ class SmartPIHandler:
         t = self._thermostat
         entry = t._entry_infos
 
-        # Initialize storage
-        self._store = Store(t._hass, STORAGE_VERSION, STORAGE_KEY.format(t.unique_id))
+        # Initialize storage with slugified name to allow retrieval if re-created
+        # STORAGE_KEY is "versatile_thermostat.smartpi.{}"
+        safe_name = slugify(t.name)
+        self._store = Store(t._hass, STORAGE_VERSION, STORAGE_KEY.format(safe_name))
 
         # Read config (mirroring how it was done for TPI, but for SmartPI params)
         cycle_min = entry.get(CONF_CYCLE_MIN, 5)
