@@ -162,7 +162,6 @@ class SmartPIHandler:
                     t._prop_algorithm.on_time_sec if t._prop_algorithm else None,
                     t._prop_algorithm.off_time_sec if t._prop_algorithm else None,
                     t._prop_algorithm.on_percent if t._prop_algorithm else None,
-                    t._prop_algorithm.on_percent if t._prop_algorithm else None,
                     force,
                 )
         
