@@ -536,7 +536,7 @@ class SmartPI:
         max_on_percent: Optional[float] = None,
         # Tuning knobs (keyword)
         deadband_c: float = DEFAULT_DEADBAND_C,
-        aggressiveness: float = 1.0,  # Note: logic changed, 1.0 is now default
+        aggressiveness: float = 0.5,  # Note: logic changed, 1.0 is now default
         saved_state: Optional[Dict[str, Any]] = None,
         # --- Feed-forward (FF) progressive enablement ("smart warm-up") ---
         ff_warmup_ok_count: int = 30,
