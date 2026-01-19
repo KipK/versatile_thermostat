@@ -732,6 +732,10 @@ def test_update_learning_skips_when_resume_counter_active():
     assert smartpi._learning_resume_ts > time.time()
 
     # First update_learning call (immediate) should skip
+    smartpi.start_new_cycle(0.5, 19.0, 10.0) # Ensure start snapshot exists
+    # Spoof start time to ensure valid cycle duration (avoid "cycle too short")
+    smartpi._cycle_start_state["time"] -= 600.0 # 10 minutes ago
+
     smartpi.update_learning(
         current_temp=20.0,
         ext_current_temp=10.0,
@@ -744,10 +748,13 @@ def test_update_learning_skips_when_resume_counter_active():
     # Learn count should NOT increase
     assert smartpi.est.learn_ok_count == initial_learn_count
     # Reason should indicate resume skip
-    assert "skip:resume" in smartpi.est.learn_last_reason
+    assert "skip: resume" in smartpi.est.learn_last_reason
 
     # Clean up skip timer artificially to simulate passing of time
     smartpi._learning_resume_ts = time.time() - 1.0
+    # Also spoof the start of the current cycle so it's not "too short"
+    # The previous update_learning (though skipped) started a new cycle at NOW.
+    smartpi._cycle_start_state["time"] -= 600.0
 
     # Second call should proceed normally
     smartpi.update_learning(

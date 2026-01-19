@@ -536,7 +536,7 @@ class SmartPI:
         max_on_percent: Optional[float] = None,
         # Tuning knobs (keyword)
         deadband_c: float = DEFAULT_DEADBAND_C,
-        aggressiveness: float = 0.5,  # Note: logic changed, 1.0 is now default
+        aggressiveness: float = 1.0,  # Note: logic changed, 1.0 is now default
         saved_state: Optional[Dict[str, Any]] = None,
         # --- Feed-forward (FF) progressive enablement ("smart warm-up") ---
         ff_warmup_ok_count: int = 30,
@@ -647,6 +647,9 @@ class SmartPI:
         # Setpoint step boost state (for fast power ramp-up on setpoint change)
         self._setpoint_boost_active: bool = False
         self._prev_setpoint_for_boost: Optional[float] = None
+        
+        # Enhanced A/B Learning: Start-of-cycle snapshot
+        self._cycle_start_state: Optional[Dict[str, float]] = None
 
         if saved_state:
             self.load_state(saved_state)
@@ -885,13 +888,30 @@ class SmartPI:
     # Learning entry point
     # ------------------------------
 
+    def start_new_cycle(self, u_applied: float, temp_in: float, temp_ext: float) -> None:
+        """
+        Snapshot state at the START of a control cycle.
+        This provides the baseline (T_start, etc.) for calculating dT at the END of the cycle.
+        """
+        self._cycle_start_state = {
+            "temp_in": float(temp_in),
+            "temp_ext": float(temp_ext),
+            "time": time.time(),
+            "u_applied": float(u_applied),
+        }
+        _LOGGER.debug(
+            "%s - SmartPI new cycle snapshot: Tin=%.2f, Text=%.2f, U=%.2f", 
+            self._name, temp_in, temp_ext, u_applied
+        )
+
     def update_learning(
         self,
         current_temp: float,
         ext_current_temp: float,
-        previous_temp: float,
-        previous_power: float,
-        hvac_mode: VThermHvacMode,
+        # Legacy/Unused args from old implementation kept for compatibility
+        previous_temp: float = None,
+        previous_power: float = None,
+        hvac_mode: VThermHvacMode = VThermHvacMode_HEAT,
         cycle_dt: float = None,
         ext_previous_temp: float = None,
         *,
@@ -901,104 +921,79 @@ class SmartPI:
         ext_previous_temp_ts: float | None = None,
     ) -> None:
         """
-        Update the thermal model with observed data.
-
-        Metrology rules:
-        - Prefer measurement timestamps (sensor time) to compute dt.
-        - Fall back to cycle_dt (minutes) if timestamps are not available.
-        - Last resort: wall-clock (kept only for backward compatibility).
-
-        Important:
-        - dt is in minutes and must match (previous_temp -> current_temp).
-        - Never assume dt == self._cycle_min unless we are sure this call is truly "once per cycle".
+        Update learning model at the END of a cycle.
+        Uses the difference between Current State (End) and _cycle_start_state (Start).
         """
-        if previous_temp is None or previous_power is None or current_temp is None:
+        # If we don't have a start snapshot, we can't calculate a reliable delta over the cycle.
+        if self._cycle_start_state is None:
+            # This happens on first boot or after reset. Initialize for next time.
+            u_init = previous_power if previous_power is not None else 0.0
+            self.start_new_cycle(u_init, current_temp, ext_current_temp)
+            self.est.learn_skip_count += 1
+            self.est.learn_last_reason = "skip: no start snapshot"
             return
 
-        if hvac_mode != VThermHvacMode_HEAT:
+        # 1. Retrieve Cycle Start Data (from START of this cycle)
+        start = self._cycle_start_state
+        t_int_start = start["temp_in"]
+        t_ext_start = start["temp_ext"]
+        ts_start = start["time"]
+        u_applied = start["u_applied"]
+
+        now = time.time()
+        dt_minutes = (now - ts_start) / 60.0
+
+        # 2. Reset snapshot for the NEXT cycle immediately
+        # The next cycle starts NOW with current temps.
+        # NOTE: u_applied for the NEXT cycle is not known yet (calculate() runs after). 
+        # It must be updated later or we assume 0 until updated.
+        # We start with u=0.0 (placeholder)
+        self.start_new_cycle(0.0, current_temp, ext_current_temp)
+
+        # 3. Validation: Cycle Duration
+        if dt_minutes < 0.8 * self._cycle_min:
+            self.est.learn_skip_count += 1
+            self.est.learn_last_reason = f"skip: cycle too short ({dt_minutes:.1f}m)"
             return
 
-        # Skip learning cycles after resume from interruption (e.g., window close)
-        if self._learning_resume_ts is not None:
-             # Check if we are still in the skip window
-             # Use timestamp of the measurement if available, else wall clock
-            check_ts = current_temp_ts if current_temp_ts is not None else time.time()
-            if check_ts < self._learning_resume_ts:
-                self.est.learn_last_reason = "skip:resume(wait)"
-                _LOGGER.debug(
-                    "%s - Skipping learning cycle (resume wait until %s)",
-                    self._name,
-                    datetime.fromtimestamp(self._learning_resume_ts).isoformat()
-                )
+        # 4. Compute Deflection and Delta
+        dT = current_temp - t_int_start
+        dT_dt = dT / dt_minutes
+        delta_T = t_int_start - t_ext_start  # Relative to OUTSIDE at START
+
+        # 5. Interruption / resume check
+        if self._learning_resume_ts:
+            if now < self._learning_resume_ts:
+                self.est.learn_skip_count += 1
+                self.est.learn_last_reason = "skip: resume cool-down"
                 return
             else:
                 # Done waiting
                 self._learning_resume_ts = None
 
-        # Ensure u is always in [0..1]
-        previous_power = clamp(float(previous_power), 0.0, 1.0)
+        # 6. Learning Logic (Strict Separation)
+        
+        # Learn B (Heat Loss) -> dominant when heating is OFF/Low (u < 5%)
+        if u_applied < 0.05 and abs(delta_T) >= 0.5:
+            self.est.learn(
+                dT_int_per_min=dT_dt,
+                u=u_applied,
+                t_int=t_int_start,
+                t_ext=t_ext_start
+            )
 
-        # Determine dt_minutes robustly
-        dt_minutes: float | None = None
-
-        # 1) Prefer measurement timestamps if provided
-        if current_temp_ts is not None and previous_temp_ts is not None:
-            try:
-                dt_s = float(current_temp_ts) - float(previous_temp_ts)
-            except (TypeError, ValueError):
-                dt_s = None
-            if dt_s is not None and dt_s > 0:
-                dt_minutes = dt_s / 60.0
-
-        # 2) Otherwise prefer explicit cycle_dt if provided and plausible
-        if dt_minutes is None and cycle_dt is not None:
-            try:
-                dt_candidate = float(cycle_dt)
-            except (TypeError, ValueError):
-                dt_candidate = None
-            if dt_candidate is not None and dt_candidate > 1e-4:
-                dt_minutes = dt_candidate
-
-        # 3) Last resort: wall-clock
-        now_ts = time.time()
-        if dt_minutes is None:
-            if self._learn_last_ts is None:
-                self._learn_last_ts = now_ts
-                self.est.learn_last_reason = "skip:dt:init"
-                return
-            dt_minutes = (now_ts - self._learn_last_ts) / 60.0
-            self._learn_last_ts = now_ts
+        # Learn A (Heating Power) -> dominant when heating is ON/High (u > 20%)
+        elif u_applied > 0.20 and abs(delta_T) >= 0.2:
+             self.est.learn(
+                dT_int_per_min=dT_dt,
+                u=u_applied,
+                t_int=t_int_start,
+                t_ext=t_ext_start
+            )
+            
         else:
-            # Keep timestamp in sync when we do have a real dt from timestamps/cycle_dt
-            self._learn_last_ts = now_ts
-
-        # Guardrails: ignore too small/too large windows
-        DT_MIN_OK = 0.5   # 30 s (avoid noise)
-        DT_MAX_OK = 30.0  # 30 min (avoid long gaps)
-        if dt_minutes < DT_MIN_OK:
-            self.est.learn_last_reason = f"skip:dt:too_small({dt_minutes:.2f}m)"
-            return
-        if dt_minutes > DT_MAX_OK:
-            self.est.learn_last_reason = f"skip:dt:too_large({dt_minutes:.2f}m)"
-            return
-
-        # External temperature at start of observation window
-        # Prefer explicit ext_previous_temp if provided, else current ext temp
-        t_ext_prev = ext_previous_temp if ext_previous_temp is not None else ext_current_temp
-        if t_ext_prev is None:
-            # Don't fake it with previous_temp (would force delta=0 => b not learnable)
-            self.est.learn_last_reason = "skip:ext:none"
-            return
-
-        dT = float(current_temp) - float(previous_temp)
-        dT_int_per_min = dT / dt_minutes
-
-        self.est.learn(
-            dT_int_per_min=dT_int_per_min,
-            u=previous_power,
-            t_int=float(previous_temp),
-            t_ext=float(t_ext_prev),
-        )
+             self.est.learn_skip_count += 1
+             self.est.learn_last_reason = "skip: low excitation"
 
     # ------------------------------
     # Props / API Compat
@@ -1727,7 +1722,17 @@ class SmartPI:
             self._last_aw_du = 0.0
 
         # Store final applied command for next cycle rate-limiting
+        # Store final applied command for next cycle rate-limiting
         self.u_prev = u_applied
+
+        # Update the current cycle snapshot with the actual U that will be applied
+        # This completes the start_new_cycle() logic initiated in update_learning()
+        if self._cycle_start_state is not None:
+             self._cycle_start_state["u_applied"] = float(u_applied)
+
+        # Update timing properties (_on_time_sec, etc.)
+        self._on_percent = u_applied
+        self._calculate_times()
 
     # ------------------------------
     # Timings and diagnostics

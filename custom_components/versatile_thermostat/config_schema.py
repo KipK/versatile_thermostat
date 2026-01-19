@@ -568,7 +568,7 @@ STEP_SMART_PI_PARAMS_SCHEMA = vol.Schema(
                 min=0.0, max=1.0, step=0.01, mode=selector.NumberSelectorMode.BOX
             )
         ),
-        vol.Optional(CONF_SMART_PI_AGGRESSIVENESS, default=0.5): selector.NumberSelector(
+        vol.Optional(CONF_SMART_PI_AGGRESSIVENESS, default=1.0): selector.NumberSelector(
             selector.NumberSelectorConfig(
                 min=0.1, max=2.0, step=0.1, mode=selector.NumberSelectorMode.BOX
             )
@@ -585,7 +585,7 @@ STEP_SMART_PI_CENTRAL_SCHEMA = vol.Schema(
                 min=0.0, max=1.0, step=0.01, mode=selector.NumberSelectorMode.BOX
             )
         ),
-        vol.Optional(CONF_SMART_PI_AGGRESSIVENESS, default=0.5): selector.NumberSelector(
+        vol.Optional(CONF_SMART_PI_AGGRESSIVENESS, default=1.0): selector.NumberSelector(
             selector.NumberSelectorConfig(
                 min=0.1, max=2.0, step=0.1, mode=selector.NumberSelectorMode.BOX
             )
