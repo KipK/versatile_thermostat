@@ -86,6 +86,8 @@ def test_conditional_integration_saturation_high():
     smartpi.est.a = 0.01
     smartpi.est.b = 0.02  # k_ff = b/a = 2.0
     smartpi.est.learn_ok_count = 50  # Enable full FF
+    smartpi.est.learn_ok_count_a = 20 # Enable FF gating
+    smartpi.est.learn_ok_count_b = 20
     smartpi._cycles_since_reset = 10  # Enable FF warmup
     smartpi._tau_reliable = True
     
@@ -405,8 +407,8 @@ def test_deadband_leak():
     assert "LEAK" in smartpi._last_i_mode
 
 
-def test_ff_disabled_for_low_a():
-    """Test that feed-forward is disabled when a is too low."""
+def test_ff_disabled_when_unreliable():
+    """Test that feed-forward is disabled when model is unreliable (low count or bad tau)."""
     smartpi = SmartPI(
         cycle_min=10,
         minimal_activation_delay=0,
@@ -414,19 +416,62 @@ def test_ff_disabled_for_low_a():
         name="TestSmartPI"
     )
     
-    # Set a very low value
-    smartpi.est.a = 1e-5  # Below threshold of 2e-4
+    # 1. Start with good 'a' and 'b' but low learning count
+    smartpi.est.a = 0.01
+    smartpi.est.b = 0.02
+    smartpi.est.learn_ok_count = 50
+    smartpi.est.learn_ok_count_a = 5  # < 10, should disable FF
+    smartpi.est.learn_ok_count_b = 20
+    smartpi._tau_reliable = True      # Even if reliable flag is manually forced (or computed true)
+                                      # the low count_a should block it.
     
     smartpi.calculate(
         target_temp=20,
         current_temp=18,
-        ext_current_temp=5,  # Large delta would normally give high FF
+        ext_current_temp=5,
         slope=0,
         hvac_mode=VThermHvacMode_HEAT
     )
     
-    # FF should be 0
-    assert smartpi.u_ff == 0.0, f"FF should be 0 when a is too low: {smartpi.u_ff}"
+    assert smartpi.u_ff == 0.0, "FF should be 0 when learn_ok_count_a < 10"
+
+
+    # 2. High learning count but unreliable tau
+    smartpi._last_calculate_time = None # allow immediate recalculation
+    smartpi.est.learn_ok_count_a = 20 # > 10, OK
+    # Create unreliable condition (empty history or bad stability)
+    # We can force the property mock or just rely on state
+    smartpi.est.learn_ok_count_b = 2 # insufficient b samples -> unreliable
+    smartpi._tau_reliable = False # forced via logic inside calculate based on est.tau_reliability()
+    
+    # Re-running calculate will re-check tau_reliability()
+    # verify est.tau_reliability() returns False first
+    assert not smartpi.est.tau_reliability().reliable
+
+    smartpi.calculate(
+        target_temp=20,
+        current_temp=18,
+        ext_current_temp=5,
+        slope=0,
+        hvac_mode=VThermHvacMode_HEAT
+    )
+    assert smartpi.u_ff == 0.0, "FF should be 0 when tau is unreliable"
+
+
+    # 3. Everything OK
+    smartpi._last_calculate_time = None # allow immediate recalculation
+    smartpi.est.learn_ok_count_b = 20
+    # Inject history for reliable check
+    for _ in range(10): smartpi.est._b_hat_hist.append(smartpi.est.b)
+    
+    smartpi.calculate(
+        target_temp=20,
+        current_temp=18,
+        ext_current_temp=5,
+        slope=0,
+        hvac_mode=VThermHvacMode_HEAT
+    )
+    assert smartpi.u_ff > 0.0, "FF should be active when conditions are met"
 
 
 def test_heuristic_gains_reliable_tau():

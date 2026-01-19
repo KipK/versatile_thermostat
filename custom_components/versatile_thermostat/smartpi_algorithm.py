@@ -1477,7 +1477,7 @@ class SmartPI:
             u_ff = 0.0
         else:
             t_ext = ext_current_temp
-            if a < 2e-4:
+            if self.est.learn_ok_count_a < 10 or not self._tau_reliable:
                 u_ff = 0.0
             else:
                 k_ff = clamp(b / a, 0.0, 3.0)
