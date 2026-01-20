@@ -179,13 +179,12 @@ def test_abestimator_learn_b_off():
     # With T_int = 20, T_ext = 10, delta = 10
     # If b = 0.001, then dT/dt = -0.001 * 10 = -0.01 (cooling)
     
-    # Need >= 4 points to start learning in Huber mode
-    # Then after tau becomes reliable, it switches to Theil-Sen which needs 4 more
+    # Need >= 5 points to start learning in Median+MAD mode
     # We provide 15 iterations to ensure learning completes
     random.seed(42)
     b_target = 0.001
     
-    for i in range(15):  # More points to ensure learning triggers after mode switch
+    for i in range(20):  # More points to ensure learning triggers (min 11)
         delta = 10.0 + i * 0.5
         # Ideal dT = -b * delta
         # Add noise to creating non-zero sigma
@@ -221,7 +220,7 @@ def test_abestimator_learn_a_on():
     target_a = 0.04
     b_used = est.b
     
-    for i in range(10):
+    for i in range(20):
         # Vary u to get slope
         u_val = 0.4 + i * 0.05
         # const delta
@@ -240,8 +239,8 @@ def test_abestimator_learn_a_on():
         )
     
     assert est.learn_ok_count_a > 0
-    assert "learned a" in est.learn_last_reason
-    # Huber estimation with noise might be slightly off, relax tolerance
+    assert "learned a (Median)" in est.learn_last_reason
+    # Median estimation with noise might be slightly off, relax tolerance
     assert math.isclose(est.a, target_a, rel_tol=0.35)
 
 
@@ -266,9 +265,9 @@ def test_abestimator_learn_b_off_phase():
     random.seed(42)
     b_target = 0.001
     
-    # Need >= 4 points for Huber, then may switch to Theil-Sen needing 4 more
+    # Need >= 5 points for Median+MAD
     # Use 15 iterations to ensure learning completes
-    for i in range(15):
+    for i in range(20):
         delta = 10.0 + i * 0.2
         noise = random.uniform(-0.0005, 0.0005)
         dt_val = -b_target * delta + noise
@@ -327,9 +326,6 @@ def test_save_and_load_state():
     smartpi1.est.a = 0.015
     smartpi1.est.b = 0.003
     smartpi1.est.learn_ok_count = 10
-    # _b_pts stores (delta, y)
-    smartpi1.est._b_pts.append((10.0, 0.03))
-    smartpi1.est._b_pts.append((10.0, 0.031))
     smartpi1.integral = 5.0
     smartpi1.u_prev = 0.6
     
@@ -347,7 +343,6 @@ def test_save_and_load_state():
     assert smartpi2.est.a == 0.015
     assert smartpi2.est.b == 0.003
     assert smartpi2.est.learn_ok_count == 10
-    assert len(smartpi2.est._b_pts) == 2
     assert smartpi2.integral == 5.0
     assert smartpi2.u_prev == 0.6
 
@@ -930,24 +925,17 @@ def test_abestimator_no_saturation_bias():
     # 1. est.a should be clamped
     assert est.a <= est.A_MAX, f"a should be clamped: {est.a}"
     
-    # 2. _a_pts should contain raw points implying high slope
-    slope, _ = est._theil_sen(list(est._a_pts))
-    if slope is not None:
-         assert slope > est.A_MAX, f"Stored points should imply high slope: {slope}"
-    else:
-         # If slope is None, it means points were degenerate, which defeats test purpose
-         # But here we used same u=0.5. 
-         # We must vary u in the loop above to avoid slope=None
-         pass
+    # 2. a_meas_hist should contain raw points implying high slope
+    # Last measurement should be around 0.20 (calculated above)
+    last_meas = est.a_meas_hist[-1]
+    assert last_meas > est.A_MAX, f"Stored history should imply high slope: {last_meas}"
 
 
-    # Re-run with varying U to properly test Theil-Sen return
+    # Re-run with varying U to properly test history
     est = ABEstimator()
     # Force reliable mode
     est.learn_ok_count = 5
     est.learn_ok_count_b = 20
-    est._b_hat_hist.extend([0.002] * 10)
-    # Also need to initialize b to something reasonable so residuals don't block
     est.b = 0.002
     
     for i in range(7):
@@ -961,8 +949,10 @@ def test_abestimator_no_saturation_bias():
             t_ext=8.0
         )
     assert est.a <= est.A_MAX
-    slope, _ = est._theil_sen(list(est._a_pts))
-    assert slope > est.A_MAX
+    
+    # Check median of history is high
+    med = statistics.median(est.a_meas_hist)
+    assert med > est.A_MAX
 
 
 def test_abestimator_b_no_saturation_bias():
@@ -993,15 +983,15 @@ def test_abestimator_b_no_saturation_bias():
     # 1. est.b should be clamped
     assert est.b <= est.B_MAX, f"b should be clamped: {est.b}"
     
-    # 2. _b_pts should contain raw points
-    # Need varying delta in input to get valid slope
+    # 2. b_meas_hist should contain raw points
+    last_meas = est.b_meas_hist[-1]
+    assert last_meas > est.B_MAX, f"Stored history should be high: {last_meas}"
     
     # Re-run with varying delta
     est = ABEstimator()
     # Force reliable mode
     est.learn_ok_count = 5
     est.learn_ok_count_b = 20
-    est._b_hat_hist.extend([0.002] * 10)
     est.b = 0.002
     
     for i in range(7):
@@ -1018,8 +1008,8 @@ def test_abestimator_b_no_saturation_bias():
         )
     
     assert est.b <= est.B_MAX
-    slope, _ = est._theil_sen(list(est._b_pts))
-    assert slope > est.B_MAX, f"Stored points should imply high slope: {slope}"
+    med = statistics.median(est.b_meas_hist)
+    assert med > est.B_MAX, f"Stored points should imply high slope: {med}"
 
 
 def test_anti_windup_tracking_diagnostics():

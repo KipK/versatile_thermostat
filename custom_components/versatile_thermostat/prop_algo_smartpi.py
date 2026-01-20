@@ -141,6 +141,13 @@ B_STABILITY_MAD_RATIO_MAX = 0.60   # MAD(b) / median(b)
 LEARN_BOOTSTRAP_COUNT = 10      # Number of learn cycles before applying strict residual gating
 
 # --- SmartPI Robust Learning Constants ---
+# Median+MAD Strategy Constants
+AB_HISTORY_SIZE = 31      # Keep last 31 (ODD) values
+AB_MIN_SAMPLES = 11       # Start learning after 11 (ODD) values
+AB_MAD_SIGMA_MULT = 3.0   # Outlier rejection threshold (sigma)
+AB_VAR_MAX = 0.5          # Max relative variation for update (50%)
+AB_MAD_K = 1.4826         # Sigma scaling factor for MAD
+AB_VAL_TOLERANCE = 1e-12  # Small epsilon
 LEARN_SAMPLE_MAX = 240          # Max samples history (e.g. 4h @ 1min)
 LEARN_Q_HIST_MAX = 200          # History for quantization estimation
 DT_MIN_OK = 0.5                 # Min dt (minutes) for valid derivative window
@@ -153,9 +160,11 @@ QUANTIZATION_ROUND_TO = 0.001   # Rounding / binning for quantization detection
 DT_MIN_FRACTION = 0.8
 DT_MAX_MIN = 30
 MIN_ABS_DT = 0.03      # °C
-DELTA_MIN = 0.5        # °C
+DELTA_MIN = 0.2        # °C (Matches DELTA_MIN_ON)
 U_OFF_MAX = 0.05
 U_ON_MIN = 0.20
+DELTA_MIN_OFF = 0.5        # °C
+DELTA_MIN_ON = 0.2         # °C
 
 
 @dataclass(frozen=True)
@@ -187,20 +196,12 @@ class ABEstimator:
         self.B_MIN: float = 1e-5
         self.B_MAX: float = 0.05
 
-        # --- Strategy 2: Theil-Sen (Reliable) ---
-        # stored as (x, y)
-        self._b_pts: Deque[Tuple[float, float]] = deque(maxlen=B_POINTS_MAX)
-        self._a_pts: Deque[Tuple[float, float]] = deque(maxlen=A_POINTS_MAX)
-        
-        # Residual tracking for gating
-        self._r_hist: Deque[float] = deque(maxlen=RESIDUAL_HIST_MAX)
-
-        # --- Strategy 1: Huber/MAD (Early/Unreliable) ---
+        # --- Strategy: Median + MAD (Robust) ---
         # Raw measurement history
-        self.a_meas_hist: Deque[float] = deque(maxlen=24) # ~ half hour @ 1min
-        self.b_meas_hist: Deque[float] = deque(maxlen=30) 
+        self.a_meas_hist: Deque[float] = deque(maxlen=AB_HISTORY_SIZE) # Keep last 31
+        self.b_meas_hist: Deque[float] = deque(maxlen=AB_HISTORY_SIZE) 
 
-        # Stability tracking for b (tau) - used by both
+        # Stability tracking for b (tau) - used for reliability check
         self._b_hat_hist: Deque[float] = deque(maxlen=20)
 
         # Counters
@@ -209,12 +210,6 @@ class ABEstimator:
         self.learn_ok_count_b = 0
         self.learn_skip_count = 0
         self.learn_last_reason: Optional[str] = "init"
-        
-        # Constants for Huber
-        self.AB_OUTLIER_K = 4.0
-        self.AB_HUBER_C = 1.5
-        self.ALPHA_A = 0.10
-        self.ALPHA_B = 0.08  # slightly slower for b
 
     def reset(self) -> None:
         """Reset learned parameters and history to initial values."""
@@ -225,9 +220,6 @@ class ABEstimator:
         self.learn_ok_count_b = 0
         self.learn_skip_count = 0
         self.learn_last_reason = "reset"
-        self._b_pts.clear()
-        self._a_pts.clear()
-        self._r_hist.clear()
         self._b_hat_hist.clear()
         self.a_meas_hist.clear()
         self.b_meas_hist.clear()
@@ -244,80 +236,6 @@ class ABEstimator:
         except statistics.StatisticsError:
             return None
 
-    @staticmethod
-    def _theil_sen(points):
-        """Robust Theil–Sen slope + intercept."""
-        slopes = []
-        n = len(points)
-        for i in range(n):
-            x_i, y_i = points[i]
-            for j in range(i + 1, n):
-                x_j, y_j = points[j]
-                dx = x_j - x_i
-                if abs(dx) < 1e-6:
-                    continue
-                slopes.append((y_j - y_i) / dx)
-
-        if not slopes:
-            return None, None
-
-        slope = statistics.median(slopes)
-        intercepts = [y - slope * x for x, y in points]
-        intercept = statistics.median(intercepts)
-        return slope, intercept
-
-    @staticmethod
-    def _robust_huber_location(
-        values: Deque[float],
-        outlier_k: float = 4.0,
-        huber_c: float = 1.5,
-    ) -> Tuple[float, float, float]: # estimate, scale, median
-        """
-        Estimate robust location using Median/MAD outlier rejection + Huber.
-        Returns (estimate, scale, median).
-        """
-        vals = list(values)
-        if not vals:
-            return 0.0, 0.0, 0.0
-        
-        m = statistics.median(vals)
-        # MAD calculation
-        abs_dev = [abs(x - m) for x in vals]
-        mad = statistics.median(abs_dev) if abs_dev else 0.0
-        s = 1.4826 * mad
-        
-        if s <= 1e-12:
-            return m, s, m
-            
-        # Filter outliers
-        thr = outlier_k * s
-        kept = [x for x in vals if abs(x - m) <= thr]
-        
-        if not kept:
-            return m, s, m
-            
-        # Huber iterations
-        mu = statistics.mean(kept)
-        c = max(1e-9, huber_c * s)
-        for _ in range(3):
-            num = 0.0
-            den = 0.0
-            for x in kept:
-                r = x - mu
-                ar = abs(r)
-                w = 1.0 if ar <= c else (c / ar)
-                num += w * x
-                den += w
-            if den <= 1e-12:
-                break
-            mu_new = num / den
-            if abs(mu_new - mu) < 1e-9:
-                mu = mu_new
-                break
-            mu = mu_new
-            
-        return mu, s, m
-
     # ---------- Main learning ----------
 
     def learn(
@@ -330,188 +248,104 @@ class ABEstimator:
         max_abs_dT_per_min: float = 0.35,
     ) -> None:
         """
-        Update (a,b) using Hybrid approach.
+        Update (a,b) using Median + MAD approach.
         
-        The min dT check is done upstream in update_learning() using absolute dT,
-        not per-minute rate, to avoid rejecting valid long windows.
+        Model: dT/dt = a*u - b*(T_int - T_ext)
         """
         dTdt = float(dT_int_per_min)
         delta = float(t_int - t_ext)
         
-        _LOGGER.debug(
-            "ABEstimator.learn: dTdt=%.5f, u=%.3f, delta=%.2f, t_int=%.2f, t_ext=%.2f",
-            dTdt, u, delta, t_int, t_ext
-        )
-        
-        # 1. Reject gross outliers (physics)
+        # 1. Reject gross physics outliers
         if abs(dTdt) > max_abs_dT_per_min:
             self.learn_skip_count += 1
             self.learn_last_reason = "skip: slope outlier"
-            _LOGGER.debug("ABEstimator: rejected - slope outlier (%.5f > %.5f)", abs(dTdt), max_abs_dT_per_min)
             return
 
-        # 2. Check current reliability to decide strategy
-        tau_info = self.tau_reliability()
-        is_reliable = tau_info.reliable
-        
-        # 3. Residual check (only if we have a model to trust)
-        # r = dTdt - (a*u - b*delta)
-        r = dTdt - (self.a * u - self.b * delta)
-        self._r_hist.append(r)
-        
-        mad_r = self._mad(self._r_hist)
-        sigma_r = 1.4826 * mad_r if mad_r is not None else 0.0
-        
-        if is_reliable and mad_r is not None and self.learn_ok_count > LEARN_BOOTSTRAP_COUNT:
-             if abs(r) > RESIDUAL_GATE_K * sigma_r:
-                self.learn_skip_count += 1
-                self.learn_last_reason = "skip: residual outlier"
-                return
-
-        # ---------- OFF phase : learn b ----------
+        # ---------- OFF phase: learn b ----------
         # dT/dt = -b * delta  =>  b = -dT/dt / delta
-        # Condition: heater OFF (u small), delta significant
-        if u < 0.05 and abs(delta) >= 0.5:
-            # Instant measurement
+        if u < U_OFF_MAX and abs(delta) >= DELTA_MIN_OFF:
             b_meas = -dTdt / delta
             if b_meas <= 0:
-                 self.learn_skip_count += 1
-                 self.learn_last_reason = "skip: b_meas <= 0"
-                 return
+                self.learn_skip_count += 1
+                self.learn_last_reason = "skip: b_meas <= 0"
+                return
             
-            # Use Hybrid Strategy
-            if not is_reliable:
-                # Strategy 1: Huber on raw measurements
-                self.b_meas_hist.append(b_meas)
-                if len(self.b_meas_hist) < 6:
-                     self.learn_skip_count += 1
-                     self.learn_last_reason = "skip: collecting b meas"
-                     _LOGGER.debug("ABEstimator: collecting b meas (%d/6)", len(self.b_meas_hist))
-                     return
-                
-                b_rob, s, m = self._robust_huber_location(self.b_meas_hist)
-                
-                # Outlier check against distribution
-                if s > 1e-12 and abs(b_meas - m) > self.AB_OUTLIER_K * s:
+            # Add to history
+            self.b_meas_hist.append(b_meas)
+            
+            if len(self.b_meas_hist) < AB_MIN_SAMPLES:
+                self.learn_skip_count += 1
+                self.learn_last_reason = f"skip: collecting b meas ({len(self.b_meas_hist)}/{AB_MIN_SAMPLES})"
+                return
+            
+            # Median + MAD outlier rejection
+            med_b = statistics.median(self.b_meas_hist)
+            mad_b = self._mad(self.b_meas_hist)
+            
+            if mad_b is not None and mad_b > AB_VAL_TOLERANCE:
+                sigma_b = AB_MAD_K * mad_b
+                if abs(b_meas - med_b) > AB_MAD_SIGMA_MULT * sigma_b:
                     self.learn_skip_count += 1
                     self.learn_last_reason = "skip: b_meas outlier"
-                    _LOGGER.debug("ABEstimator: b_meas outlier (%.6f vs median %.6f, k*s=%.6f)", b_meas, m, self.AB_OUTLIER_K * s)
                     return
-                
-                # Soft update
-                new_b = (1 - self.ALPHA_B) * self.b + self.ALPHA_B * b_rob
-                update_type = "Huber"
-            else:
-                # Strategy 2: Theil-Sen on (delta, -dTdt)
-                self._b_pts.append((delta, -dTdt))
-                if len(self._b_pts) < 6:
-                    self.learn_last_reason = "skip: collecting b pts"
-                    _LOGGER.debug("ABEstimator: collecting b pts (%d/6)", len(self._b_pts))
-                    return
-                
-                b_hat, c = self._theil_sen(self._b_pts)
-                if b_hat is None or b_hat <= 0:
-                    self.learn_skip_count += 1
-                    self.learn_last_reason = "skip: TS b invalid"
-                    _LOGGER.debug("ABEstimator: TS b invalid (b_hat=%s)", b_hat)
-                    return
-                
-                # Check intercept coherence
-                if mad_r is not None and abs(c) > INTERCEPT_SIGMA_FACTOR * sigma_r:
-                     self.learn_skip_count += 1
-                     self.learn_last_reason = "skip: TS b intercept"
-                     _LOGGER.debug("ABEstimator: TS b intercept too large (|c|=%.6f > %.6f)", abs(c), INTERCEPT_SIGMA_FACTOR * sigma_r)
-                     return
-                
-                new_b = b_hat
-                update_type = "T-S"
-
-            # Apply bounds
+            
+            new_b = med_b  # Use median directly
             new_b = clamp(new_b, self.B_MIN, self.B_MAX)
             
-            # 50% relative variation check (per original spec)
-            if self.b > 0 and abs(new_b - self.b) / self.b > 0.5:
+            # Relative variation check
+            if self.b > 0 and abs(new_b - self.b) / self.b > AB_VAR_MAX:
                 self.learn_skip_count += 1
-                self.learn_last_reason = "skip: b variation > 50%"
-                _LOGGER.debug("ABEstimator: b variation too large (%.6f -> %.6f, %.1f%%)", self.b, new_b, 100 * abs(new_b - self.b) / self.b)
+                self.learn_last_reason = f"skip: b variation > {int(AB_VAR_MAX*100)}%"
                 return
             
             self.b = new_b
             self._b_hat_hist.append(new_b)
             self.learn_ok_count += 1
             self.learn_ok_count_b += 1
-            self.learn_last_reason = f"learned b ({update_type})"
-            _LOGGER.debug("ABEstimator: learned b=%.6f (%s)", new_b, update_type)
+            self.learn_last_reason = "learned b (Median)"
             return
 
-        # ---------- ON phase : learn a ----------
-        # dT/dt = a*u - b*delta => a = (dT/dt + b*delta) / u
-        if u > 0.20 and abs(delta) >= 0.2:
-            # Instant measurement using CURRENT b
+        # ---------- ON phase: learn a ----------
+        # dT/dt = a*u - b*delta  =>  a = (dT/dt + b*delta) / u
+        if u > U_ON_MIN and abs(delta) >= DELTA_MIN_ON:
             a_meas = (dTdt + self.b * delta) / u
             if a_meas <= 0:
-                 self.learn_skip_count += 1
-                 self.learn_last_reason = "skip: a_meas <= 0"
-                 return
-
-            if not is_reliable:
-                # Strategy 1: Huber
-                self.a_meas_hist.append(a_meas)
-                if len(self.a_meas_hist) < 6:
-                    self.learn_skip_count += 1
-                    self.learn_last_reason = "skip: collecting a meas"
-                    _LOGGER.debug("ABEstimator: collecting a meas (%d/6)", len(self.a_meas_hist))
-                    return
-                
-                a_rob, s, m = self._robust_huber_location(self.a_meas_hist)
-                # Outlier check
-                if s > 1e-12 and abs(a_meas - m) > self.AB_OUTLIER_K * s:
+                self.learn_skip_count += 1
+                self.learn_last_reason = "skip: a_meas <= 0"
+                return
+            
+            # Add to history
+            self.a_meas_hist.append(a_meas)
+            
+            if len(self.a_meas_hist) < AB_MIN_SAMPLES:
+                self.learn_skip_count += 1
+                self.learn_last_reason = f"skip: collecting a meas ({len(self.a_meas_hist)}/{AB_MIN_SAMPLES})"
+                return
+            
+            # Median + MAD outlier rejection
+            med_a = statistics.median(self.a_meas_hist)
+            mad_a = self._mad(self.a_meas_hist)
+            
+            if mad_a is not None and mad_a > AB_VAL_TOLERANCE:
+                sigma_a = AB_MAD_K * mad_a
+                if abs(a_meas - med_a) > AB_MAD_SIGMA_MULT * sigma_a:
                     self.learn_skip_count += 1
                     self.learn_last_reason = "skip: a_meas outlier"
-                    _LOGGER.debug("ABEstimator: a_meas outlier (%.6f vs median %.6f, k*s=%.6f)", a_meas, m, self.AB_OUTLIER_K * s)
                     return
-
-                new_a = (1 - self.ALPHA_A) * self.a + self.ALPHA_A * a_rob
-                update_type = "Huber"
-            else:
-                # Strategy 2: Theil-Sen on (u, dTdt + b*delta)
-                y = dTdt + self.b * delta
-                self._a_pts.append((u, y))
-                if len(self._a_pts) < 6:
-                    self.learn_last_reason = "skip: collecting a pts"
-                    _LOGGER.debug("ABEstimator: collecting a pts (%d/6)", len(self._a_pts))
-                    return
-
-                a_hat, c = self._theil_sen(self._a_pts)
-                if a_hat is None or a_hat <= 0:
-                    self.learn_skip_count += 1
-                    self.learn_last_reason = "skip: TS a invalid"
-                    _LOGGER.debug("ABEstimator: TS a invalid (a_hat=%s)", a_hat)
-                    return
-                
-                if mad_r is not None and abs(c) > INTERCEPT_SIGMA_FACTOR * sigma_r:
-                    self.learn_skip_count += 1
-                    self.learn_last_reason = "skip: TS a intercept"
-                    _LOGGER.debug("ABEstimator: TS a intercept too large (|c|=%.6f > %.6f)", abs(c), INTERCEPT_SIGMA_FACTOR * sigma_r)
-                    return
-
-                new_a = a_hat
-                update_type = "T-S"
-
+            
+            new_a = med_a  # Use median directly
             new_a = clamp(new_a, self.A_MIN, self.A_MAX)
             
-            # 50% relative variation check (per original spec)
-            if self.a > 0 and abs(new_a - self.a) / self.a > 0.5:
+            # Relative variation check
+            if self.a > 0 and abs(new_a - self.a) / self.a > AB_VAR_MAX:
                 self.learn_skip_count += 1
-                self.learn_last_reason = "skip: a variation > 50%"
-                _LOGGER.debug("ABEstimator: a variation too large (%.6f -> %.6f, %.1f%%)", self.a, new_a, 100 * abs(new_a - self.a) / self.a)
+                self.learn_last_reason = f"skip: a variation > {int(AB_VAR_MAX*100)}%"
                 return
             
             self.a = new_a
             self.learn_ok_count += 1
             self.learn_ok_count_a += 1
-            self.learn_last_reason = f"learned a ({update_type})"
-            _LOGGER.debug("ABEstimator: learned a=%.6f (%s)", new_a, update_type)
+            self.learn_last_reason = "learned a (Median)"
             return
 
         self.learn_skip_count += 1
@@ -534,7 +368,7 @@ class ABEstimator:
         if mad_b is None or med_b <= 0:
             return TauReliability(reliable=False, tau_min=9999.0)
 
-        # Stability check: Relative dispersion of b estimates
+        # Stability check: Relative dispersion of b estimates (0.60 threshold)
         if (mad_b / med_b) > B_STABILITY_MAD_RATIO_MAX:
              return TauReliability(reliable=False, tau_min=9999.0)
              
@@ -792,26 +626,9 @@ class SmartPI:
             self.est.learn_skip_count = int(state.get("learn_skip_count", 0) or 0)
 
             # Load history queues - Robust estimator uses points (x,y) and residual hist
-            a_pts_data = state.get("a_pts", [])
-            b_pts_data = state.get("b_pts", [])
-            r_hist_data = state.get("r_hist", [])
             b_hat_hist_data = state.get("b_hat_hist", [])
 
-            # Safe loading of tuples for points
-            def to_dq_tuples(data, dq_maxlen):
-                d = deque(maxlen=dq_maxlen)
-                if not data:
-                    return d
-                for item in data:
-                    if isinstance(item, (list, tuple)) and len(item) == 2:
-                        d.append(tuple(item))
-                return d
-
-            self.est._a_pts = to_dq_tuples(a_pts_data, self.est._a_pts.maxlen)
-            self.est._b_pts = to_dq_tuples(b_pts_data, self.est._b_pts.maxlen)
-            
             # Simple float queues
-            self.est._r_hist = deque(r_hist_data, maxlen=self.est._r_hist.maxlen)
             self.est._b_hat_hist = deque(b_hat_hist_data, maxlen=self.est._b_hat_hist.maxlen)
             
             # Hybrid learning raw histories
@@ -938,9 +755,6 @@ class SmartPI:
             "learn_ok_count_a": self.est.learn_ok_count_a,
             "learn_ok_count_b": self.est.learn_ok_count_b,
             "learn_skip_count": self.est.learn_skip_count,
-            "a_pts": list(self.est._a_pts),
-            "b_pts": list(self.est._b_pts),
-            "r_hist": list(self.est._r_hist),
             "b_hat_hist": list(self.est._b_hat_hist),
             "a_meas_hist": list(self.est.a_meas_hist),
             "b_meas_hist": list(self.est.b_meas_hist),
