@@ -236,6 +236,18 @@ class ABEstimator:
         except statistics.StatisticsError:
             return None
 
+    def _get_window(self, history: Deque[float]):
+        """
+        Get the learning window subset according to step logic.
+        - If accumulating (11 <= len < 31): Use last 11 samples.
+        - If full (len == 31): Use all 31 samples.
+        """
+        if len(history) < AB_HISTORY_SIZE:
+             # Logic: From 11 to 30, we stay in "mode 11" (rolling 11)
+             return list(history)[-AB_MIN_SAMPLES:]
+        # Mode 31
+        return history
+
     # ---------- Main learning ----------
 
     def learn(
@@ -278,9 +290,12 @@ class ABEstimator:
                 self.learn_last_reason = f"skip: collecting b meas ({len(self.b_meas_hist)}/{AB_MIN_SAMPLES})"
                 return
             
+            # Step logic: Select window
+            b_window = self._get_window(self.b_meas_hist)
+
             # Median + MAD outlier rejection
-            med_b = statistics.median(self.b_meas_hist)
-            mad_b = self._mad(self.b_meas_hist)
+            med_b = statistics.median(b_window)
+            mad_b = self._mad(b_window)
             
             if mad_b is not None and mad_b > AB_VAL_TOLERANCE:
                 sigma_b = AB_MAD_K * mad_b
@@ -318,9 +333,12 @@ class ABEstimator:
                 self.learn_last_reason = f"skip: collecting a meas ({len(self.a_meas_hist)}/{AB_MIN_SAMPLES})"
                 return
             
+            # Step logic: Select window
+            a_window = self._get_window(self.a_meas_hist)
+
             # Median + MAD outlier rejection
-            med_a = statistics.median(self.a_meas_hist)
-            mad_a = self._mad(self.a_meas_hist)
+            med_a = statistics.median(a_window)
+            mad_a = self._mad(a_window)
             
             if mad_a is not None and mad_a > AB_VAL_TOLERANCE:
                 sigma_a = AB_MAD_K * mad_a
