@@ -145,7 +145,7 @@ LEARN_BOOTSTRAP_COUNT = 10      # Number of learn cycles before applying strict 
 AB_HISTORY_SIZE = 31      # Keep last 31 (ODD) values
 AB_MIN_SAMPLES = 11       # Start learning after 11 (ODD) values
 AB_MAD_SIGMA_MULT = 3.0   # Outlier rejection threshold (sigma)
-AB_VAR_MAX = 0.5          # Max relative variation for update (50%)
+
 AB_MAD_K = 1.4826         # Sigma scaling factor for MAD
 AB_VAL_TOLERANCE = 1e-12  # Small epsilon
 LEARN_SAMPLE_MAX = 240          # Max samples history (e.g. 4h @ 1min)
@@ -292,11 +292,7 @@ class ABEstimator:
             new_b = med_b  # Use median directly
             new_b = clamp(new_b, self.B_MIN, self.B_MAX)
             
-            # Relative variation check
-            if self.b > 0 and abs(new_b - self.b) / self.b > AB_VAR_MAX:
-                self.learn_skip_count += 1
-                self.learn_last_reason = f"skip: b variation > {int(AB_VAR_MAX*100)}%"
-                return
+
             
             self.b = new_b
             self._b_hat_hist.append(new_b)
@@ -336,11 +332,7 @@ class ABEstimator:
             new_a = med_a  # Use median directly
             new_a = clamp(new_a, self.A_MIN, self.A_MAX)
             
-            # Relative variation check
-            if self.a > 0 and abs(new_a - self.a) / self.a > AB_VAR_MAX:
-                self.learn_skip_count += 1
-                self.learn_last_reason = f"skip: a variation > {int(AB_VAR_MAX*100)}%"
-                return
+
             
             self.a = new_a
             self.learn_ok_count += 1
@@ -785,6 +777,16 @@ class SmartPI:
             "setpoint_boost_active": self._setpoint_boost_active,
             "prev_setpoint_for_boost": self._prev_setpoint_for_boost,
         }
+
+    @property
+    def meas_count_a(self) -> int:
+        """Return number of collected 'a' measurements in the buffer."""
+        return len(self.est.a_meas_hist)
+
+    @property
+    def meas_count_b(self) -> int:
+        """Return number of collected 'b' measurements in the buffer."""
+        return len(self.est.b_meas_hist)
 
     # ------------------------------
     # Learning entry point
