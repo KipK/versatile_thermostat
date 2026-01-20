@@ -1029,9 +1029,9 @@ class SmartPI:
         # 5. Multi-cycle learning window logic
         if not self.learn_win_active:
             self.learn_win_active = True
-            self.learn_win_start_ts = now
-            self.learn_T_int_start = current_temp
-            self.learn_T_ext_start = ext_current_temp
+            self.learn_win_start_ts = ts_start
+            self.learn_T_int_start = t_int_start
+            self.learn_T_ext_start = t_ext_start
             self.learn_u_int = 0.0
             self.learn_t_int_s = 0.0
             self.est.learn_last_reason = "learn: window start"
