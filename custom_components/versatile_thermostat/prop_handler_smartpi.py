@@ -219,6 +219,8 @@ class SmartPIHandler:
                 "learn_ok_count_b": algo.learn_ok_count_b,
                 "learn_skip_count": algo.learn_skip_count,
                 "learn_last_reason": algo.learn_last_reason,
+                "meas_count_a": algo.meas_count_a,
+                "meas_count_b": algo.meas_count_b,
                 "learning_start_dt": algo.learning_start_dt,
                 "Kp": algo.kp,
                 "Ki": algo.ki,
