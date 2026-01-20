@@ -328,23 +328,26 @@ class ABEstimator:
         t_ext: float,
         *,
         max_abs_dT_per_min: float = 0.35,
-        min_dT_per_min: float = 0.003,
     ) -> None:
         """
         Update (a,b) using Hybrid approach.
+        
+        The min dT check is done upstream in update_learning() using absolute dT,
+        not per-minute rate, to avoid rejecting valid long windows.
         """
         dTdt = float(dT_int_per_min)
         delta = float(t_int - t_ext)
+        
+        _LOGGER.debug(
+            "ABEstimator.learn: dTdt=%.5f, u=%.3f, delta=%.2f, t_int=%.2f, t_ext=%.2f",
+            dTdt, u, delta, t_int, t_ext
+        )
         
         # 1. Reject gross outliers (physics)
         if abs(dTdt) > max_abs_dT_per_min:
             self.learn_skip_count += 1
             self.learn_last_reason = "skip: slope outlier"
-            return
-
-        if abs(dTdt) < min_dT_per_min:
-            self.learn_skip_count += 1
-            self.learn_last_reason = "skip: slope too small"
+            _LOGGER.debug("ABEstimator: rejected - slope outlier (%.5f > %.5f)", abs(dTdt), max_abs_dT_per_min)
             return
 
         # 2. Check current reliability to decide strategy
@@ -383,6 +386,7 @@ class ABEstimator:
                 if len(self.b_meas_hist) < 6:
                      self.learn_skip_count += 1
                      self.learn_last_reason = "skip: collecting b meas"
+                     _LOGGER.debug("ABEstimator: collecting b meas (%d/4)", len(self.b_meas_hist))
                      return
                 
                 b_rob, s, m = self._robust_huber_location(self.b_meas_hist)
@@ -391,6 +395,7 @@ class ABEstimator:
                 if s > 1e-12 and abs(b_meas - m) > self.AB_OUTLIER_K * s:
                     self.learn_skip_count += 1
                     self.learn_last_reason = "skip: b_meas outlier"
+                    _LOGGER.debug("ABEstimator: b_meas outlier (%.6f vs median %.6f, k*s=%.6f)", b_meas, m, self.AB_OUTLIER_K * s)
                     return
                 
                 # Soft update
@@ -399,20 +404,23 @@ class ABEstimator:
             else:
                 # Strategy 2: Theil-Sen on (delta, -dTdt)
                 self._b_pts.append((delta, -dTdt))
-                if len(self._b_pts) < 6:
-                    self.learn_last_reason = "skip: collecting b pts" # Should unlikely happen if reliable
+                if len(self._b_pts) < 4:
+                    self.learn_last_reason = "skip: collecting b pts"
+                    _LOGGER.debug("ABEstimator: collecting b pts (%d/4)", len(self._b_pts))
                     return
                 
                 b_hat, c = self._theil_sen(self._b_pts)
                 if b_hat is None or b_hat <= 0:
                     self.learn_skip_count += 1
                     self.learn_last_reason = "skip: TS b invalid"
+                    _LOGGER.debug("ABEstimator: TS b invalid (b_hat=%s)", b_hat)
                     return
                 
                 # Check intercept coherence
                 if mad_r is not None and abs(c) > INTERCEPT_SIGMA_FACTOR * sigma_r:
                      self.learn_skip_count += 1
                      self.learn_last_reason = "skip: TS b intercept"
+                     _LOGGER.debug("ABEstimator: TS b intercept too large (|c|=%.6f > %.6f)", abs(c), INTERCEPT_SIGMA_FACTOR * sigma_r)
                      return
                 
                 new_b = b_hat
@@ -420,11 +428,20 @@ class ABEstimator:
 
             # Apply bounds
             new_b = clamp(new_b, self.B_MIN, self.B_MAX)
+            
+            # 50% relative variation check (per original spec)
+            if self.b > 0 and abs(new_b - self.b) / self.b > 0.5:
+                self.learn_skip_count += 1
+                self.learn_last_reason = "skip: b variation > 50%"
+                _LOGGER.debug("ABEstimator: b variation too large (%.6f -> %.6f, %.1f%%)", self.b, new_b, 100 * abs(new_b - self.b) / self.b)
+                return
+            
             self.b = new_b
             self._b_hat_hist.append(new_b)
             self.learn_ok_count += 1
             self.learn_ok_count_b += 1
             self.learn_last_reason = f"learned b ({update_type})"
+            _LOGGER.debug("ABEstimator: learned b=%.6f (%s)", new_b, update_type)
             return
 
         # ---------- ON phase : learn a ----------
@@ -440,46 +457,61 @@ class ABEstimator:
             if not is_reliable:
                 # Strategy 1: Huber
                 self.a_meas_hist.append(a_meas)
-                if len(self.a_meas_hist) < 6:
+                if len(self.a_meas_hist) < 4:
                     self.learn_skip_count += 1
                     self.learn_last_reason = "skip: collecting a meas"
+                    _LOGGER.debug("ABEstimator: collecting a meas (%d/4)", len(self.a_meas_hist))
                     return
                 
                 a_rob, s, m = self._robust_huber_location(self.a_meas_hist)
-                 # Outlier check
+                # Outlier check
                 if s > 1e-12 and abs(a_meas - m) > self.AB_OUTLIER_K * s:
                     self.learn_skip_count += 1
                     self.learn_last_reason = "skip: a_meas outlier"
+                    _LOGGER.debug("ABEstimator: a_meas outlier (%.6f vs median %.6f, k*s=%.6f)", a_meas, m, self.AB_OUTLIER_K * s)
                     return
 
                 new_a = (1 - self.ALPHA_A) * self.a + self.ALPHA_A * a_rob
                 update_type = "Huber"
             else:
-                 # Strategy 2: Theil-Sen on (u, dTdt + b*delta)
-                 y = dTdt + self.b * delta
-                 self._a_pts.append((u, y))
-                 if len(self._a_pts) < 6:
-                     return
+                # Strategy 2: Theil-Sen on (u, dTdt + b*delta)
+                y = dTdt + self.b * delta
+                self._a_pts.append((u, y))
+                if len(self._a_pts) < 4:
+                    self.learn_last_reason = "skip: collecting a pts"
+                    _LOGGER.debug("ABEstimator: collecting a pts (%d/4)", len(self._a_pts))
+                    return
 
-                 a_hat, c = self._theil_sen(self._a_pts)
-                 if a_hat is None or a_hat <= 0:
-                     self.learn_skip_count += 1
-                     self.learn_last_reason = "skip: TS a invalid"
-                     return
-                 
-                 if mad_r is not None and abs(c) > INTERCEPT_SIGMA_FACTOR * sigma_r:
-                     self.learn_skip_count += 1
-                     self.learn_last_reason = "skip: TS a intercept"
-                     return
+                a_hat, c = self._theil_sen(self._a_pts)
+                if a_hat is None or a_hat <= 0:
+                    self.learn_skip_count += 1
+                    self.learn_last_reason = "skip: TS a invalid"
+                    _LOGGER.debug("ABEstimator: TS a invalid (a_hat=%s)", a_hat)
+                    return
+                
+                if mad_r is not None and abs(c) > INTERCEPT_SIGMA_FACTOR * sigma_r:
+                    self.learn_skip_count += 1
+                    self.learn_last_reason = "skip: TS a intercept"
+                    _LOGGER.debug("ABEstimator: TS a intercept too large (|c|=%.6f > %.6f)", abs(c), INTERCEPT_SIGMA_FACTOR * sigma_r)
+                    return
 
-                 new_a = a_hat
-                 update_type = "T-S"
+                new_a = a_hat
+                update_type = "T-S"
 
             new_a = clamp(new_a, self.A_MIN, self.A_MAX)
+            
+            # 50% relative variation check (per original spec)
+            if self.a > 0 and abs(new_a - self.a) / self.a > 0.5:
+                self.learn_skip_count += 1
+                self.learn_last_reason = "skip: a variation > 50%"
+                _LOGGER.debug("ABEstimator: a variation too large (%.6f -> %.6f, %.1f%%)", self.a, new_a, 100 * abs(new_a - self.a) / self.a)
+                return
+            
             self.a = new_a
             self.learn_ok_count += 1
             self.learn_ok_count_a += 1
             self.learn_last_reason = f"learned a ({update_type})"
+            _LOGGER.debug("ABEstimator: learned a=%.6f (%s)", new_a, update_type)
             return
 
         self.learn_skip_count += 1

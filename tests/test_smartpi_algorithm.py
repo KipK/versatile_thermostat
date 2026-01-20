@@ -179,13 +179,13 @@ def test_abestimator_learn_b_off():
     # With T_int = 20, T_ext = 10, delta = 10
     # If b = 0.001, then dT/dt = -0.001 * 10 = -0.01 (cooling)
     
-    # Need > 5 points to start learning
-    # We vary t_ext AND dT to create a consistent slope AND add noise
-    # Noise is critical to allow 'mad' to be non-zero and permit initial bias to pass gating
+    # Need >= 4 points to start learning in Huber mode
+    # Then after tau becomes reliable, it switches to Theil-Sen which needs 4 more
+    # We provide 15 iterations to ensure learning completes
     random.seed(42)
     b_target = 0.001
     
-    for i in range(10): # More points to ensuring learning triggers
+    for i in range(15):  # More points to ensure learning triggers after mode switch
         delta = 10.0 + i * 0.5
         # Ideal dT = -b * delta
         # Add noise to creating non-zero sigma
@@ -200,9 +200,9 @@ def test_abestimator_learn_b_off():
         )
     
     assert est.learn_ok_count > 0
-    assert "learned b" in est.learn_last_reason
+    assert est.learn_ok_count_b > 0  # b was learned (last reason may be skip if final sample rejected)
     # b should be learned
-    assert math.isclose(est.b, b_target, rel_tol=0.20) # Looser tol due to noise
+    assert math.isclose(est.b, b_target, rel_tol=0.20)  # Looser tol due to noise
 
 
 def test_abestimator_learn_a_on():
@@ -266,7 +266,9 @@ def test_abestimator_learn_b_off_phase():
     random.seed(42)
     b_target = 0.001
     
-    for i in range(10):
+    # Need >= 4 points for Huber, then may switch to Theil-Sen needing 4 more
+    # Use 15 iterations to ensure learning completes
+    for i in range(15):
         delta = 10.0 + i * 0.2
         noise = random.uniform(-0.0005, 0.0005)
         dt_val = -b_target * delta + noise
@@ -280,7 +282,7 @@ def test_abestimator_learn_b_off_phase():
     
     # Should learn b in OFF phase, not skip
     assert est.learn_ok_count > 0
-    assert "learned b" in est.learn_last_reason
+    assert est.learn_ok_count_b > 0  # b was learned (last reason may be skip if final sample rejected)
 
 
 def test_tau_reliability_not_enough_learns():
