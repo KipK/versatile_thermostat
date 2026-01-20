@@ -265,3 +265,6 @@ class SmartPIHandler:
                  "type": "learning_reset"
              })
              write_event_log(_LOGGER, t, "SmartPI learning reset")
+             self.update_attributes()
+             t.async_write_ha_state()
+             await self._async_save()
