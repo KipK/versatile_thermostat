@@ -386,7 +386,7 @@ class ABEstimator:
                 if len(self.b_meas_hist) < 6:
                      self.learn_skip_count += 1
                      self.learn_last_reason = "skip: collecting b meas"
-                     _LOGGER.debug("ABEstimator: collecting b meas (%d/4)", len(self.b_meas_hist))
+                     _LOGGER.debug("ABEstimator: collecting b meas (%d/6)", len(self.b_meas_hist))
                      return
                 
                 b_rob, s, m = self._robust_huber_location(self.b_meas_hist)
@@ -404,9 +404,9 @@ class ABEstimator:
             else:
                 # Strategy 2: Theil-Sen on (delta, -dTdt)
                 self._b_pts.append((delta, -dTdt))
-                if len(self._b_pts) < 4:
+                if len(self._b_pts) < 6:
                     self.learn_last_reason = "skip: collecting b pts"
-                    _LOGGER.debug("ABEstimator: collecting b pts (%d/4)", len(self._b_pts))
+                    _LOGGER.debug("ABEstimator: collecting b pts (%d/6)", len(self._b_pts))
                     return
                 
                 b_hat, c = self._theil_sen(self._b_pts)
@@ -457,10 +457,10 @@ class ABEstimator:
             if not is_reliable:
                 # Strategy 1: Huber
                 self.a_meas_hist.append(a_meas)
-                if len(self.a_meas_hist) < 4:
+                if len(self.a_meas_hist) < 6:
                     self.learn_skip_count += 1
                     self.learn_last_reason = "skip: collecting a meas"
-                    _LOGGER.debug("ABEstimator: collecting a meas (%d/4)", len(self.a_meas_hist))
+                    _LOGGER.debug("ABEstimator: collecting a meas (%d/6)", len(self.a_meas_hist))
                     return
                 
                 a_rob, s, m = self._robust_huber_location(self.a_meas_hist)
@@ -477,9 +477,9 @@ class ABEstimator:
                 # Strategy 2: Theil-Sen on (u, dTdt + b*delta)
                 y = dTdt + self.b * delta
                 self._a_pts.append((u, y))
-                if len(self._a_pts) < 4:
+                if len(self._a_pts) < 6:
                     self.learn_last_reason = "skip: collecting a pts"
-                    _LOGGER.debug("ABEstimator: collecting a pts (%d/4)", len(self._a_pts))
+                    _LOGGER.debug("ABEstimator: collecting a pts (%d/6)", len(self._a_pts))
                     return
 
                 a_hat, c = self._theil_sen(self._a_pts)
@@ -1116,7 +1116,6 @@ class SmartPI:
                 t_ext=self.learn_T_ext_start,
             )
             self._reset_learning_window()
-            self.est.learn_last_reason = "learn: b window"
             return
 
         if u_eff > U_ON_MIN:
@@ -1127,7 +1126,6 @@ class SmartPI:
                 t_ext=self.learn_T_ext_start,
             )
             self._reset_learning_window()
-            self.est.learn_last_reason = "learn: a window"
             return
 
         self._reset_learning_window()
