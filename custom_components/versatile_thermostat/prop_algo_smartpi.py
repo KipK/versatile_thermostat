@@ -547,12 +547,20 @@ class SmartPI:
         self.est.reset()
         self.integral = 0.0
         self.u_prev = 0.0
+        self._on_percent = 0.0
+        self._on_time_sec = 0
+        self._off_time_sec = 0
+        self._last_u_ff = 0.0
+        self._last_u_pi = 0.0
+        self._last_u_cmd = 0.0
+        self._last_u_limited = 0.0
+        self._last_u_applied = 0.0
+        self._last_aw_du = 0.0
         self._e_filt = None
         self.Kp = KP_SAFE
         self.Ki = KI_SAFE
         self._cycles_since_reset = 0
         self._accumulated_dt = 0.0
-        self._prev_error = None
         self._prev_error = None
         self._sign_flip_active = False
         self._sign_flip_end_ts = None
