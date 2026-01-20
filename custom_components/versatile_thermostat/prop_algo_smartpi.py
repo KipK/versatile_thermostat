@@ -797,7 +797,7 @@ class SmartPI:
         self.learn_u_int = 0.0
         self.learn_t_int_s = 0.0
 
-    def start_new_cycle(self, u_applied: float, temp_in: float, temp_ext: float) -> None:
+    def start_new_cycle(self, u_applied: Optional[float], temp_in: float, temp_ext: float) -> None:
         """
         Snapshot state at the START of a control cycle.
         This provides the baseline (T_start, etc.) for calculating dT at the END of the cycle.
@@ -806,11 +806,12 @@ class SmartPI:
             "temp_in": float(temp_in),
             "temp_ext": float(temp_ext),
             "time": time.time(),
-            "u_applied": float(u_applied),
+            "u_applied": float(u_applied) if u_applied is not None else 0.0,
         }
+        u_log = f"{u_applied:.2f}" if u_applied is not None else "Pending"
         _LOGGER.debug(
-            "%s - SmartPI new cycle snapshot: Tin=%.2f, Text=%.2f, U=%.2f", 
-            self._name, temp_in, temp_ext, u_applied
+            "%s - SmartPI new cycle snapshot: Tin=%.2f, Text=%.2f, U=%s", 
+            self._name, temp_in, temp_ext, u_log
         )
 
     def update_learning(
@@ -858,9 +859,9 @@ class SmartPI:
         # The next cycle starts NOW with current temps.
         # NOTE: u_applied for the NEXT cycle is not known yet (calculate() runs after). 
         # It must be updated later or we assume 0 until updated.
-        # We start with u=0.0 (placeholder)
+        # We start with u=None (Pending)
         temp_ext_next = ext_current_temp if ext_current_temp is not None else t_ext_start
-        self.start_new_cycle(0.0, current_temp, temp_ext_next)
+        self.start_new_cycle(None, current_temp, temp_ext_next)
 
         # 3. Interruption / resume check
         if self._learning_resume_ts:
