@@ -149,6 +149,14 @@ DT_DERIVATIVE_MIN_ABS = 0.03    # Min absolute dT (°C) if quantization unknown
 LEARN_QUALITY_THRESHOLD = 0.25  # Min QI quality to accept learning
 QUANTIZATION_ROUND_TO = 0.001   # Rounding / binning for quantization detection
 
+# --- SmartPI Learning Window Constants ---
+DT_MIN_FRACTION = 0.8
+DT_MAX_MIN = 30
+MIN_ABS_DT = 0.03      # °C
+DELTA_MIN = 0.5        # °C
+U_OFF_MAX = 0.05
+U_ON_MIN = 0.20
+
 
 @dataclass(frozen=True)
 class TauReliability:
@@ -628,6 +636,14 @@ class SmartPI:
         # Timestamp for robust learning dt calculation
         self._learn_last_ts: float | None = None
 
+        # Learning window state (multi-cycle learning)
+        self.learn_win_active: bool = False
+        self.learn_win_start_ts: float | None = None
+        self.learn_T_int_start: float = 0.0
+        self.learn_T_ext_start: float = 0.0
+        self.learn_u_int: float = 0.0
+        self.learn_t_int_s: float = 0.0
+
         # Learning start timestamp
         self._learning_start_date: Optional[datetime] = datetime.now()
 
@@ -684,6 +700,12 @@ class SmartPI:
         self._in_deadband = False
         self._setpoint_boost_active = False
         self._prev_setpoint_for_boost = None
+        self.learn_win_active = False
+        self.learn_win_start_ts = None
+        self.learn_T_int_start = 0.0
+        self.learn_T_ext_start = 0.0
+        self.learn_u_int = 0.0
+        self.learn_t_int_s = 0.0
         _LOGGER.info("%s - SmartPI learning and history reset", self._name)
 
     def notify_resume_after_interruption(self, skip_cycles: int = None) -> None:
@@ -791,6 +813,26 @@ class SmartPI:
                 except (ValueError, TypeError):
                     self._learning_start_date = None
 
+            # Load learning window state
+            self.learn_win_active = bool(state.get("learn_win_active", False))
+            learn_win_start_ts = state.get("learn_win_start_ts")
+            if learn_win_start_ts is not None:
+                try:
+                    self.learn_win_start_ts = float(learn_win_start_ts)
+                except (ValueError, TypeError):
+                    self.learn_win_start_ts = None
+            else:
+                self.learn_win_start_ts = None
+            for field_name in ("learn_T_int_start", "learn_T_ext_start", "learn_u_int", "learn_t_int_s"):
+                value = state.get(field_name)
+                if value is not None:
+                    try:
+                        setattr(self, field_name, float(value))
+                    except (ValueError, TypeError):
+                        setattr(self, field_name, 0.0)
+                else:
+                    setattr(self, field_name, 0.0)
+
             # Load setpoint filter state
             filtered_sp = state.get("filtered_setpoint")
             last_raw_sp = state.get("last_raw_setpoint")
@@ -875,6 +917,12 @@ class SmartPI:
             "cycles_since_reset": self._cycles_since_reset,
             "accumulated_dt": self._accumulated_dt,
             "learning_start_date": self._learning_start_date.isoformat() if self._learning_start_date else None,
+            "learn_win_active": self.learn_win_active,
+            "learn_win_start_ts": self.learn_win_start_ts,
+            "learn_T_int_start": self.learn_T_int_start,
+            "learn_T_ext_start": self.learn_T_ext_start,
+            "learn_u_int": self.learn_u_int,
+            "learn_t_int_s": self.learn_t_int_s,
             "filtered_setpoint": self._filtered_setpoint,
             "last_raw_setpoint": self._last_raw_setpoint,
             "initial_temp_for_filter": self._initial_temp_for_filter,
@@ -887,6 +935,13 @@ class SmartPI:
     # ------------------------------
     # Learning entry point
     # ------------------------------
+
+    def _reset_learning_window(self) -> None:
+        """Reset the multi-cycle learning window state."""
+        self.learn_win_active = False
+        self.learn_win_start_ts = None
+        self.learn_u_int = 0.0
+        self.learn_t_int_s = 0.0
 
     def start_new_cycle(self, u_applied: float, temp_in: float, temp_ext: float) -> None:
         """
@@ -928,7 +983,8 @@ class SmartPI:
         if self._cycle_start_state is None:
             # This happens on first boot or after reset. Initialize for next time.
             u_init = previous_power if previous_power is not None else 0.0
-            self.start_new_cycle(u_init, current_temp, ext_current_temp)
+            temp_ext_init = ext_current_temp if ext_current_temp is not None else 0.0
+            self.start_new_cycle(u_init, current_temp, temp_ext_init)
             self.est.learn_skip_count += 1
             self.est.learn_last_reason = "skip: no start snapshot"
             return
@@ -941,59 +997,110 @@ class SmartPI:
         u_applied = start["u_applied"]
 
         now = time.time()
-        dt_minutes = (now - ts_start) / 60.0
+        dt_s = max(now - ts_start, 0.0)
+        dt_minutes = dt_s / 60.0
 
         # 2. Reset snapshot for the NEXT cycle immediately
         # The next cycle starts NOW with current temps.
         # NOTE: u_applied for the NEXT cycle is not known yet (calculate() runs after). 
         # It must be updated later or we assume 0 until updated.
         # We start with u=0.0 (placeholder)
-        self.start_new_cycle(0.0, current_temp, ext_current_temp)
+        temp_ext_next = ext_current_temp if ext_current_temp is not None else t_ext_start
+        self.start_new_cycle(0.0, current_temp, temp_ext_next)
 
-        # 3. Validation: Cycle Duration
-        if dt_minutes < 0.8 * self._cycle_min:
-            self.est.learn_skip_count += 1
-            self.est.learn_last_reason = f"skip: cycle too short ({dt_minutes:.1f}m)"
-            return
-
-        # 4. Compute Deflection and Delta
-        dT = current_temp - t_int_start
-        dT_dt = dT / dt_minutes
-        delta_T = t_int_start - t_ext_start  # Relative to OUTSIDE at START
-
-        # 5. Interruption / resume check
+        # 3. Interruption / resume check
         if self._learning_resume_ts:
             if now < self._learning_resume_ts:
                 self.est.learn_skip_count += 1
                 self.est.learn_last_reason = "skip: resume cool-down"
+                self._reset_learning_window()
                 return
             else:
                 # Done waiting
                 self._learning_resume_ts = None
 
-        # 6. Learning Logic (Strict Separation)
-        
-        # Learn B (Heat Loss) -> dominant when heating is OFF/Low (u < 5%)
-        if u_applied < 0.05 and abs(delta_T) >= 0.5:
+        # 4. Learning requires external temperature
+        if ext_current_temp is None:
+            self.est.learn_skip_count += 1
+            self.est.learn_last_reason = "skip: no external temp"
+            self._reset_learning_window()
+            return
+
+        # 5. Multi-cycle learning window logic
+        if not self.learn_win_active:
+            self.learn_win_active = True
+            self.learn_win_start_ts = now
+            self.learn_T_int_start = current_temp
+            self.learn_T_ext_start = ext_current_temp
+            self.learn_u_int = 0.0
+            self.learn_t_int_s = 0.0
+            self.est.learn_last_reason = "learn: window start"
+
+        # Integrate u_applied over the cycle duration
+        self.learn_u_int += clamp(u_applied, 0.0, 1.0) * dt_s
+        self.learn_t_int_s += dt_s
+
+        if not self.learn_win_start_ts:
+            self._reset_learning_window()
+            self.est.learn_last_reason = "skip: window duty invalid"
+            return
+
+        dt_min = (now - self.learn_win_start_ts) / 60.0
+        if dt_min < DT_MIN_FRACTION * self._cycle_min:
+            self.est.learn_last_reason = "skip: window too short"
+            return
+
+        dT = current_temp - self.learn_T_int_start
+        abs_dT = abs(dT)
+        delta_T = self.learn_T_int_start - self.learn_T_ext_start
+
+        if abs(delta_T) < DELTA_MIN:
+            self._reset_learning_window()
+            self.est.learn_last_reason = "skip: delta too small"
+            return
+
+        if abs_dT < MIN_ABS_DT and dt_min < DT_MAX_MIN:
+            self.est.learn_last_reason = "skip: extending window (dT too small)"
+            return
+
+        if abs_dT < MIN_ABS_DT and dt_min >= DT_MAX_MIN:
+            self._reset_learning_window()
+            self.est.learn_last_reason = "skip: window timeout (dT too small)"
+            return
+
+        if self.learn_t_int_s <= 0.0:
+            self._reset_learning_window()
+            self.est.learn_last_reason = "skip: window duty invalid"
+            return
+
+        u_eff = self.learn_u_int / self.learn_t_int_s
+        dT_dt = dT / dt_min
+
+        if u_eff < U_OFF_MAX:
             self.est.learn(
                 dT_int_per_min=dT_dt,
-                u=u_applied,
-                t_int=t_int_start,
-                t_ext=t_ext_start
+                u=0.0,
+                t_int=self.learn_T_int_start,
+                t_ext=self.learn_T_ext_start,
             )
+            self._reset_learning_window()
+            self.est.learn_last_reason = "learn: b window"
+            return
 
-        # Learn A (Heating Power) -> dominant when heating is ON/High (u > 20%)
-        elif u_applied > 0.20 and abs(delta_T) >= 0.2:
-             self.est.learn(
+        if u_eff > U_ON_MIN:
+            self.est.learn(
                 dT_int_per_min=dT_dt,
-                u=u_applied,
-                t_int=t_int_start,
-                t_ext=t_ext_start
+                u=u_eff,
+                t_int=self.learn_T_int_start,
+                t_ext=self.learn_T_ext_start,
             )
-            
-        else:
-             self.est.learn_skip_count += 1
-             self.est.learn_last_reason = "skip: low excitation"
+            self._reset_learning_window()
+            self.est.learn_last_reason = "learn: a window"
+            return
+
+        self._reset_learning_window()
+        self.est.learn_last_reason = "skip: low excitation (u mid)"
+        return
 
     # ------------------------------
     # Props / API Compat

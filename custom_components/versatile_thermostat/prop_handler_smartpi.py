@@ -136,7 +136,7 @@ class SmartPIHandler:
                  # We simply pass current data. SmartPI determines dt and deltas against its internal snapshot.
                  t._prop_algorithm.update_learning(
                      current_temp=current_temp,
-                     ext_current_temp=current_ext_temp if current_ext_temp is not None else 0.0,
+                     ext_current_temp=current_ext_temp,
                      hvac_mode=t.vtherm_hvac_mode,
                      current_temp_ts=time.time()
                  )
