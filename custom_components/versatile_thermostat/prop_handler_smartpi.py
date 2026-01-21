@@ -194,10 +194,10 @@ class SmartPIHandler:
 
         async def _recalc_callback(now):
             _LOGGER.debug("%s - SmartPI periodic calculation trigger", t)
-            t.recalculate()
-            # We also trigger control_heating to apply any changes
-            # We pass timestamp=now to trigger learning
-            await t.async_control_heating(timestamp=now)
+            # Force control_heating but without timestamp to avoid triggering learning
+            # The learning should only be triggered by the cycle manager (every cycle_min)
+            # automatic recalculation is done inside control_heating
+            await t.async_control_heating(timestamp=None)
 
         t._smartpi_recalc_timer_remove = async_track_time_interval(
             t.hass,
