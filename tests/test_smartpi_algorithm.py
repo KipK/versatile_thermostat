@@ -22,6 +22,21 @@ from custom_components.versatile_thermostat.prop_algo_smartpi import (
 )
 import math
 from custom_components.versatile_thermostat.vtherm_hvac_mode import VThermHvacMode_HEAT, VThermHvacMode_COOL
+from homeassistant.core import HomeAssistant
+from unittest.mock import patch, MagicMock
+from custom_components.versatile_thermostat.const import (
+    DOMAIN, 
+    CONF_NAME, 
+    CONF_CYCLE_MIN,
+    CONF_PROP_FUNCTION,
+    PROPORTIONAL_FUNCTION_SMART_PI,
+    CONF_EXTERNAL_TEMP_SENSOR,
+    CONF_TEMP_SENSOR,
+    CONF_THERMOSTAT_TYPE,
+)
+from custom_components.versatile_thermostat.prop_handler_smartpi import SmartPIHandler
+from tests.commons import create_thermostat, MockSwitch, register_mock_entity
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 
 def test_smartpi_instantiation():
@@ -1954,3 +1969,76 @@ def test_setpoint_boost_on_decrease_heat_mode():
         "Setpoint boost should activate on decrease in HEAT mode"
 
 
+
+"""Test SmartPI startup behavior fix."""
+
+@pytest.fixture
+async def smartpi_thermostat_for_startup(hass: HomeAssistant):
+    """Create a SmartPI thermostat fixture for startup tests."""
+    entry_data = {
+        CONF_NAME: "Test SmartPI Startup",
+        CONF_PROP_FUNCTION: PROPORTIONAL_FUNCTION_SMART_PI,
+        CONF_CYCLE_MIN: 5,
+        CONF_EXTERNAL_TEMP_SENSOR: "sensor.external_temp",
+        CONF_TEMP_SENSOR: "sensor.indoor_temp",
+        CONF_THERMOSTAT_TYPE: "thermostat_over_switch",
+        "underlying_entity_ids": ["switch.test_heater"],
+        "minimal_activation_delay": 0,
+        "minimal_deactivation_delay": 0,
+    }
+    
+    mock_entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Test SmartPI Startup",
+        data=entry_data,
+        unique_id="test_smartpi_startup_uid"
+    )
+    
+    # Create the underlying switch
+    from homeassistant.components.switch import DOMAIN as SWITCH_DOMAIN
+    mock_switch = MockSwitch(hass, "test_heater", "Test Heater")
+    mock_switch.entity_id = "switch.test_heater"
+    await register_mock_entity(hass, mock_switch, SWITCH_DOMAIN)
+    
+    # We delay the entity creation so we can manipulate state before startup if needed
+    # But create_thermostat calls async_add_entry -> async_setup_entry -> etc.
+    # To test startup specifically with mocked sensors we should create them first
+    
+    hass.states.async_set("sensor.indoor_temp", "20.0")
+    hass.states.async_set("sensor.external_temp", "10.0")
+    
+    entity = await create_thermostat(hass, mock_entry, "climate.test_smartpi_startup")
+    return entity
+
+async def test_smartpi_startup_initializes_cycle(hass: HomeAssistant, smartpi_thermostat_for_startup):
+    """Test that SmartPI initializes cycle state at startup, enabling first cycle learning."""
+    entity = smartpi_thermostat_for_startup
+    algo = entity._prop_algorithm
+    
+    # 1. Verify that async_startup (called by create_thermostat) has initialized the start state
+    # This assertion ensures our fix works. Without the fix, this should be None.
+    assert algo._cycle_start_state is not None, "Cycle start state should be initialized at startup"
+    assert algo._cycle_start_state["temp_in"] == 20.0
+    assert algo._cycle_start_state["temp_ext"] == 10.0
+    
+    # 2. Simulate end of cycle
+    # We can call update_learning directly to verify it doesn't skip
+    # (Mocking time to ensure non-zero dt if needed, but logic handles small dt with just skipping if too small, 
+    # but here we want to ensure it doesn't skip due to "no start snapshot")
+    
+    with patch("custom_components.versatile_thermostat.prop_algo_smartpi.time.time") as mock_time:
+        # Move time forward by cycle_min (5 min = 300s)
+        start_time = algo._cycle_start_state["time"]
+        mock_time.return_value = start_time + 301
+        
+        # Change temp to produce a signal
+        algo.update_learning(
+            current_temp=21.0, # +1
+            ext_current_temp=10.0,
+            hvac_mode=1 # HEAT
+        )
+        
+        # Check reasons
+        # If it was skipped due to "no start snapshot", reason would be "skip: no start snapshot"
+        # If it proceeds, it might skip due to "low excitation" or "collecting b meas", but NOT "no start snapshot"
+        assert algo.est.learn_last_reason != "skip: no start snapshot"
