@@ -1,6 +1,7 @@
 
 # tests/test_smartpi_cycle_alignment.py
 import pytest
+import time
 from unittest.mock import MagicMock, patch, AsyncMock
 from homeassistant.core import HomeAssistant
 from homeassistant.const import STATE_ON, STATE_OFF
@@ -98,12 +99,14 @@ async def test_smartpi_60s_timer_interference():
     
     # A. Test control_heating(timestamp=None) -> No update_learning
     mock_update = MagicMock()
-    with patch.object(algo, 'update_learning', mock_update):
+    with patch.object(algo, 'update_learning', mock_update), \
+         patch.object(handler, '_async_save', new_callable=AsyncMock):
         await handler.control_heating(timestamp=None)
         mock_update.assert_not_called()
         
     # B. Test control_heating(timestamp=Value) -> update_learning called
-    with patch.object(algo, 'update_learning', mock_update):
+    with patch.object(algo, 'update_learning', mock_update), \
+         patch.object(handler, '_async_save', new_callable=AsyncMock):
         await handler.control_heating(timestamp=now_ts)
         mock_update.assert_called_once()
     
@@ -288,3 +291,46 @@ async def test_smartpi_power_stability_abort():
     
     assert algo.learn_win_active is False
     assert "skip: power instability" in algo.est.learn_last_reason
+
+@pytest.mark.asyncio
+async def test_smartpi_resume_from_off_resets_cycle():
+    """
+    Verify that when resuming from OFF state (e.g., after window close),
+    the cycle start state is reset to prevent using stale timestamps.
+    """
+    from custom_components.versatile_thermostat.vtherm_hvac_mode import VThermHvacMode_OFF
+    
+    # Setup
+    t = MockThermostat()
+    handler = SmartPIHandler(t)
+    handler._store = AsyncMock()
+    
+    algo = SmartPI(
+        cycle_min=10, 
+        minimal_activation_delay=0, 
+        minimal_deactivation_delay=0, 
+        name="TestAlgo"
+    )
+    t._prop_algorithm = algo
+    
+    # Initialize cycle with old timestamp (simulating before window opened)
+    old_time = time.time() - 3600  # 1 hour ago
+    algo.start_new_cycle(0.5, 20.0, 5.0)
+    algo._cycle_start_state["time"] = old_time
+    
+    # Simulate thermostat was OFF (timer stopped)
+    t._smartpi_recalc_timer_remove = None
+    t.vtherm_hvac_mode = VThermHvacMode_HEAT
+    
+    # Trigger on_state_changed (what happens when window closes)
+    with patch.object(handler, '_start_recalc_timer'):
+        await handler.on_state_changed()
+    
+    # Verify cycle start state was reset to current time (not old_time)
+    new_start_time = algo._cycle_start_state["time"]
+    assert new_start_time > old_time, "Cycle start time should be reset to NOW, not use old timestamp"
+    assert abs(new_start_time - time.time()) < 2, "Cycle start time should be approximately NOW"
+    
+    # Verify learning window was also reset
+    assert algo.learn_win_active is False
+    assert algo.learn_win_start_ts is None
