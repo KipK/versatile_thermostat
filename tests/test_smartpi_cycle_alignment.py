@@ -206,3 +206,85 @@ async def test_smartpi_frozen_power_snapshot():
     # Verify snapshot is STILL the first value (Frozen)
     assert algo._cycle_start_state["u_applied"] == float(first_u)
     assert algo._cycle_start_state["u_applied"] != float(second_u) 
+
+@pytest.mark.asyncio
+async def test_smartpi_reboot_discards_active_window():
+    """
+    Verify that restoring state DISCARDS active learning window progress.
+    This ensures a fresh start after reboot (interruption).
+    """
+    algo = SmartPI(
+        cycle_min=10, 
+        minimal_activation_delay=0, 
+        minimal_deactivation_delay=0, 
+        name="TestAlgo"
+    )
+    
+    # Simulate a saved state with an active window
+    saved_state = {
+        "learn_win_active": True,
+        "learn_win_start_ts": time.time() - 300, # 5 min ago
+        "learn_u_int": 2.5,
+        "a": 0.01,
+        "b": 0.02
+    }
+    
+    # Load state
+    algo.load_state(saved_state)
+    
+    # Check Persistence of params
+    assert algo.est.a == 0.01
+    assert algo.est.b == 0.02
+    
+    # Check DISCARD of window
+    assert algo.learn_win_active is False
+    assert algo.learn_win_start_ts is None
+    assert algo.learn_u_int == 0.0
+
+@pytest.mark.asyncio
+async def test_smartpi_power_stability_abort():
+    """
+    Verify that changing power output in a subsequent cycle 
+    within the same learning window ABORTS the window 
+    (strict power requirement).
+    """
+    algo = SmartPI(
+        cycle_min=10, 
+        minimal_activation_delay=0, 
+        minimal_deactivation_delay=0, 
+        name="TestAlgo"
+    )
+    # 1. Start a cycle with 50% power
+    algo.start_new_cycle(0.5, 20.0, 10.0)
+    algo._cycle_start_state["time"] -= 600 # 10 min elapsed
+    
+    # 2. Update learning (cycle ends): Should START window
+    algo.update_learning(
+        current_temp=20.0, # No temp change yet
+        ext_current_temp=10.0,
+        previous_temp=20.0,
+        previous_power=0.5,
+        hvac_mode=VThermHvacMode_HEAT,
+        cycle_dt=10.0
+    )
+    assert algo.learn_win_active is True
+    assert algo.learn_u_first == 0.5
+    # Reason could be "window start" or "extending window" depending on dT checks
+    assert "window" in algo.est.learn_last_reason
+    
+    # 3. Start NEXT cycle with DIFFERENT power (0.6)
+    algo.start_new_cycle(0.6, 20.0, 10.0)
+    algo._cycle_start_state["time"] -= 600
+    
+    # 4. Update learning: Should ABORT due to power change
+    algo.update_learning(
+        current_temp=20.2, # Some temp change
+        ext_current_temp=10.0,
+        previous_temp=20.0,
+        previous_power=0.6,
+        hvac_mode=VThermHvacMode_HEAT,
+        cycle_dt=10.0
+    )
+    
+    assert algo.learn_win_active is False
+    assert "skip: power instability" in algo.est.learn_last_reason

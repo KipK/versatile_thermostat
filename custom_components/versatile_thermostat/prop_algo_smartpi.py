@@ -518,7 +518,10 @@ class SmartPI:
         self.learn_T_int_start: float = 0.0
         self.learn_T_ext_start: float = 0.0
         self.learn_u_int: float = 0.0
+        self.learn_u_int: float = 0.0
         self.learn_t_int_s: float = 0.0
+        # For strict power check during window extension
+        self.learn_u_first: float | None = None
 
         # Learning start timestamp
         self._learning_start_date: Optional[datetime] = datetime.now()
@@ -590,6 +593,7 @@ class SmartPI:
         self.learn_T_ext_start = 0.0
         self.learn_u_int = 0.0
         self.learn_t_int_s = 0.0
+        self.learn_u_first = None
         _LOGGER.info("%s - SmartPI learning and history reset", self._name)
 
     def notify_resume_after_interruption(self, skip_cycles: int = None) -> None:
@@ -810,6 +814,7 @@ class SmartPI:
         self.learn_win_start_ts = None
         self.learn_u_int = 0.0
         self.learn_t_int_s = 0.0
+        self.learn_u_first = None
 
     def start_new_cycle(self, u_applied: Optional[float], temp_in: float, temp_ext: float) -> None:
         """
@@ -909,7 +914,15 @@ class SmartPI:
             self.learn_T_ext_start = t_ext_start
             self.learn_u_int = 0.0
             self.learn_t_int_s = 0.0
+            self.learn_u_first = u_applied  # strict power check reference
             self.est.learn_last_reason = "learn: window start"
+        else:
+             # Window extension: check power stability
+             if self.learn_u_first is not None and abs(u_applied - self.learn_u_first) > 1e-3:
+                 self.est.learn_skip_count += 1
+                 self.est.learn_last_reason = "skip: power instability"
+                 self._reset_learning_window()
+                 return
 
         # Integrate u_applied over the cycle duration
         self.learn_u_int += clamp(u_applied, 0.0, 1.0) * dt_s
