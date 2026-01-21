@@ -192,18 +192,33 @@ class SmartPIHandler:
         if getattr(t, "_smartpi_recalc_timer_remove", None):
             return
 
-        async def _recalc_callback(_):
+        async def _recalc_callback(now):
             _LOGGER.debug("%s - SmartPI periodic calculation trigger", t)
             t.recalculate()
             # We also trigger control_heating to apply any changes
-            await t.async_control_heating()
+            # We pass timestamp=now to trigger learning
+            await t.async_control_heating(timestamp=now)
 
         t._smartpi_recalc_timer_remove = async_track_time_interval(
             t.hass,
             _recalc_callback,
             timedelta(seconds=SMARTPI_RECALC_INTERVAL_SEC)
         )
-        _LOGGER.debug("%s - SmartPI calc timer started", t)
+        
+        # When we start the timer, we are resuming from an OFF/STOP state (e.g. Window Close).
+        # We must reset the cycle start snapshot to NOW, otherwise the next learning update
+        # will use an old timestamp (from before the window opened) and calculate a huge dt/loss.
+        if t._prop_algorithm and isinstance(t._prop_algorithm, SmartPI):
+             # We use the current u_applied (which should be 0 or small if we come from OFF)
+             u_init = t._prop_algorithm.u_applied if t._prop_algorithm.u_applied is not None else 0.0
+             # Ensure we have valid temps (fallback to 0 if None, though usually available)
+             cur_temp = t._cur_temp if t._cur_temp is not None else 0.0
+             cur_ext = t._cur_ext_temp if t._cur_ext_temp is not None else 0.0
+             
+             t._prop_algorithm.start_new_cycle(u_init, cur_temp, cur_ext)
+             _LOGGER.debug("%s - SmartPI calc timer started - cycle reset", t)
+        else:
+             _LOGGER.debug("%s - SmartPI calc timer started", t)
 
     def _stop_recalc_timer(self):
         """Stop the periodic recalculation timer."""
