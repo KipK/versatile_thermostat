@@ -812,6 +812,8 @@ def test_update_learning_skips_when_resume_counter_active():
     # Also spoof the start of the current cycle so it's not "too short"
     # The previous update_learning (though skipped) started a new cycle at NOW.
     smartpi._cycle_start_state["time"] -= 600.0
+    # Also ensure u_applied is set (simulate calculate happened), otherwise update_learning aborts
+    smartpi._cycle_start_state["u_applied"] = 0.5
 
     # Second call should proceed normally
     smartpi.update_learning(

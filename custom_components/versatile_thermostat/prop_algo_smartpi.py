@@ -826,7 +826,7 @@ class SmartPI:
             "temp_in": float(temp_in),
             "temp_ext": float(temp_ext),
             "time": time.time(),
-            "u_applied": float(u_applied) if u_applied is not None else 0.0,
+            "u_applied": float(u_applied) if u_applied is not None else None,
         }
         u_log = f"{u_applied:.2f}" if u_applied is not None else "Pending"
         _LOGGER.debug(
@@ -869,6 +869,7 @@ class SmartPI:
         t_int_start = start["temp_in"]
         t_ext_start = start["temp_ext"]
         ts_start = start["time"]
+        ts_start = start["time"]
         u_applied = start["u_applied"]
 
         now = time.time()
@@ -882,6 +883,11 @@ class SmartPI:
         # We start with u=None (Pending)
         temp_ext_next = ext_current_temp if ext_current_temp is not None else t_ext_start
         self.start_new_cycle(None, current_temp, temp_ext_next)
+
+        if u_applied is None:
+            self.est.learn_skip_count += 1
+            self.est.learn_last_reason = "skip: cycle power undefined"
+            return
 
         # 3. Interruption / resume check
         if self._learning_resume_ts:
@@ -922,7 +928,9 @@ class SmartPI:
 
         dt_min = (now - self.learn_win_start_ts) / 60.0
         if dt_min < DT_MIN_FRACTION * self._cycle_min:
-            self.est.learn_last_reason = "skip: window too short"
+            # Not an error, just growing the window
+            required = DT_MIN_FRACTION * self._cycle_min
+            self.est.learn_last_reason = f"waiting: window filling ({dt_min:.1f}/{required:.1f} min)"
             return
 
         dT = current_temp - self.learn_T_int_start
@@ -1708,7 +1716,11 @@ class SmartPI:
         # Update the current cycle snapshot with the actual U that will be applied
         # This completes the start_new_cycle() logic initiated in update_learning()
         if self._cycle_start_state is not None:
-             self._cycle_start_state["u_applied"] = float(u_applied)
+             # Only update if pending (None). If reset/start had a value, or we already set it, keep it.
+             # This freezes the power used for learning to the FIRST calculation of the cycle.
+             if self._cycle_start_state.get("u_applied") is None:
+                self._cycle_start_state["u_applied"] = float(u_applied)
+
 
         # Update timing properties (_on_time_sec, etc.)
         self._on_percent = u_applied
