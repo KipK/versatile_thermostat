@@ -182,7 +182,20 @@ class SmartPIHandler:
         """Handle state changes."""
         t = self._thermostat
         if t.vtherm_hvac_mode in [VThermHvacMode_HEAT, VThermHvacMode_COOL]:
+            # Check if we're resuming from OFF (timer was stopped)
+            timer_was_stopped = getattr(t, "_smartpi_recalc_timer_remove", None) is None
+            
             self._start_recalc_timer()
+            
+            # When resuming from OFF state (e.g., window close), reset the cycle start state
+            # to prevent using stale timestamps that would cause incorrect learning window duration
+            if timer_was_stopped and t._prop_algorithm and isinstance(t._prop_algorithm, SmartPI):
+                u_init = t._prop_algorithm.u_applied if t._prop_algorithm.u_applied is not None else 0.0
+                cur_temp = t._cur_temp if t._cur_temp is not None else 0.0
+                cur_ext = t._cur_ext_temp if t._cur_ext_temp is not None else 0.0
+                t._prop_algorithm.start_new_cycle(u_init, cur_temp, cur_ext)
+                t._prop_algorithm._reset_learning_window()
+                _LOGGER.debug("%s - SmartPI resumed from OFF: cycle and learning window reset", t.name)
         else:
             self._stop_recalc_timer()
 
@@ -204,21 +217,7 @@ class SmartPIHandler:
             _recalc_callback,
             timedelta(seconds=SMARTPI_RECALC_INTERVAL_SEC)
         )
-        
-        # When we start the timer, we are resuming from an OFF/STOP state (e.g. Window Close).
-        # We must reset the cycle start snapshot to NOW, otherwise the next learning update
-        # will use an old timestamp (from before the window opened) and calculate a huge dt/loss.
-        if t._prop_algorithm and isinstance(t._prop_algorithm, SmartPI):
-             # We use the current u_applied (which should be 0 or small if we come from OFF)
-             u_init = t._prop_algorithm.u_applied if t._prop_algorithm.u_applied is not None else 0.0
-             # Ensure we have valid temps (fallback to 0 if None, though usually available)
-             cur_temp = t._cur_temp if t._cur_temp is not None else 0.0
-             cur_ext = t._cur_ext_temp if t._cur_ext_temp is not None else 0.0
-             
-             t._prop_algorithm.start_new_cycle(u_init, cur_temp, cur_ext)
-             _LOGGER.debug("%s - SmartPI calc timer started - cycle reset", t)
-        else:
-             _LOGGER.debug("%s - SmartPI calc timer started", t)
+        _LOGGER.debug("%s - SmartPI calc timer started", t)
 
     def _stop_recalc_timer(self):
         """Stop the periodic recalculation timer."""

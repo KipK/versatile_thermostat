@@ -78,8 +78,8 @@ async def test_smartpi_periodic_recalc(
     assert entity._prop_algorithm
     assert entity._proportional_function == PROPORTIONAL_FUNCTION_SMART_PI
 
-    # Spy on recalculate method
-    with patch.object(entity, 'recalculate', wraps=entity.recalculate) as mock_recalculate:
+    # Spy on async_control_heating method (this is what the periodic timer calls)
+    with patch.object(entity, 'async_control_heating', wraps=entity.async_control_heating) as mock_control:
         
         # 2. Set to HEAT mode to start the timer
         print(f"DEBUG: Entity type: {type(entity)}")
@@ -100,7 +100,7 @@ async def test_smartpi_periodic_recalc(
             f"SmartPI={entity._prop_algorithm}"
         
         # Reset mock to ignore initial calls during startup/mode change
-        mock_recalculate.reset_mock()
+        mock_control.reset_mock()
         
         # 3. Advance time by SMARTPI_RECALC_INTERVAL_SEC + 1 second
         # We need to fire time change event
@@ -108,19 +108,19 @@ async def test_smartpi_periodic_recalc(
         async_fire_time_changed(hass, future)
         await hass.async_block_till_done()
         
-        # 4. Verify recalculate was called
-        assert mock_recalculate.called, "recalculate() should be called by the periodic timer"
-        assert mock_recalculate.call_count >= 1
+        # 4. Verify async_control_heating was called with timestamp=None
+        assert mock_control.called, "async_control_heating() should be called by the periodic timer"
+        assert mock_control.call_count >= 1
         
         # Reset for next check
-        mock_recalculate.reset_mock()
+        mock_control.reset_mock()
         
         # 5. Advance time again
         future = future + timedelta(seconds=SMARTPI_RECALC_INTERVAL_SEC + 1)
         async_fire_time_changed(hass, future)
         await hass.async_block_till_done()
         
-        assert mock_recalculate.called, "recalculate() should be called again"
+        assert mock_control.called, "async_control_heating() should be called again"
         
         # 6. Turn OFF and verify timer is stopped
         await entity.async_set_hvac_mode(HVACMode.OFF)
@@ -129,13 +129,13 @@ async def test_smartpi_periodic_recalc(
         assert entity._smartpi_recalc_timer_remove is None
         
         # Reset mock
-        mock_recalculate.reset_mock()
+        mock_control.reset_mock()
         
         # 7. Advance time and verify NO call
         future = future + timedelta(seconds=SMARTPI_RECALC_INTERVAL_SEC + 1)
         async_fire_time_changed(hass, future)
         await hass.async_block_till_done()
         
-        assert not mock_recalculate.called, "recalculate() should NOT be called when OFF"
+        assert not mock_control.called, "async_control_heating() should NOT be called when OFF"
 
     entity.remove_thermostat()
