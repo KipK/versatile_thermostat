@@ -97,6 +97,16 @@ class SmartPIHandler:
 
     async def async_startup(self):
         """Startup actions."""
+        # Initialize the cycle start state if possible to enable first-cycle learning
+        t = self._thermostat
+        if t._prop_algorithm and isinstance(t._prop_algorithm, SmartPI):
+            # Check availability of sensors
+            if t._cur_temp is not None and t._cur_ext_temp is not None:
+                # Use restored u_applied if available, else 0
+                u_init = t._prop_algorithm.u_applied if t._prop_algorithm.u_applied is not None else 0.0
+                t._prop_algorithm.start_new_cycle(u_init, t._cur_temp, t._cur_ext_temp)
+                _LOGGER.debug("%s - SmartPI startup: initialized cycle start state", t)
+
         # Check if we need to start the periodic recalculation timer
         await self.on_state_changed()
 
