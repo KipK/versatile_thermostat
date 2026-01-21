@@ -681,24 +681,18 @@ class SmartPI:
                     self._learning_start_date = None
 
             # Load learning window state
-            self.learn_win_active = bool(state.get("learn_win_active", False))
-            learn_win_start_ts = state.get("learn_win_start_ts")
-            if learn_win_start_ts is not None:
-                try:
-                    self.learn_win_start_ts = float(learn_win_start_ts)
-                except (ValueError, TypeError):
-                    self.learn_win_start_ts = None
-            else:
-                self.learn_win_start_ts = None
-            for field_name in ("learn_T_int_start", "learn_T_ext_start", "learn_u_int", "learn_t_int_s"):
-                value = state.get(field_name)
-                if value is not None:
-                    try:
-                        setattr(self, field_name, float(value))
-                    except (ValueError, TypeError):
-                        setattr(self, field_name, 0.0)
-                else:
-                    setattr(self, field_name, 0.0)
+            # FORCE RESET ON LOAD: We do not restore the active learning window.
+            # A reboot/reload implies an interruption of unknown duration.
+            # We must discard the partial cycle to avoid corrupting learning with invalid time deltas.
+            self.learn_win_active = False
+            self.learn_win_start_ts = None
+            self.learn_T_int_start = 0.0
+            self.learn_T_ext_start = 0.0
+            self.learn_u_int = 0.0
+            self.learn_t_int_s = 0.0
+
+            # (Legacy code removed: previously we tried to restore these fields)
+
 
             # Load setpoint filter state
             filtered_sp = state.get("filtered_setpoint")
