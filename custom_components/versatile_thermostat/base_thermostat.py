@@ -274,6 +274,9 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
             if cfg.get(CONF_USE_LOCK_CENTRAL_CONFIG) is True:
                 clean_one(cfg, STEP_CENTRAL_LOCK_DATA_SCHEMA)
 
+            if cfg.get(CONF_USE_SMART_PI_CENTRAL_CONFIG) is True:
+                clean_one(cfg, STEP_SMART_PI_CENTRAL_SCHEMA)
+
             # take all central config
             entry_infos = central_config.data.copy()
             # and merge with cleaned config_entry
