@@ -73,7 +73,7 @@ async def smartpi_thermostat(hass: HomeAssistant):
 
 async def test_smartpi_math_with_mocked_time(hass: HomeAssistant):
     """Test math with controlled time."""
-    with patch('time.time') as mock_time:
+    with patch('custom_components.versatile_thermostat.prop_algo_smartpi.time.monotonic') as mock_time:
         mock_time.return_value = 1000.0
         
         algo = SmartPI(

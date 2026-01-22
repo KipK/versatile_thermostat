@@ -315,7 +315,7 @@ async def test_smartpi_resume_from_off_resets_cycle():
     t._prop_algorithm = algo
     
     # Initialize cycle with old timestamp (simulating before window opened)
-    old_time = time.time() - 3600  # 1 hour ago
+    old_time = time.monotonic() - 3600  # 1 hour ago (in monotonic time)
     algo.start_new_cycle(0.5, 20.0, 5.0)
     algo._cycle_start_state["time"] = old_time
     
@@ -330,7 +330,7 @@ async def test_smartpi_resume_from_off_resets_cycle():
     # Verify cycle start state was reset to current time (not old_time)
     new_start_time = algo._cycle_start_state["time"]
     assert new_start_time > old_time, "Cycle start time should be reset to NOW, not use old timestamp"
-    assert abs(new_start_time - time.time()) < 2, "Cycle start time should be approximately NOW"
+    assert abs(new_start_time - time.monotonic()) < 2, "Cycle start time should be approximately NOW"
     
     # Verify learning window was also reset
     assert algo.learn_win_active is False
