@@ -179,7 +179,7 @@ class ABEstimator:
     Robust Online Estimator for a and b using Hybrid approach:
     1. Early stage (unreliable tau): Median/MAD + Huber location on raw samples.
     2. Stable stage (reliable tau): Theil-Sen regression on (x,y) points.
-    
+
     Model: dT/dt = a*u - b*(T_int - T_ext)
     """
 
@@ -199,7 +199,7 @@ class ABEstimator:
         # --- Strategy: Median + MAD (Robust) ---
         # Raw measurement history
         self.a_meas_hist: Deque[float] = deque(maxlen=AB_HISTORY_SIZE) # Keep last 31
-        self.b_meas_hist: Deque[float] = deque(maxlen=AB_HISTORY_SIZE) 
+        self.b_meas_hist: Deque[float] = deque(maxlen=AB_HISTORY_SIZE)
 
         # Stability tracking for b (tau) - used for reliability check
         self._b_hat_hist: Deque[float] = deque(maxlen=20)
@@ -243,8 +243,8 @@ class ABEstimator:
         - If full (len == 31): Use all 31 samples.
         """
         if len(history) < AB_HISTORY_SIZE:
-             # Logic: From 11 to 30, we stay in "mode 11" (rolling 11)
-             return list(history)[-AB_MIN_SAMPLES:]
+            # Logic: From 11 to 30, we stay in "mode 11" (rolling 11)
+            return list(history)[-AB_MIN_SAMPLES:]
         # Mode 31
         return history
 
@@ -261,12 +261,12 @@ class ABEstimator:
     ) -> None:
         """
         Update (a,b) using Median + MAD approach.
-        
+
         Model: dT/dt = a*u - b*(T_int - T_ext)
         """
         dTdt = float(dT_int_per_min)
         delta = float(t_int - t_ext)
-        
+
         # 1. Reject gross physics outliers
         if abs(dTdt) > max_abs_dT_per_min:
             self.learn_skip_count += 1
@@ -281,34 +281,32 @@ class ABEstimator:
                 self.learn_skip_count += 1
                 self.learn_last_reason = "skip: b_meas <= 0"
                 return
-            
+
             # Add to history
             self.b_meas_hist.append(b_meas)
-            
+
             if len(self.b_meas_hist) < AB_MIN_SAMPLES:
                 self.learn_skip_count += 1
                 self.learn_last_reason = f"skip: collecting b meas ({len(self.b_meas_hist)}/{AB_MIN_SAMPLES})"
                 return
-            
+
             # Step logic: Select window
             b_window = self._get_window(self.b_meas_hist)
 
             # Median + MAD outlier rejection
             med_b = statistics.median(b_window)
             mad_b = self._mad(b_window)
-            
+
             if mad_b is not None and mad_b > AB_VAL_TOLERANCE:
                 sigma_b = AB_MAD_K * mad_b
                 if abs(b_meas - med_b) > AB_MAD_SIGMA_MULT * sigma_b:
                     self.learn_skip_count += 1
                     self.learn_last_reason = "skip: b_meas outlier"
                     return
-            
+
             new_b = med_b  # Use median directly
             new_b = clamp(new_b, self.B_MIN, self.B_MAX)
-            
 
-            
             self.b = new_b
             self._b_hat_hist.append(new_b)
             self.learn_ok_count += 1
@@ -324,34 +322,32 @@ class ABEstimator:
                 self.learn_skip_count += 1
                 self.learn_last_reason = "skip: a_meas <= 0"
                 return
-            
+
             # Add to history
             self.a_meas_hist.append(a_meas)
-            
+
             if len(self.a_meas_hist) < AB_MIN_SAMPLES:
                 self.learn_skip_count += 1
                 self.learn_last_reason = f"skip: collecting a meas ({len(self.a_meas_hist)}/{AB_MIN_SAMPLES})"
                 return
-            
+
             # Step logic: Select window
             a_window = self._get_window(self.a_meas_hist)
 
             # Median + MAD outlier rejection
             med_a = statistics.median(a_window)
             mad_a = self._mad(a_window)
-            
+
             if mad_a is not None and mad_a > AB_VAL_TOLERANCE:
                 sigma_a = AB_MAD_K * mad_a
                 if abs(a_meas - med_a) > AB_MAD_SIGMA_MULT * sigma_a:
                     self.learn_skip_count += 1
                     self.learn_last_reason = "skip: a_meas outlier"
                     return
-            
+
             new_a = med_a  # Use median directly
             new_a = clamp(new_a, self.A_MIN, self.A_MAX)
-            
 
-            
             self.a = new_a
             self.learn_ok_count += 1
             self.learn_ok_count_a += 1
@@ -367,21 +363,21 @@ class ABEstimator:
         """
         # Enough updates?
         if self.learn_ok_count_b < 5:
-             return TauReliability(reliable=False, tau_min=9999.0)
-        
+            return TauReliability(reliable=False, tau_min=9999.0)
+
         if len(self._b_hat_hist) < 5:
             return TauReliability(reliable=False, tau_min=9999.0)
 
         med_b = statistics.median(self._b_hat_hist)
         mad_b = self._mad(self._b_hat_hist)
-        
+
         if mad_b is None or med_b <= 0:
             return TauReliability(reliable=False, tau_min=9999.0)
 
         # Stability check: Relative dispersion of b estimates (0.60 threshold)
         if (mad_b / med_b) > B_STABILITY_MAD_RATIO_MAX:
-             return TauReliability(reliable=False, tau_min=9999.0)
-             
+            return TauReliability(reliable=False, tau_min=9999.0)
+
         # Value bounds check
         if med_b < self.B_MIN or med_b > self.B_MAX:
             return TauReliability(reliable=False, tau_min=9999.0)
@@ -390,7 +386,6 @@ class ABEstimator:
         # 10 min to ~66 hours (4000 min)
         reliable = 10.0 <= tau <= 4000.0
         return TauReliability(reliable=reliable, tau_min=tau)
-
 
 
 class SmartPI:
@@ -436,7 +431,7 @@ class SmartPI:
         sign_flip_band_mult: float = 2.0,
         use_setpoint_filter: bool = True,
     ) -> None:
-        
+
         self._name = name
         self._cycle_min = float(cycle_min)
         self.deadband_c = float(deadband_c)
@@ -505,7 +500,7 @@ class SmartPI:
         self._initial_temp_for_filter: Optional[float] = None
 
         # Track last time calculate() was executed for dt-based integration
-        self._last_calculate_time: Optional[datetime] = None
+        self._last_calculate_time: Optional[float] = None
         # Accumulated time for cycle counting (used for FF warm-up)
         self._accumulated_dt: float = 0.0
 
@@ -542,13 +537,13 @@ class SmartPI:
         # Setpoint step boost state (for fast power ramp-up on setpoint change)
         self._setpoint_boost_active: bool = False
         self._prev_setpoint_for_boost: Optional[float] = None
-        
+
         # Enhanced A/B Learning: Start-of-cycle snapshot
         self._cycle_start_state: Optional[Dict[str, float]] = None
 
         if saved_state:
             self.load_state(saved_state)
-        
+
         _LOGGER.debug("%s - SmartPI initialized", self._name)
 
     # ------------------------------
@@ -607,19 +602,24 @@ class SmartPI:
         """
         if skip_cycles is None:
             skip_cycles = SKIP_CYCLES_AFTER_RESUME
-        
+
         # Robust conversion: assume at least 15 min per cycle equivalent if cycle_min is small,
         # or use cycle_min. This is a heuristic.
         duration_min = float(skip_cycles) * max(self._cycle_min, 15.0)
-        self._learning_resume_ts = time.time() + (duration_min * 60.0)
-        
+        self._learning_resume_ts = time.monotonic() + (duration_min * 60.0)
+
         # Also reset the learning timestamp to avoid using stale dt
         self._learn_last_ts = None
-        _LOGGER.info(
-            "%s - SmartPI notified of resume after interruption, skipping learning until %s",
-            self._name,
-            datetime.fromtimestamp(self._learning_resume_ts).isoformat()
-        )
+
+        # Compute wall-clock time for logging/diagnostics
+        try:
+            # Just for logging
+            resume_dt_log = datetime.now().timestamp() + (duration_min * 60.0)
+            resume_dt_iso = datetime.fromtimestamp(resume_dt_log).isoformat()
+        except Exception:
+            resume_dt_iso = "unknown"
+
+        _LOGGER.info("%s - SmartPI notified of resume after interruption, skipping learning until (approx) %s", self._name, resume_dt_iso)
 
     def load_state(self, state: Dict[str, Any]) -> None:
         """Load persistent state with validation."""
@@ -652,7 +652,7 @@ class SmartPI:
 
             # Simple float queues
             self.est._b_hat_hist = deque(b_hat_hist_data, maxlen=self.est._b_hat_hist.maxlen)
-            
+
             # Hybrid learning raw histories
             a_meas_data = state.get("a_meas_hist", [])
             b_meas_data = state.get("b_meas_hist", [])
@@ -697,7 +697,6 @@ class SmartPI:
 
             # (Legacy code removed: previously we tried to restore these fields)
 
-
             # Load setpoint filter state
             filtered_sp = state.get("filtered_setpoint")
             last_raw_sp = state.get("last_raw_setpoint")
@@ -725,16 +724,23 @@ class SmartPI:
             resume_ts = state.get("learning_resume_ts")
             if resume_ts is not None:
                 try:
-                    self._learning_resume_ts = float(resume_ts)
+                    # Stored as wall clock timestamp. Convert to monotonic.
+                    stored_wall_ts = float(resume_ts)
+                    now_wall = time.time()
+                    remaining = stored_wall_ts - now_wall
+                    if remaining > 0:
+                        self._learning_resume_ts = time.monotonic() + remaining
+                    else:
+                        self._learning_resume_ts = None
                 except (ValueError, TypeError):
                     self._learning_resume_ts = None
             else:
-                 # Check legacy key
+                # Check legacy key
                 legacy_skip = int(state.get("skip_learning_cycles_left", 0) or 0)
                 if legacy_skip > 0:
-                     # Convert to approx duration
-                     duration_min = float(legacy_skip) * max(self._cycle_min, 15.0)
-                     self._learning_resume_ts = time.time() + (duration_min * 60.0)
+                    # Convert to approx duration
+                    duration_min = float(legacy_skip) * max(self._cycle_min, 15.0)
+                    self._learning_resume_ts = time.monotonic() + (duration_min * 60.0)
                 else:
                     self._learning_resume_ts = None
 
@@ -764,6 +770,13 @@ class SmartPI:
 
     def save_state(self) -> Dict[str, Any]:
         """Return state for persistence."""
+        # Convert monotonic learning_resume_ts back to wall clock for persistence
+        resume_wall_ts = None
+        if self._learning_resume_ts is not None:
+            remaining = self._learning_resume_ts - time.monotonic()
+            if remaining > 0:
+                resume_wall_ts = time.time() + remaining
+
         return {
             "a": self.est.a,
             "b": self.est.b,
@@ -788,7 +801,7 @@ class SmartPI:
             "filtered_setpoint": self._filtered_setpoint,
             "last_raw_setpoint": self._last_raw_setpoint,
             "initial_temp_for_filter": self._initial_temp_for_filter,
-            "learning_resume_ts": self._learning_resume_ts,
+            "learning_resume_ts": resume_wall_ts,
             "in_deadband": self._in_deadband,
             "setpoint_boost_active": self._setpoint_boost_active,
             "prev_setpoint_for_boost": self._prev_setpoint_for_boost,
@@ -824,14 +837,11 @@ class SmartPI:
         self._cycle_start_state = {
             "temp_in": float(temp_in),
             "temp_ext": float(temp_ext),
-            "time": time.time(),
+            "time": time.monotonic(),
             "u_applied": float(u_applied) if u_applied is not None else None,
         }
         u_log = f"{u_applied:.2f}" if u_applied is not None else "Pending"
-        _LOGGER.debug(
-            "%s - SmartPI new cycle snapshot: Tin=%.2f, Text=%.2f, U=%s", 
-            self._name, temp_in, temp_ext, u_log
-        )
+        _LOGGER.debug("%s - SmartPI new cycle snapshot: Tin=%.2f, Text=%.2f, U=%s", self._name, temp_in, temp_ext, u_log)
 
     def update_learning(
         self,
@@ -871,13 +881,13 @@ class SmartPI:
         ts_start = start["time"]
         u_applied = start["u_applied"]
 
-        now = time.time()
+        now = time.monotonic()
         dt_s = max(now - ts_start, 0.0)
         dt_minutes = dt_s / 60.0
 
         # 2. Reset snapshot for the NEXT cycle immediately
         # The next cycle starts NOW with current temps.
-        # NOTE: u_applied for the NEXT cycle is not known yet (calculate() runs after). 
+        # NOTE: u_applied for the NEXT cycle is not known yet (calculate() runs after).
         # It must be updated later or we assume 0 until updated.
         # We start with u=None (Pending)
         temp_ext_next = ext_current_temp if ext_current_temp is not None else t_ext_start
@@ -890,6 +900,7 @@ class SmartPI:
 
         # 3. Interruption / resume check
         if self._learning_resume_ts:
+            # We use monotonic time for self._learning_resume_ts
             if now < self._learning_resume_ts:
                 self.est.learn_skip_count += 1
                 self.est.learn_last_reason = "skip: resume cool-down"
@@ -917,12 +928,12 @@ class SmartPI:
             self.learn_u_first = u_applied  # strict power check reference
             self.est.learn_last_reason = "learn: window start"
         else:
-             # Window extension: check power stability
-             if self.learn_u_first is not None and abs(u_applied - self.learn_u_first) > 1e-3:
-                 self.est.learn_skip_count += 1
-                 self.est.learn_last_reason = "skip: power instability"
-                 self._reset_learning_window()
-                 return
+            # Window extension: check power stability
+            if self.learn_u_first is not None and abs(u_applied - self.learn_u_first) > 1e-3:
+                self.est.learn_skip_count += 1
+                self.est.learn_last_reason = "skip: power instability"
+                self._reset_learning_window()
+                return
 
         # Integrate u_applied over the cycle duration
         self.learn_u_int += clamp(u_applied, 0.0, 1.0) * dt_s
@@ -989,7 +1000,7 @@ class SmartPI:
     # ------------------------------
     # Props / API Compat
     # ------------------------------
-    
+
     @property
     def a(self) -> float:
         return self.est.a
@@ -1001,7 +1012,7 @@ class SmartPI:
     @property
     def on_percent(self) -> float:
         return self._on_percent
-        
+
     @property
     def calculated_on_percent(self) -> float:
         return self._on_percent
@@ -1013,7 +1024,7 @@ class SmartPI:
     @property
     def off_time_sec(self) -> int:
         return self._off_time_sec
-        
+
     @property
     def tpi_coef_int(self) -> float:
         return self.Kp
@@ -1027,11 +1038,11 @@ class SmartPI:
     def integral_error(self) -> float:
         """Current integral accumulator value."""
         return self.integral
-        
+
     @property
     def kp(self) -> float:
         return self._kp
-        
+
     @property
     def ki(self) -> float:
         return self._ki
@@ -1044,7 +1055,7 @@ class SmartPI:
     @property
     def u_pi(self) -> float:
         return self._last_u_pi
-        
+
     @property
     def tau_min(self) -> float:
         return self.est.tau_reliability().tau_min
@@ -1068,19 +1079,19 @@ class SmartPI:
     @property
     def learn_skip_count(self) -> int:
         return self.est.learn_skip_count
-        
+
     @property
     def learn_last_reason(self) -> str:
         return self.est.learn_last_reason
 
     @property
     def learning_start_dt(self) -> str:
-         return self._learning_start_date.isoformat() if self._learning_start_date else None
+        return self._learning_start_date.isoformat() if self._learning_start_date else None
 
     @property
     def i_mode(self) -> str:
         return self._last_i_mode
-        
+
     @property
     def sat(self) -> str:
         return self._last_sat
@@ -1088,11 +1099,11 @@ class SmartPI:
     @property
     def error(self) -> float:
         return self._last_error
-        
+
     @property
     def error_p(self) -> float:
         return self._last_error_p
-        
+
     @property
     def error_filtered(self) -> float:
         return self._e_filt if self._e_filt is not None else 0.0
@@ -1103,7 +1114,7 @@ class SmartPI:
 
     @property
     def cycles_since_reset(self) -> int:
-         return self._cycles_since_reset
+        return self._cycles_since_reset
 
     @property
     def filtered_setpoint(self) -> float:
@@ -1111,32 +1122,38 @@ class SmartPI:
 
     @property
     def learning_resume_ts(self) -> float:
-        return self._learning_resume_ts
+        # Return wall time estimation for diagnostics
+        if self._learning_resume_ts is None:
+            return None
+        remaining = self._learning_resume_ts - time.monotonic()
+        if remaining > 0:
+            return time.time() + remaining
+        return None
 
     @property
     def u_cmd(self) -> float:
         return self._last_u_cmd
-        
+
     @property
     def u_limited(self) -> float:
         return self._last_u_limited
-        
+
     @property
     def u_applied(self) -> float:
         return self._last_u_applied
-        
+
     @property
     def aw_du(self) -> float:
         return self._last_aw_du
-        
+
     @property
     def forced_by_timing(self) -> bool:
         return self._last_forced_by_timing
-        
+
     @property
     def in_deadband(self) -> bool:
         return self._in_deadband
-        
+
     @property
     def setpoint_boost_active(self) -> bool:
         return self._setpoint_boost_active
@@ -1244,24 +1261,24 @@ class SmartPI:
             # Calculate dynamic alpha based on dt and Tau
             # alpha = 1 - exp(-dt / tau)
             # Interpolate Tau based on gap? No, interpolate the alpha-equivalents.
-            
+
             # Use band to interpolate between fast and slow time constants
             w = min(gap / SP_BAND, 1.0)
-            
+
             # Linear interpolation of Tau (simpler/safer than interpolating alphas directly)
             # Far from target (large gap) -> w=1 -> FAST Tau (small)
             # Close to target (small gap) -> w=0 -> SLOW Tau (large)
             tau = SP_TAU_SLOW + (SP_TAU_FAST - SP_TAU_SLOW) * w
-            
+
             # Robust alpha calculation
             alpha = 1.0 - math.exp(-max(dt_min, 0.0) / max(tau, 1.0)) if tau > 0 else 1.0
-            
+
             # Fallback for very small dt (Taylor expansion approx: alpha ~= dt/tau)
             if tau > 0:
                 alpha = 1.0 - math.exp(-max(dt_min, 0.001) / tau)
             else:
                 alpha = 1.0
-                
+
             self._filtered_setpoint = alpha * target_temp + (1 - alpha) * self._filtered_setpoint
 
         return self._filtered_setpoint
@@ -1296,7 +1313,7 @@ class SmartPI:
         making it robust to irregular call intervals. A minimum dt threshold prevents
         excessive noise from very rapid calls.
         """
-        now = datetime.now()
+        now = time.monotonic()
 
         # Input validation
         if target_temp is None or current_temp is None:
@@ -1314,28 +1331,26 @@ class SmartPI:
             return
 
         # Calculate elapsed time since last calculation for dt-based integration
+        is_first_run = False
         if self._last_calculate_time is not None:
-            dt_min = (now - self._last_calculate_time).total_seconds() / 60.0
+            dt_min = (now - self._last_calculate_time) / 60.0
         else:
-            # First call: use cycle_min as initial approximation
-            dt_min = self._cycle_min
-
-
+            # First call: We use 0.0 to prevent integral windup (kickstart)
+            # The first calculation will be P-only (proportional term) which is safer.
+            dt_min = 0.0
+            is_first_run = True
 
         # Minimum dt threshold to prevent noise from very rapid calls (< 3 seconds)
         # BUT we must bypass this if the setpoint has changed to ensure immediate reaction (e.g. user sliding the bar)
+        # We also bypass if it's the first run (dt=0) to ensure immediate output generation.
         MIN_DT_SECONDS = 3.0
-        
-        setpoint_changed = (
-            self._last_raw_setpoint is not None 
-            and abs(target_temp - self._last_raw_setpoint) > 0.01
-        )
-      
-        
-        if dt_min < MIN_DT_SECONDS / 60.0 and not setpoint_changed:
+
+        setpoint_changed = self._last_raw_setpoint is not None and abs(target_temp - self._last_raw_setpoint) > 0.01
+
+        if dt_min < MIN_DT_SECONDS / 60.0 and not setpoint_changed and not is_first_run:
 
             # Too soon since last calculation - keep existing outputs
-            # BUT still capture setpoint changes to not miss user adjustments (in case we didn't catch it above? 
+            # BUT still capture setpoint changes to not miss user adjustments (in case we didn't catch it above?
             # actually if setpoint_changed is True we don't be here, so this fallback is mostly for safe internal state updates)
             self._filter_setpoint(target_temp, current_temp, hvac_mode, dt_min, advance_ema=False)
             self._calculate_times()
@@ -1374,7 +1389,7 @@ class SmartPI:
         # Apply global aggressiveness
         kp *= max(self.aggressiveness, 0.0)
         ki *= max(self.aggressiveness, 0.0)
-        
+
         self._kp = kp
         self._ki = ki
 
@@ -1383,7 +1398,7 @@ class SmartPI:
         # But only use the filtered value for PI control when tau is reliable
         # advance_ema=True here because we're in the main PI loop (once per cycle)
         filtered_result = self._filter_setpoint(target_temp, current_temp, hvac_mode, dt_min, advance_ema=True)
-        
+
         if self._use_setpoint_filter and self._tau_reliable:
             target_temp_internal = filtered_result
         else:
@@ -1412,7 +1427,6 @@ class SmartPI:
 
         self._last_error_p = e_p
 
-
         # Sign-flip detection (for optional integral discharge)
         if self._prev_error is not None and (e * self._prev_error) < 0.0:
             # Only apply if we are close enough to setpoint (avoid messing with large disturbances)
@@ -1421,9 +1435,9 @@ class SmartPI:
                 # Convert cycles to duration approx (using current cycle_min)
                 # This makes it robust to irregular updates
                 duration_min = float(self.sign_flip_leak_cycles) * max(self._cycle_min, 1.0)
-                self._sign_flip_end_ts = time.time() + (duration_min * 60.0)
+                self._sign_flip_end_ts = time.monotonic() + (duration_min * 60.0)
                 self._sign_flip_active = True
-                
+
         self._prev_error = e
 
         # Near-setpoint gain scheduling (soft landing)
@@ -1495,23 +1509,23 @@ class SmartPI:
 
         # Optional "sign flip leak" soft discharge (dt-aware)
         if self._sign_flip_active:
-             now_ts = time.time()
-             if self._sign_flip_end_ts is not None and now_ts < self._sign_flip_end_ts:
-                 # Apply leak scaled by dt
-                 # leak = base_leak ** dt_min  (assuming sign_flip_leak is "per cycle" ~ "per 10-15min"?)
-                 # To keep it simple and consistent: interpret sign_flip_leak as "leak per cycle"
-                 # so we scale it: leak_factor = leak ** (dt / cycle_min)
-                 # This preserves the original tuning meaning.
-                 cycle_ref = max(self._cycle_min, 1.0)
-                 leak_exponent = dt_min / cycle_ref
-                 leak_factor = (1.0 - self.sign_flip_leak) ** leak_exponent
-                 
-                 self.integral *= leak_factor
-                 # Keep integral bounded
-                 self.integral = clamp(self.integral, -i_max, i_max)
-             else:
-                 self._sign_flip_active = False
-                 self._sign_flip_end_ts = None
+            now_ts = time.monotonic()
+            if self._sign_flip_end_ts is not None and now_ts < self._sign_flip_end_ts:
+                # Apply leak scaled by dt
+                # leak = base_leak ** dt_min  (assuming sign_flip_leak is "per cycle" ~ "per 10-15min"?)
+                # To keep it simple and consistent: interpret sign_flip_leak as "leak per cycle"
+                # so we scale it: leak_factor = leak ** (dt / cycle_min)
+                # This preserves the original tuning meaning.
+                cycle_ref = max(self._cycle_min, 1.0)
+                leak_exponent = dt_min / cycle_ref
+                leak_factor = (1.0 - self.sign_flip_leak) ** leak_exponent
+
+                self.integral *= leak_factor
+                # Keep integral bounded
+                self.integral = clamp(self.integral, -i_max, i_max)
+            else:
+                self._sign_flip_active = False
+                self._sign_flip_end_ts = None
 
         # --- PI control with anti-windup ---
         # Deadband with hysteresis to reduce oscillations at boundary:
@@ -1534,7 +1548,8 @@ class SmartPI:
 
         # Bumpless transfer: on deadband exit, re-initialize integral
         # so that u_ff + Kp*e_p + Ki*I = u_prev (no output discontinuity)
-        if self._in_deadband and not in_deadband_now:
+        # Note: Do not apply bumpless transfer if setpoint changed (we want immediate reaction)
+        if self._in_deadband and not in_deadband_now and not setpoint_changed:
             # Exiting deadband: compute integral for bumpless transfer
             if self.Ki > KI_MIN:
                 # I_new = (u_prev - u_ff - Kp * e_p) / Ki
@@ -1638,7 +1653,8 @@ class SmartPI:
         # Rate limiting: bound command delta per cycle (prevents abrupt power changes)
         # Exception: if setpoint has just changed significantly, allow immediate jump
         # This prevents locking the output when dt is small (e.g. user interaction)
-        if setpoint_changed:
+        # Also allow immediate jump on first run to ensure we output something (since dt=0 -> max_step=0)
+        if setpoint_changed or is_first_run:
             u_limited = u_cmd
         else:
             max_step = rate_limit * dt_min
@@ -1719,11 +1735,10 @@ class SmartPI:
         # Update the current cycle snapshot with the actual U that will be applied
         # This completes the start_new_cycle() logic initiated in update_learning()
         if self._cycle_start_state is not None:
-             # Only update if pending (None). If reset/start had a value, or we already set it, keep it.
-             # This freezes the power used for learning to the FIRST calculation of the cycle.
-             if self._cycle_start_state.get("u_applied") is None:
+            # Only update if pending (None). If reset/start had a value, or we already set it, keep it.
+            # This freezes the power used for learning to the FIRST calculation of the cycle.
+            if self._cycle_start_state.get("u_applied") is None:
                 self._cycle_start_state["u_applied"] = float(u_applied)
-
 
         # Update timing properties (_on_time_sec, etc.)
         self._on_percent = u_applied

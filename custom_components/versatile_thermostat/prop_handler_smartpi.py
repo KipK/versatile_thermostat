@@ -62,7 +62,7 @@ class SmartPIHandler:
         minimal_activation_delay = entry.get(CONF_MINIMAL_ACTIVATION_DELAY, 0)
         minimal_deactivation_delay = entry.get(CONF_MINIMAL_DEACTIVATION_DELAY, 0)
         max_on_percent = entry.get(CONF_MAX_ON_PERCENT, 1.0)
-        
+
         # SmartPI specific
         deadband = entry.get(CONF_SMART_PI_DEADBAND, 0.05)
         aggressiveness = entry.get(CONF_SMART_PI_AGGRESSIVENESS, 1.0)
@@ -80,7 +80,7 @@ class SmartPIHandler:
             aggressiveness=aggressiveness,
             use_setpoint_filter=use_setpoint_filter,
         )
-        
+
         _LOGGER.info("%s - SmartPI Algorithm initialized", t)
 
     async def async_added_to_hass(self):
@@ -125,9 +125,9 @@ class SmartPIHandler:
         """Cleanup and save state on removal."""
         t = self._thermostat
         if self._store and t._prop_algorithm:
-             # We can't await here easily, but we schedule save
-             t.hass.async_create_task(self._async_save())
-        
+            # We can't await here easily, but we schedule save
+            t.hass.async_create_task(self._async_save())
+
         self._stop_recalc_timer()
 
     async def control_heating(self, timestamp=None, force=False):
@@ -137,22 +137,17 @@ class SmartPIHandler:
         import time
 
         if t._prop_algorithm:
-             # Learning update
-             current_temp = t._cur_temp
-             current_ext_temp = t._cur_ext_temp
-             
-             # Trigger learning only on cycle timer (timestamp is not None)
-             if timestamp is not None and current_temp is not None:
-                 # We simply pass current data. SmartPI determines dt and deltas against its internal snapshot.
-                 t._prop_algorithm.update_learning(
-                     current_temp=current_temp,
-                     ext_current_temp=current_ext_temp,
-                     hvac_mode=t.vtherm_hvac_mode,
-                     current_temp_ts=time.time()
-                 )
+            # Learning update
+            current_temp = t._cur_temp
+            current_ext_temp = t._cur_ext_temp
 
-             # Calculate uses current temp, ext temp, etc.
-             t._prop_algorithm.calculate(
+            # Trigger learning only on cycle timer (timestamp is not None)
+            if timestamp is not None and current_temp is not None:
+                # We simply pass current data. SmartPI determines dt and deltas against its internal snapshot.
+                t._prop_algorithm.update_learning(current_temp=current_temp, ext_current_temp=current_ext_temp, hvac_mode=t.vtherm_hvac_mode, current_temp_ts=time.monotonic())
+
+            # Calculate uses current temp, ext temp, etc.
+            t._prop_algorithm.calculate(
                 target_temp=t.target_temperature,
                 current_temp=t._cur_temp,
                 ext_current_temp=t._cur_ext_temp,
@@ -174,7 +169,7 @@ class SmartPIHandler:
                     t._prop_algorithm.on_percent if t._prop_algorithm else None,
                     force,
                 )
-        
+
         # Save state after cycle to persist learning data
         await self._async_save()
 
@@ -184,9 +179,9 @@ class SmartPIHandler:
         if t.vtherm_hvac_mode in [VThermHvacMode_HEAT, VThermHvacMode_COOL]:
             # Check if we're resuming from OFF (timer was stopped)
             timer_was_stopped = getattr(t, "_smartpi_recalc_timer_remove", None) is None
-            
+
             self._start_recalc_timer()
-            
+
             # When resuming from OFF state (e.g., window close), reset the cycle start state
             # to prevent using stale timestamps that would cause incorrect learning window duration
             if timer_was_stopped and t._prop_algorithm and isinstance(t._prop_algorithm, SmartPI):
@@ -285,12 +280,12 @@ class SmartPIHandler:
         """Reset learning data."""
         t = self._thermostat
         if t._prop_algorithm and isinstance(t._prop_algorithm, SmartPI):
-             t._prop_algorithm.reset_learning()
-             t.hass.bus.fire(EventType.SMART_PI_EVENT.value, {
+            t._prop_algorithm.reset_learning()
+            t.hass.bus.fire(EventType.SMART_PI_EVENT.value, {
                  "entity_id": t.entity_id,
                  "type": "learning_reset"
              })
-             write_event_log(_LOGGER, t, "SmartPI learning reset")
-             self.update_attributes()
-             t.async_write_ha_state()
-             await self._async_save()
+            write_event_log(_LOGGER, t, "SmartPI learning reset")
+            self.update_attributes()
+            t.async_write_ha_state()
+            await self._async_save()

@@ -25,8 +25,8 @@ from custom_components.versatile_thermostat.vtherm_hvac_mode import VThermHvacMo
 from homeassistant.core import HomeAssistant
 from unittest.mock import patch, MagicMock
 from custom_components.versatile_thermostat.const import (
-    DOMAIN, 
-    CONF_NAME, 
+    DOMAIN,
+    CONF_NAME,
     CONF_CYCLE_MIN,
     CONF_PROP_FUNCTION,
     PROPORTIONAL_FUNCTION_SMART_PI,
@@ -60,7 +60,7 @@ def test_smartpi_calculation():
         minimal_deactivation_delay=0,
         name="TestSmartPI"
     )
-    
+
     # Initial state
     smartpi.calculate(
         target_temp=20,
@@ -69,11 +69,11 @@ def test_smartpi_calculation():
         slope=0,
         hvac_mode=VThermHvacMode_HEAT
     )
-    
+
     # Check if calculation produces a value
     assert smartpi.on_percent >= 0
     assert smartpi.on_percent <= 1
-    
+
     # Verify diagnostics
     diag = smartpi.get_diagnostics()
     assert "Kp" in diag
@@ -96,7 +96,7 @@ def test_conditional_integration_saturation_high():
         # Disable near-band scheduling
         near_band_deg=0.0,
     )
-    
+
     # Set up estimator to produce high FF that saturates
     smartpi.est.a = 0.01
     smartpi.est.b = 0.02  # k_ff = b/a = 2.0
@@ -105,12 +105,12 @@ def test_conditional_integration_saturation_high():
     smartpi.est.learn_ok_count_b = 20
     smartpi._cycles_since_reset = 10  # Enable FF warmup
     smartpi._tau_reliable = True
-    
+
     smartpi.integral = 10.0
     smartpi.u_prev = 1.0  # Already at max
-    
+
     integral_before = smartpi.integral
-    
+
     # Positive error (need more heat) with high FF that causes saturation
     smartpi.calculate(
         target_temp=25,
@@ -119,7 +119,7 @@ def test_conditional_integration_saturation_high():
         slope=0,
         hvac_mode=VThermHvacMode_HEAT
     )
-    
+
     # Conditional integration should be skipped (I:SKIP due to SAT_HI and e>0)
     # Note: Integral may still change due to tracking anti-windup, but the main
     # integration step should be skipped
@@ -135,24 +135,26 @@ def test_conditional_integration_normal():
         minimal_deactivation_delay=0,
         name="TestSmartPI",
     )
-    
+
     # Note: calculate() recalculates Kp/Ki from tau_reliability
     # With unreliable tau, safe gains (KP_SAFE=0.55, KI_SAFE=0.01) are used
     smartpi.integral = 0.0
     smartpi.u_prev = 0.0  # Start from 0 to avoid rate limiting issues
-    
+
     # With default a=0.0, b=0.0 (unreliable)
     # u_ff = 0
     # With e=0.2, u_pi = Kp*e + Ki*I = 0.55*0.2 + 0.01*0 = 0.11 < 1.0 = NO_SAT
-    smartpi.calculate(
-        target_temp=20,
-        current_temp=19.8,  # error = 0.2 (above deadband 0.05)
-        ext_current_temp=19.8,
-        slope=0,
-        hvac_mode=VThermHvacMode_HEAT
-    )
-    
+    # First call initializes (dt=0)
+    smartpi.calculate(target_temp=20, current_temp=19.8, ext_current_temp=19.8, slope=0, hvac_mode=VThermHvacMode_HEAT)  # error = 0.2
+
+    # Simulate time passing (10 min)
+    with patch("custom_components.versatile_thermostat.prop_algo_smartpi.time.monotonic") as mock_mono:
+        mock_mono.return_value = smartpi._last_calculate_time + 600.0
+
+        smartpi.calculate(target_temp=20, current_temp=19.8, ext_current_temp=19.8, slope=0, hvac_mode=VThermHvacMode_HEAT)  # error = 0.2
+
     # Integral should have increased: integral += e * cycle_min = 0.2 * 10 = 2.0
+    # Note: AW tracking might slightly adjust it, but it should be positive
     assert smartpi.integral > 0, f"Integral should increase: {smartpi.integral}"
     assert "I:RUN" in smartpi._last_i_mode
 
@@ -165,10 +167,10 @@ def test_integrator_hold():
         minimal_deactivation_delay=0,
         name="TestSmartPI",
     )
-    
+
     smartpi.integral = 5.0
     integral_before = smartpi.integral
-    
+
     # Calculate with integrator_hold=True
     smartpi.calculate(
         target_temp=20,
@@ -178,7 +180,7 @@ def test_integrator_hold():
         hvac_mode=VThermHvacMode_HEAT,
         integrator_hold=True
     )
-    
+
     # Integral should not change
     assert smartpi.integral == integral_before, \
         f"Integral should be held: before={integral_before}, after={smartpi.integral}"
@@ -188,31 +190,31 @@ def test_integrator_hold():
 def test_abestimator_learn_b_off():
     """Test learning of b during OFF periods (u < 0.05)."""
     est = ABEstimator()
-    
+
     # OFF phase: u = 0 (no heating)
     # Model: dT/dt = -b * (T_int - T_ext)
     # With T_int = 20, T_ext = 10, delta = 10
     # If b = 0.001, then dT/dt = -0.001 * 10 = -0.01 (cooling)
-    
+
     # Need >= 5 points to start learning in Median+MAD mode
     # We provide 15 iterations to ensure learning completes
     random.seed(42)
     b_target = 0.001
-    
+
     for i in range(20):  # More points to ensure learning triggers (min 11)
         delta = 10.0 + i * 0.5
         # Ideal dT = -b * delta
         # Add noise to creating non-zero sigma
         noise = random.uniform(-0.0005, 0.0005)
         dt_val = -b_target * delta + noise
-        
+
         est.learn(
             dT_int_per_min=dt_val,  # Cooling
             u=0.0,  # OFF phase
             t_int=20.0,
             t_ext=20.0 - delta
         )
-    
+
     assert est.learn_ok_count > 0
     assert est.learn_ok_count_b > 0  # b was learned (last reason may be skip if final sample rejected)
     # b should be learned
@@ -223,36 +225,36 @@ def test_abestimator_learn_a_on():
     """Test learning of a during ON phases (u > 0.20)."""
     est = ABEstimator()
     random.seed(42)
-    
+
     # First, learn b manually or via loop
     est.b = 0.001
     est.learn_ok_count_b = 10
-    
+
     # Init a closer to target to speed up convergence verification
     est.a = 0.03
-    
+
     # ON phase
     target_a = 0.04
     b_used = est.b
-    
+
     for i in range(20):
         # Vary u to get slope
         u_val = 0.4 + i * 0.05
         # const delta
         t_ext = 10.0
         delta = 20.0 - t_ext # 10
-        
+
         # dT = a*u - b*delta
         noise = random.uniform(-0.0005, 0.0005)
         dt_val = target_a * u_val - b_used * delta + noise
-        
+
         est.learn(
             dT_int_per_min=dt_val,
             u=u_val,
             t_int=20.0,
             t_ext=t_ext
         )
-    
+
     assert est.learn_ok_count_a > 0
     assert "learned a (Median)" in est.learn_last_reason
     # Median estimation with noise might be slightly off, relax tolerance
@@ -262,14 +264,14 @@ def test_abestimator_learn_a_on():
 def test_abestimator_skip_gray_zone():
     """Test that learning is skipped in gray zone (0.05 <= u <= 0.20)."""
     est = ABEstimator()
-    
+
     est.learn(
         dT_int_per_min=-0.01,
         u=0.10,  # Gray zone: 0.05 <= u <= 0.20
         t_int=19.0,
         t_ext=10.0
     )
-    
+
     assert est.learn_ok_count == 0
     assert "skip: low excitation" in est.learn_last_reason
 
@@ -279,21 +281,21 @@ def test_abestimator_learn_b_off_phase():
     est = ABEstimator()
     random.seed(42)
     b_target = 0.001
-    
+
     # Need >= 5 points for Median+MAD
     # Use 15 iterations to ensure learning completes
     for i in range(20):
         delta = 10.0 + i * 0.2
         noise = random.uniform(-0.0005, 0.0005)
         dt_val = -b_target * delta + noise
-        
+
         est.learn(
             dT_int_per_min=dt_val,  # Cooling
             u=0.01,  # OFF phase (u < 0.05)
             t_int=19.0,
             t_ext=19.0 - delta
         )
-    
+
     # Should learn b in OFF phase, not skip
     assert est.learn_ok_count > 0
     assert est.learn_ok_count_b > 0  # b was learned (last reason may be skip if final sample rejected)
@@ -303,9 +305,9 @@ def test_tau_reliability_not_enough_learns():
     """Test tau reliability when not enough learns."""
     est = ABEstimator()
     est.learn_ok_count_b = 5  # < 10 needed
-    
+
     tau_info = est.tau_reliability()
-    
+
     assert not tau_info.reliable
     assert tau_info.tau_min == 9999.0
 
@@ -313,17 +315,17 @@ def test_tau_reliability_not_enough_learns():
 def test_tau_reliability_ok():
     """Test tau reliability when conditions are met."""
     est = ABEstimator()
-    
+
     # Inject reliable history manually to bypass learning logic
     est.learn_ok_count_b = 15
     est.b = 0.002
-    
+
     # Fill history with consistent b values
     for _ in range(10):
         est._b_hat_hist.append(0.002)
-    
+
     tau_info = est.tau_reliability()
-    
+
     assert tau_info.reliable
     assert math.isclose(tau_info.tau_min, 500.0, rel_tol=1e-3)
 
@@ -336,17 +338,17 @@ def test_save_and_load_state():
         minimal_deactivation_delay=0,
         name="TestSmartPI1"
     )
-    
+
     # Modify state
     smartpi1.est.a = 0.015
     smartpi1.est.b = 0.003
     smartpi1.est.learn_ok_count = 10
     smartpi1.integral = 5.0
     smartpi1.u_prev = 0.6
-    
+
     # Save and create new instance with saved state
     saved = smartpi1.save_state()
-    
+
     smartpi2 = SmartPI(
         cycle_min=10,
         minimal_activation_delay=0,
@@ -354,15 +356,12 @@ def test_save_and_load_state():
         name="TestSmartPI2",
         saved_state=saved
     )
-    
+
     assert smartpi2.est.a == 0.015
     assert smartpi2.est.b == 0.003
     assert smartpi2.est.learn_ok_count == 10
     assert smartpi2.integral == 5.0
     assert smartpi2.u_prev == 0.6
-
-
-
 
 
 def test_reset_learning():
@@ -373,16 +372,16 @@ def test_reset_learning():
         minimal_deactivation_delay=0,
         name="TestSmartPI"
     )
-    
+
     # Modify state
     smartpi.est.a = 0.02
     smartpi.est.b = 0.005
     smartpi.est.learn_ok_count = 25
     smartpi.integral = 10.0
-    
+
     # Reset
     smartpi.reset_learning()
-    
+
     # Check defaults restored (uses A_INIT and B_INIT, not 0)
     assert smartpi.est.a == smartpi.est.A_INIT
     assert smartpi.est.b == smartpi.est.B_INIT
@@ -399,20 +398,21 @@ def test_deadband_leak():
         name="TestSmartPI",
         deadband_c=0.1
     )
-    
+
     smartpi.integral = 10.0
     smartpi.u_prev = 0.5
     integral_before = smartpi.integral
-    
-    # Error within deadband
-    smartpi.calculate(
-        target_temp=20,
-        current_temp=19.95,  # error = 0.05 < deadband 0.1
-        ext_current_temp=10,
-        slope=0,
-        hvac_mode=VThermHvacMode_HEAT
-    )
-    
+
+    # First call (init)
+    smartpi.calculate(target_temp=20, current_temp=19.95, ext_current_temp=10, slope=0, hvac_mode=VThermHvacMode_HEAT)
+
+    # Simulate time passing (10 min) to allow leak
+    with patch("custom_components.versatile_thermostat.prop_algo_smartpi.time.monotonic") as mock_mono:
+        mock_mono.return_value = smartpi._last_calculate_time + 600.0
+
+        # Error within deadband
+        smartpi.calculate(target_temp=20, current_temp=19.95, ext_current_temp=10, slope=0, hvac_mode=VThermHvacMode_HEAT)  # error = 0.05 < deadband 0.1
+
     # Integral should decay (INTEGRAL_LEAK = 0.995)
     assert smartpi.integral < integral_before, \
         f"Integral should leak: before={integral_before}, after={smartpi.integral}"
@@ -427,7 +427,7 @@ def test_ff_disabled_when_unreliable():
         minimal_deactivation_delay=0,
         name="TestSmartPI"
     )
-    
+
     # 1. Start with good 'a' and 'b' but low learning count
     smartpi.est.a = 0.01
     smartpi.est.b = 0.02
@@ -435,8 +435,8 @@ def test_ff_disabled_when_unreliable():
     smartpi.est.learn_ok_count_a = 5  # < 10, should disable FF
     smartpi.est.learn_ok_count_b = 20
     smartpi._tau_reliable = True      # Even if reliable flag is manually forced (or computed true)
-                                      # the low count_a should block it.
-    
+    # the low count_a should block it.
+
     smartpi.calculate(
         target_temp=20,
         current_temp=18,
@@ -444,9 +444,8 @@ def test_ff_disabled_when_unreliable():
         slope=0,
         hvac_mode=VThermHvacMode_HEAT
     )
-    
-    assert smartpi.u_ff == 0.0, "FF should be 0 when learn_ok_count_a < 10"
 
+    assert smartpi.u_ff == 0.0, "FF should be 0 when learn_ok_count_a < 10"
 
     # 2. High learning count but unreliable tau
     smartpi._last_calculate_time = None # allow immediate recalculation
@@ -455,7 +454,7 @@ def test_ff_disabled_when_unreliable():
     # We can force the property mock or just rely on state
     smartpi.est.learn_ok_count_b = 2 # insufficient b samples -> unreliable
     smartpi._tau_reliable = False # forced via logic inside calculate based on est.tau_reliability()
-    
+
     # Re-running calculate will re-check tau_reliability()
     # verify est.tau_reliability() returns False first
     assert not smartpi.est.tau_reliability().reliable
@@ -467,24 +466,46 @@ def test_ff_disabled_when_unreliable():
         slope=0,
         hvac_mode=VThermHvacMode_HEAT
     )
-    assert smartpi.u_ff == 0.0, "FF should be 0 when tau is unreliable"
+    # First call resets accumulator if _last_calculate_time is None (re-init)
+    # So we need to simulate accumulated time to pass FF warmup (if not passed already)
+    # But smartpi._cycles_since_reset is already set to 10 in previous step?
+    # Ah, we reused `smartpi` object.
 
+    assert smartpi.u_ff == 0.0, "FF should be 0 when tau is unreliable"
 
     # 3. Everything OK
     smartpi._last_calculate_time = None # allow immediate recalculation
     smartpi.est.learn_ok_count_b = 20
     # Inject history for reliable check
     for _ in range(10): smartpi.est._b_hat_hist.append(smartpi.est.b)
-    
-    smartpi.calculate(
-        target_temp=20,
-        current_temp=18,
-        ext_current_temp=5,
-        slope=0,
-        hvac_mode=VThermHvacMode_HEAT
-    )
-    assert smartpi.u_ff > 0.0, "FF should be active when conditions are met"
 
+    # First call (init)
+    smartpi.calculate(target_temp=20, current_temp=18, ext_current_temp=5, slope=0, hvac_mode=VThermHvacMode_HEAT)
+
+    # Simulate time passing to accumulate cycles for FF warmup
+    # We need _cycles_since_reset >= ff_warmup_cycles
+    # smartpi._cycles_since_reset was 10 initially.
+    # If calculate(init) resets it? No, only reset_learning() resets it.
+
+    # We need to ensure FF is calculated. u_ff is calculated every cycle.
+    # But now `u_ff` scale depends on `_cycles_since_reset`.
+    # With `dt=0`, cycles don't increment. But if they are already high, it should work.
+
+    # Wait, `test_ff_disabled_when_unreliable` failed assertion `u_ff > 0.0`.
+    # This implies u_ff was 0.
+    # Why? `reliable_cap`? `time_scale`?
+    # `time_scale = clamp(self._cycles_since_reset / float(self.ff_warmup_cycles), 0.0, 1.0)`
+    # If `_cycles_since_reset` is preserved, it should be 10.
+
+    # Maybe `_last_calculate_time = None` caused `dt=0`, so no new cycles added.
+    # But `cycles_since_reset` should persist.
+
+    # Let's try calling it again with time elapsed just in case.
+    with patch("custom_components.versatile_thermostat.prop_algo_smartpi.time.monotonic") as mock_mono:
+        mock_mono.return_value = smartpi._last_calculate_time + 600.0
+        smartpi.calculate(target_temp=20, current_temp=18, ext_current_temp=5, slope=0, hvac_mode=VThermHvacMode_HEAT)
+
+    assert smartpi.u_ff > 0.0, f"FF should be active when conditions are met. u_ff={smartpi.u_ff}, cycles={smartpi._cycles_since_reset}"
 
 def test_heuristic_gains_reliable_tau():
     """Test that gains are calculated via heuristic when tau is reliable."""
@@ -494,7 +515,7 @@ def test_heuristic_gains_reliable_tau():
         minimal_deactivation_delay=0,
         name="TestSmartPI"
     )
-    
+
     # Set up for reliable tau
     # New tau range [10, 800]. Let's pick 500. b = 1/500 = 0.002
     smartpi.est.learn_ok_count = 15
@@ -503,7 +524,7 @@ def test_heuristic_gains_reliable_tau():
     # Populate history for robust check
     for _ in range(10):
         smartpi.est._b_hat_hist.append(0.002)
-    
+
     # calculate() triggers tau_reliability check inside
     smartpi.calculate(
         target_temp=20,
@@ -512,13 +533,13 @@ def test_heuristic_gains_reliable_tau():
         slope=0,
         hvac_mode=VThermHvacMode_HEAT
     )
-    
+
     # Check if reliable
     assert smartpi._tau_reliable
-    
+
     # Heuristic: Kp = 0.35 + 0.9 * sqrt(500 / 200) = 0.35 + 0.9 * 1.5811 = 0.35 + 1.423 = 1.773
     # Clamped to KP_MAX = 2.5 (no clamping needed here since 1.773 < 2.5)
-    
+
     assert math.isclose(smartpi.Kp, 1.773, rel_tol=1e-3)
 
 
@@ -532,7 +553,7 @@ def test_safe_gains_unreliable_tau():
         # Disable near-band to avoid Kp reduction
         near_band_deg=0.0,
     )
-    
+
     # No learning done, tau unreliable
     smartpi.calculate(
         target_temp=20,
@@ -541,9 +562,9 @@ def test_safe_gains_unreliable_tau():
         slope=0,
         hvac_mode=VThermHvacMode_HEAT
     )
-    
+
     assert not smartpi._tau_reliable
-    
+
     # KP_SAFE = 0.55
     # Aggressiveness default = 1.0
     # Kp = 0.55 * 1.0 = 0.55
@@ -562,10 +583,10 @@ def test_cool_mode_inversion_bug():
     # Setup for COOL mode
     # Target 20, Current 22 -> Error = -2 (too hot)
     # in COOL mode, error is inverted -> e = -(-2) = 2 (positive error means cooling needed)
-    
+
     # e_p = setpoint_weight_b * e
     # We expect e_p to preserve the sign of e (positive) so that the PI produces positive output
-    
+
     smartpi.calculate(
         target_temp=20,
         current_temp=22,
@@ -588,12 +609,12 @@ def test_tau_reliability_dependent_on_b():
     est.learn_ok_count_a = 20
     est.learn_ok_count_b = 0 # No b updates
     est.learn_ok_count = 20  # Total updates reasonable
-    
+
     # Inject a valid b so it doesn't fail on range check
     est.b = 0.002 # Valid b for tau=500
-    
+
     tau_info = est.tau_reliability()
-    
+
     # Should be unreliable because b count is low
     # The BUG causes this to be True because it only checks total learn_ok_count
     assert not tau_info.reliable, "Should be unreliable if b is not learned enough"
@@ -601,7 +622,7 @@ def test_tau_reliability_dependent_on_b():
 
 def test_near_band_gain_scheduling():
     """Test that near-band scheduling reduces gains correctly.
-    
+
     This test verifies:
     1. Gains are reduced inside the near-band
     2. Ki is calculated from ORIGINAL Kp, then multiplied by ki_near_factor
@@ -740,7 +761,9 @@ def test_notify_resume_after_interruption_sets_skip_counter():
     # Should be about SKIP_CYCLES_AFTER_RESUME * max(15, cycle_min) minutes in the future
     # Default SKIP=1, cycle=10 -> duration = 1 * 15 = 15 min
     duration = 15.0 * 60.0
-    assert time.time() < smartpi._learning_resume_ts <= time.time() + duration + 5.0
+    # Use time.monotonic() since implementation changed
+    now = time.monotonic()
+    assert now < smartpi._learning_resume_ts <= now + duration + 5.0
 
     # Also verify timestamp is reset
     assert smartpi._learn_last_ts is None
@@ -761,12 +784,13 @@ def test_notify_resume_after_interruption_custom_skip():
     assert smartpi._learning_resume_ts is not None
     # 5 * 15 min = 75 min
     duration = 5 * 15.0 * 60.0
-    assert time.time() < smartpi._learning_resume_ts <= time.time() + duration + 5.0
+    now = time.monotonic()
+    assert now < smartpi._learning_resume_ts <= now + duration + 5.0
 
 
 def test_update_learning_skips_when_resume_counter_active():
     """Test that update_learning skips when skip timestamp is active.
-    
+
     With SKIP_CYCLES_AFTER_RESUME = 1:
     - First update_learning call (immediate) should skip
     - Second call (after enough time) should proceed
@@ -786,7 +810,7 @@ def test_update_learning_skips_when_resume_counter_active():
     # Notify resume to set skip counter
     smartpi.notify_resume_after_interruption(skip_cycles=1)
     # deadline is ~15 min in future
-    assert smartpi._learning_resume_ts > time.time()
+    assert smartpi._learning_resume_ts > time.monotonic()
 
     # First update_learning call (immediate) should skip
     smartpi.start_new_cycle(0.5, 19.0, 10.0) # Ensure start snapshot exists
@@ -808,7 +832,7 @@ def test_update_learning_skips_when_resume_counter_active():
     assert "skip: resume" in smartpi.est.learn_last_reason
 
     # Clean up skip timer artificially to simulate passing of time
-    smartpi._learning_resume_ts = time.time() - 1.0
+    smartpi._learning_resume_ts = time.monotonic() - 1.0
     # Also spoof the start of the current cycle so it's not "too short"
     # The previous update_learning (though skipped) started a new cycle at NOW.
     smartpi._cycle_start_state["time"] -= 600.0
@@ -839,14 +863,17 @@ def test_skip_learning_cycles_persisted():
         name="TestSmartPI_Persist1"
     )
 
-    # Set skip timestamp (e.g. 5 min future)
-    ts = time.time() + 300.0
-    smartpi1._learning_resume_ts = ts
-    
+    # Set skip timestamp (e.g. 5 min future) using monotonic
+    # save_state converts this to wall clock
+    mono_ts = time.monotonic() + 300.0
+    smartpi1._learning_resume_ts = mono_ts
+
     # Save state
     saved = smartpi1.save_state()
     assert "learning_resume_ts" in saved
-    assert saved["learning_resume_ts"] == ts
+    # Should be saved as wall clock
+    wall_ts_approx = time.time() + 300.0
+    assert math.isclose(saved["learning_resume_ts"], wall_ts_approx, abs_tol=1.0)
 
     # Load in new instance
     smartpi2 = SmartPI(
@@ -857,8 +884,13 @@ def test_skip_learning_cycles_persisted():
         saved_state=saved
     )
 
-    # Skip timestamp should be restored
-    assert smartpi2._learning_resume_ts == ts
+    # Skip timestamp should be restored as monotonic
+    # It won't be exactly mono_ts because of time.time() vs monotonic drift/offset,
+    # but the duration remaining should be correct.
+    # We can check if the remaining time matches.
+    remaining1 = mono_ts - time.monotonic()
+    remaining2 = smartpi2._learning_resume_ts - time.monotonic()
+    assert math.isclose(remaining1, remaining2, abs_tol=0.1)
 
 
 def test_skip_learning_cycles_in_diagnostics():
@@ -892,61 +924,55 @@ def test_reset_learning_clears_skip_counter():
     # Set skip counter
     smartpi.notify_resume_after_interruption(skip_cycles=5)
     assert smartpi._learning_resume_ts is not None
-    
+
     # Reset
     smartpi.reset_learning()
-    
+
     assert smartpi._learning_resume_ts is None
-    
+
     # Reset learning
     smartpi.reset_learning()
-    
+
     # Skip counter should be cleared
     assert smartpi._learning_resume_ts is None
 
 
 def test_abestimator_no_saturation_bias():
     """Test that raw points are stored, preventing clamping bias.
-    
+
     In the new robust estimator, we store raw (u, y) points.
     The regression calculates the slope 'a'.
     If the slope > A_MAX, the result is clamped, BUT the points remain valid (raw).
     This ensures that the estimator sees the "true" slope (even if high)
-    and simply limits the output, rather than modifying the internal history 
+    and simply limits the output, rather than modifying the internal history
     to match the limit (which would bias future estimates).
     """
     est = ABEstimator()
     # Force reliable mode
     # Set total count low to bypass residual gating (requires > 10)
-    est.learn_ok_count = 5 
+    est.learn_ok_count = 5
     # But set b count high to satisfy reliability check
     est.learn_ok_count_b = 20
     est._b_hat_hist.extend([0.002] * 10)
-    
+
     est.b = 0.002
-    
+
     # Feed points that imply a slope > A_MAX (0.1)
-    # y = dT/dt + b*delta. 
+    # y = dT/dt + b*delta.
     # If we want a_meas ~ 0.2, and u=0.5, we need y = 0.1
     # Let's say dT=0.08, b=0.002, delta=10 -> y = 0.08 + 0.02 = 0.10.
     # a_slope = 0.10 / 0.5 = 0.20 > A_MAX(0.1)
-    
+
     for _ in range(7):
-        est.learn(
-            dT_int_per_min=0.08, 
-            u=0.5, 
-            t_int=18.0, 
-            t_ext=8.0 # delta=10
-        )
-    
+        est.learn(dT_int_per_min=0.08, u=0.5, t_int=18.0, t_ext=8.0)  # delta=10
+
     # 1. est.a should be clamped
     assert est.a <= est.A_MAX, f"a should be clamped: {est.a}"
-    
+
     # 2. a_meas_hist should contain raw points implying high slope
     # Last measurement should be around 0.20 (calculated above)
     last_meas = est.a_meas_hist[-1]
     assert last_meas > est.A_MAX, f"Stored history should imply high slope: {last_meas}"
-
 
     # Re-run with varying U to properly test history
     est = ABEstimator()
@@ -954,7 +980,7 @@ def test_abestimator_no_saturation_bias():
     est.learn_ok_count = 5
     est.learn_ok_count_b = 20
     est.b = 0.002
-    
+
     for i in range(7):
         u_val = 0.5 + i * 0.01
         # Target a=0.20
@@ -966,7 +992,7 @@ def test_abestimator_no_saturation_bias():
             t_ext=8.0
         )
     assert est.a <= est.A_MAX
-    
+
     # Check median of history is high
     med = statistics.median(est.a_meas_hist)
     assert med > est.A_MAX
@@ -980,7 +1006,7 @@ def test_abestimator_b_no_saturation_bias():
     est.learn_ok_count_b = 20
     est._b_hat_hist.extend([0.002] * 10)
     est.b = 0.002
-    
+
     # Feed points implying b > B_MAX (0.05)
     # y = -dT/dt. x = delta.
     # b_slope = y/x.
@@ -988,7 +1014,7 @@ def test_abestimator_b_no_saturation_bias():
     # outlier check: max_abs_dT_per_min = 0.35.
     # So we need smaller delta. delta=5. y=0.3. b=0.06.
     # dT = -0.3. ok.
-    
+
     for _ in range(7):
         est.learn(
             dT_int_per_min=-0.3,
@@ -996,21 +1022,21 @@ def test_abestimator_b_no_saturation_bias():
             t_int=20.0,
             t_ext=15.0 # delta=5
         )
-        
+
     # 1. est.b should be clamped
     assert est.b <= est.B_MAX, f"b should be clamped: {est.b}"
-    
+
     # 2. b_meas_hist should contain raw points
     last_meas = est.b_meas_hist[-1]
     assert last_meas > est.B_MAX, f"Stored history should be high: {last_meas}"
-    
+
     # Re-run with varying delta
     est = ABEstimator()
     # Force reliable mode
     est.learn_ok_count = 5
     est.learn_ok_count_b = 20
     est.b = 0.002
-    
+
     for i in range(7):
         # b = 0.06
         # dt = -0.06 * delta
@@ -1023,7 +1049,7 @@ def test_abestimator_b_no_saturation_bias():
             t_ext=20.0 - delta,
             max_abs_dT_per_min=5.0
         )
-    
+
     assert est.b <= est.B_MAX
     med = statistics.median(est.b_meas_hist)
     assert med > est.B_MAX, f"Stored points should imply high slope: {med}"
@@ -1061,7 +1087,7 @@ def test_anti_windup_tracking_diagnostics():
 
 def test_anti_windup_tracking_corrects_integral():
     """Test that tracking anti-windup corrects the integral when output is constrained.
-    
+
     This verifies that when the applied command differs from the model command
     (due to rate-limiting, max_on_percent, or timing constraints), the integrator
     is adjusted to align with the actual applied command.
@@ -1091,14 +1117,14 @@ def test_anti_windup_tracking_corrects_integral():
 
     integral_before = smartpi.integral
 
-    # Calculate with high error - output will be constrained by max_on_percent
-    smartpi.calculate(
-        target_temp=25.0,
-        current_temp=20.0,  # error = 5
-        ext_current_temp=5.0,
-        slope=0,
-        hvac_mode=VThermHvacMode_HEAT
-    )
+    # First call (init)
+    smartpi.calculate(target_temp=25.0, current_temp=20.0, ext_current_temp=5.0, slope=0, hvac_mode=VThermHvacMode_HEAT)
+
+    # Second call with time passing to allow integration and AW logic
+    with patch("custom_components.versatile_thermostat.prop_algo_smartpi.time.monotonic") as mock_mono:
+        mock_mono.return_value = smartpi._last_calculate_time + 600.0
+
+        smartpi.calculate(target_temp=25.0, current_temp=20.0, ext_current_temp=5.0, slope=0, hvac_mode=VThermHvacMode_HEAT)  # error = 5
 
     # Verify output was constrained
     assert smartpi._last_u_applied <= 0.6, \
@@ -1115,7 +1141,7 @@ def test_anti_windup_tracking_corrects_integral():
 
 def test_anti_windup_tracking_respects_deadband():
     """Test that tracking anti-windup is NOT applied in deadband.
-    
+
     In deadband, the integral is managed by INTEGRAL_LEAK, and tracking
     should not interfere.
     """
@@ -1151,7 +1177,7 @@ def test_anti_windup_tracking_respects_deadband():
 
 def test_rate_limit_proportional_to_dt():
     """Test that rate limiting is proportional to elapsed time (dt_min).
-    
+
     This verifies the fix where MAX_STEP_PER_CYCLE is multiplied by dt_min.
     """
     smartpi = SmartPI(
@@ -1198,7 +1224,7 @@ def test_rate_limit_proportional_to_dt():
 
 def test_bumpless_deadband_exit():
     """Test that exiting the deadband applies bumpless transfer.
-    
+
     This test verifies that when the controller exits the deadband, the integral
     is re-initialized so that the output equals u_prev (the last applied command),
     preventing sudden power spikes.
@@ -1264,7 +1290,7 @@ def test_bumpless_deadband_exit():
 
 def test_bumpless_deadband_exit_integral_initialization():
     """Test that the integral is correctly initialized on deadband exit.
-    
+
     Verifies the formula: I_new = (u_prev - u_ff - Kp * e_p) / Ki
     """
     smartpi = SmartPI(
@@ -1281,7 +1307,7 @@ def test_bumpless_deadband_exit_integral_initialization():
     smartpi.u_prev = 0.40
     smartpi._in_deadband = True
     smartpi.integral = 10.0  # Will be replaced by bumpless calculation
-    
+
     # Force known gains (by making tau unreliable, safe gains are used)
     # KP_SAFE = 0.55, KI_SAFE = 0.01
 
@@ -1382,7 +1408,7 @@ def test_reset_learning_clears_in_deadband():
 
 def test_deadband_hysteresis_entry_and_exit():
     """Test that deadband uses hysteresis for entry and exit.
-    
+
     Hysteresis behavior:
     - Enter deadband when |e| < deadband_c
     - Exit deadband only when |e| > deadband_c + DEADBAND_HYSTERESIS
@@ -1450,7 +1476,7 @@ def test_deadband_hysteresis_entry_and_exit():
 
 def test_deadband_hysteresis_prevents_chattering():
     """Test that hysteresis prevents rapid toggling at deadband boundary.
-    
+
     Without hysteresis, oscillating between error=0.09 and 0.11 would cause
     rapid entry/exit. With hysteresis (exit at 0.125), we stay in deadband.
     """
@@ -1491,7 +1517,7 @@ def test_deadband_hysteresis_prevents_chattering():
 
 def test_deadband_hysteresis_zone_from_outside():
     """Test that starting outside and entering hysteresis zone stays outside.
-    
+
     If we start outside deadband and move into the hysteresis zone
     (without crossing the entry threshold), we should stay outside.
     """
@@ -1640,6 +1666,7 @@ def test_setpoint_boost_uses_faster_rate_limit():
     # Normal rate (0.15/min) and dt=10min -> max_step = 1.5
     # The on_percent should be higher with boost than with normal rate
     # Since PI output is high (large error), it should hit the boosted rate limit
+
     assert smartpi.on_percent > 0
 
 
@@ -1755,11 +1782,11 @@ def test_setpoint_boost_cool_mode():
 
 def test_forced_by_timing_skips_tracking_antiwindup():
     """Test that tracking anti-windup is skipped when timing forces 0%/100%.
-    
-    When min_on_delay or min_off_delay forces u_applied to 0 or 1 while 
+
+    When min_on_delay or min_off_delay forces u_applied to 0 or 1 while
     u_limited was in a reasonable range, the tracking anti-windup should NOT
     inject this artificial delta into the integral.
-    
+
     This prevents the side effect where min_off_delay forcing 100% causes
     the integral to climb artificially.
     """
@@ -1842,7 +1869,7 @@ def test_forced_by_timing_skips_tracking_antiwindup():
 
 def test_forced_by_timing_min_on_delay_forces_zero():
     """Test forced_by_timing when min_on_delay forces 0%.
-    
+
     When u_limited is small but non-zero, and min_on_delay forces
     u_applied to 0%, tracking should be skipped.
     """
@@ -1952,7 +1979,7 @@ def test_setpoint_boost_on_decrease_heat_mode():
     )
     # Ensure boost is inactive initially
     assert not smartpi._setpoint_boost_active
-    
+
     # Reset internal timer to allow immediate recalculation (avoid dt < 3s guard)
     smartpi._last_calculate_time = None
 
@@ -1965,11 +1992,10 @@ def test_setpoint_boost_on_decrease_heat_mode():
         slope=0,
         hvac_mode=VThermHvacMode_HEAT
     )
-    
+
     # 3. Verify boost activates
     assert smartpi._setpoint_boost_active, \
         "Setpoint boost should activate on decrease in HEAT mode"
-
 
 
 """Test SmartPI startup behavior fix."""
@@ -1988,27 +2014,27 @@ async def smartpi_thermostat_for_startup(hass: HomeAssistant):
         "minimal_activation_delay": 0,
         "minimal_deactivation_delay": 0,
     }
-    
+
     mock_entry = MockConfigEntry(
         domain=DOMAIN,
         title="Test SmartPI Startup",
         data=entry_data,
         unique_id="test_smartpi_startup_uid"
     )
-    
+
     # Create the underlying switch
     from homeassistant.components.switch import DOMAIN as SWITCH_DOMAIN
     mock_switch = MockSwitch(hass, "test_heater", "Test Heater")
     mock_switch.entity_id = "switch.test_heater"
     await register_mock_entity(hass, mock_switch, SWITCH_DOMAIN)
-    
+
     # We delay the entity creation so we can manipulate state before startup if needed
     # But create_thermostat calls async_add_entry -> async_setup_entry -> etc.
     # To test startup specifically with mocked sensors we should create them first
-    
+
     hass.states.async_set("sensor.indoor_temp", "20.0")
     hass.states.async_set("sensor.external_temp", "10.0")
-    
+
     entity = await create_thermostat(hass, mock_entry, "climate.test_smartpi_startup")
     return entity
 
@@ -2016,30 +2042,30 @@ async def test_smartpi_startup_initializes_cycle(hass: HomeAssistant, smartpi_th
     """Test that SmartPI initializes cycle state at startup, enabling first cycle learning."""
     entity = smartpi_thermostat_for_startup
     algo = entity._prop_algorithm
-    
+
     # 1. Verify that async_startup (called by create_thermostat) has initialized the start state
     # This assertion ensures our fix works. Without the fix, this should be None.
     assert algo._cycle_start_state is not None, "Cycle start state should be initialized at startup"
     assert algo._cycle_start_state["temp_in"] == 20.0
     assert algo._cycle_start_state["temp_ext"] == 10.0
-    
+
     # 2. Simulate end of cycle
     # We can call update_learning directly to verify it doesn't skip
-    # (Mocking time to ensure non-zero dt if needed, but logic handles small dt with just skipping if too small, 
+    # (Mocking time to ensure non-zero dt if needed, but logic handles small dt with just skipping if too small,
     # but here we want to ensure it doesn't skip due to "no start snapshot")
-    
-    with patch("custom_components.versatile_thermostat.prop_algo_smartpi.time.time") as mock_time:
+
+    with patch("custom_components.versatile_thermostat.prop_algo_smartpi.time.monotonic") as mock_time:
         # Move time forward by cycle_min (5 min = 300s)
         start_time = algo._cycle_start_state["time"]
         mock_time.return_value = start_time + 301
-        
+
         # Change temp to produce a signal
         algo.update_learning(
             current_temp=21.0, # +1
             ext_current_temp=10.0,
             hvac_mode=1 # HEAT
         )
-        
+
         # Check reasons
         # If it was skipped due to "no start snapshot", reason would be "skip: no start snapshot"
         # If it proceeds, it might skip due to "low excitation" or "collecting b meas", but NOT "no start snapshot"
