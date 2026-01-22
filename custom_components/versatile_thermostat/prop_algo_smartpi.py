@@ -43,6 +43,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Deque, Dict, Optional, Tuple
+from enum import Enum
 
 from .vtherm_hvac_mode import (
     VThermHvacMode,
@@ -62,6 +63,13 @@ def clamp(x: float, lo: float, hi: float) -> float:
         return hi
     return x
 
+
+class SmartPIPhase(str, Enum):
+    """Phases of the Smart-PI algorithm."""
+    BOOTSTRAP = "Bootstrap" # Waiting for first data
+    WARMUP = "Warmup"  # Accumulating initial history, FF scaled down
+    TUNING = "Tuning"  # Active learning, but model not reliable yet
+    STABLE = "Stable"  # Model reliable, optimized gains
 
 # ------------------------------
 # Default controller parameters
@@ -805,7 +813,29 @@ class SmartPI:
             "in_deadband": self._in_deadband,
             "setpoint_boost_active": self._setpoint_boost_active,
             "prev_setpoint_for_boost": self._prev_setpoint_for_boost,
+            "phase": self.phase,
         }
+
+    @property
+    def phase(self) -> str:
+        """Current phase of the algorithm."""
+        if self.cycles_since_reset == 0:
+            return SmartPIPhase.BOOTSTRAP
+
+        # Warmup condition:
+        # Either strictly based on time (cycles) OR learning count confidence
+        # We stay in warmup until we have BOTH enough cycles AND enough learning samples
+        # effectively scaling up FF progressively.
+        if (
+            self.cycles_since_reset < self.ff_warmup_cycles
+            or self.est.learn_ok_count < self.ff_warmup_ok_count
+        ):
+            return SmartPIPhase.WARMUP
+
+        if self.tau_reliable:
+            return SmartPIPhase.STABLE
+
+        return SmartPIPhase.TUNING
 
     @property
     def meas_count_a(self) -> int:

@@ -275,6 +275,7 @@ class SmartPIHandler:
                 "forced_by_timing": algo.forced_by_timing,
                 "in_deadband": algo.in_deadband,
                 "setpoint_boost_active": algo.setpoint_boost_active,
+                "phase": algo.phase,
             }
 
     async def service_reset_smart_pi_learning(self):
