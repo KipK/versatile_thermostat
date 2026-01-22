@@ -192,7 +192,7 @@ class ABEstimator:
 
         # Robust bounds
         self.A_MIN: float = 1e-5
-        self.A_MAX: float = 0.1
+        self.A_MAX: float = 0.15
         self.B_MIN: float = 1e-5
         self.B_MAX: float = 0.05
 
