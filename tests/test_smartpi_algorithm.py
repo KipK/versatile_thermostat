@@ -389,8 +389,8 @@ def test_reset_learning():
     assert smartpi.est.learn_ok_count == 0
 
 
-def test_deadband_leak():
-    """Test that integral leaks in deadband."""
+def test_deadband_freeze():
+    """Test that integral is frozen (not leaked) in deadband."""
     smartpi = SmartPI(
         cycle_min=10,
         minimal_activation_delay=0,
@@ -406,17 +406,17 @@ def test_deadband_leak():
     # First call (init)
     smartpi.calculate(target_temp=20, current_temp=19.95, ext_current_temp=10, slope=0, hvac_mode=VThermHvacMode_HEAT)
 
-    # Simulate time passing (10 min) to allow leak
+    # Simulate time passing (10 min)
     with patch("custom_components.versatile_thermostat.prop_algo_smartpi.time.monotonic") as mock_mono:
         mock_mono.return_value = smartpi._last_calculate_time + 600.0
 
         # Error within deadband
         smartpi.calculate(target_temp=20, current_temp=19.95, ext_current_temp=10, slope=0, hvac_mode=VThermHvacMode_HEAT)  # error = 0.05 < deadband 0.1
 
-    # Integral should decay (INTEGRAL_LEAK = 0.995)
-    assert smartpi.integral < integral_before, \
-        f"Integral should leak: before={integral_before}, after={smartpi.integral}"
-    assert "LEAK" in smartpi._last_i_mode
+    # Integral should be frozen (unchanged)
+    assert smartpi.integral == integral_before, \
+        f"Integral should be frozen: before={integral_before}, after={smartpi.integral}"
+    assert "FREEZE" in smartpi._last_i_mode
 
 
 def test_ff_disabled_when_unreliable():
@@ -1142,8 +1142,7 @@ def test_anti_windup_tracking_corrects_integral():
 def test_anti_windup_tracking_respects_deadband():
     """Test that tracking anti-windup is NOT applied in deadband.
 
-    In deadband, the integral is managed by INTEGRAL_LEAK, and tracking
-    should not interfere.
+    In deadband, the integral is frozen, and tracking should not interfere.
     """
     smartpi = SmartPI(
         cycle_min=10,
@@ -1171,8 +1170,8 @@ def test_anti_windup_tracking_respects_deadband():
     assert smartpi._last_aw_du == 0.0, \
         f"aw_du should be 0 in deadband: {smartpi._last_aw_du}"
 
-    # Verify we were in deadband mode
-    assert "LEAK" in smartpi._last_i_mode
+    # Verify we were in deadband mode (now FREEZE instead of LEAK)
+    assert "FREEZE" in smartpi._last_i_mode
 
 
 def test_rate_limit_proportional_to_dt():
@@ -1222,20 +1221,18 @@ def test_rate_limit_proportional_to_dt():
         f"Longer cycle should allow higher output: first={first_output}, second={second_output}"
 
 
-def test_bumpless_deadband_exit():
-    """Test that exiting the deadband applies bumpless transfer.
+def test_deadband_exit_preserves_integral():
+    """Test that exiting the deadband preserves the frozen integral.
 
     This test verifies that when the controller exits the deadband, the integral
-    is re-initialized so that the output equals u_prev (the last applied command),
-    preventing sudden power spikes.
+    is NOT reset but preserved from before entering, allowing proper compensation
+    for feed-forward errors.
     """
-    from custom_components.versatile_thermostat.prop_algo_smartpi import KI_MIN
-
     smartpi = SmartPI(
         cycle_min=10,
         minimal_activation_delay=0,
         minimal_deactivation_delay=0,
-        name="TestSmartPI_Bumpless",
+        name="TestSmartPI_DeadbandExit",
         deadband_c=0.1,  # Deadband of 0.1°C
         near_band_deg=0.0,  # Disable near-band scheduling
         setpoint_weight_b=1.0,  # Full proportional action
@@ -1245,6 +1242,7 @@ def test_bumpless_deadband_exit():
     smartpi.u_prev = 0.30  # Was running at 30%
     smartpi.integral = 5.0  # Some integral value
     smartpi._in_deadband = True  # Simulate previous state was in deadband
+    integral_before = smartpi.integral
 
     # Calculate inside deadband first to confirm state
     smartpi.calculate(
@@ -1255,12 +1253,10 @@ def test_bumpless_deadband_exit():
         hvac_mode=VThermHvacMode_HEAT
     )
 
-    # Should be in deadband
+    # Should be in deadband with frozen integral
     assert smartpi._in_deadband is True
-    assert "LEAK" in smartpi._last_i_mode
-
-    # Record state before exiting deadband
-    u_prev_before_exit = smartpi.u_prev
+    assert "FREEZE" in smartpi._last_i_mode
+    assert smartpi.integral == integral_before, "Integral should be frozen in deadband"
 
     # Reset timestamp to allow recalculation
     smartpi._last_calculate_time = None
@@ -1277,15 +1273,10 @@ def test_bumpless_deadband_exit():
     # Should have exited deadband
     assert smartpi._in_deadband is False
 
-    # The key assertion: the output should be close to u_prev_before_exit
-    # due to bumpless transfer (not a sudden jump to e.g. 50-60%)
-    # Allow some tolerance for rate limiting effects
-    output_after_exit = smartpi.on_percent
-
-    # Without bumpless transfer, the PI would compute a much higher output
-    # With bumpless transfer, it should be close to u_prev
-    assert abs(output_after_exit - u_prev_before_exit) < 0.20, \
-        f"Output should be near u_prev due to bumpless transfer: output={output_after_exit}, u_prev={u_prev_before_exit}"
+    # The key assertion: integral should be preserved (not reset by bumpless transfer)
+    # This allows proper compensation for feed-forward errors
+    assert smartpi.integral == integral_before, \
+        f"Integral should be preserved on deadband exit: before={integral_before}, after={smartpi.integral}"
 
 
 def test_bumpless_deadband_exit_integral_initialization():

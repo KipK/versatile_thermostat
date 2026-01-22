@@ -1546,32 +1546,15 @@ class SmartPI:
             # In hysteresis zone: maintain previous state
             in_deadband_now = self._in_deadband
 
-        # Bumpless transfer: on deadband exit, re-initialize integral
-        # so that u_ff + Kp*e_p + Ki*I = u_prev (no output discontinuity)
-        # Note: Do not apply bumpless transfer if setpoint changed (we want immediate reaction)
-        if self._in_deadband and not in_deadband_now and not setpoint_changed:
-            # Exiting deadband: compute integral for bumpless transfer
-            if self.Ki > KI_MIN:
-                # I_new = (u_prev - u_ff - Kp * e_p) / Ki
-                i_bumpless = (self.u_prev - u_ff - self.Kp * e_p) / self.Ki
-                self.integral = clamp(i_bumpless, -i_max, i_max)
-                _LOGGER.debug(
-                    "%s - Bumpless deadband exit: I adjusted to %.4f (u_prev=%.3f)",
-                    self._name, self.integral, self.u_prev
-                )
 
         # Update deadband state
         self._in_deadband = in_deadband_now
 
         if in_deadband_now:
-            # In deadband: leak integral slowly and output zero (helps avoid chatter)
-            # Metrology: leak must be time-scaled to remain invariant when dt varies.
-            # If INTEGRAL_LEAK is defined per-minute, apply leak^(dt_min).
-            leak = INTEGRAL_LEAK ** max(dt_min, 0.0)
-            self.integral *= leak
-            self.integral = clamp(self.integral, -i_max, i_max)
+            # In deadband: freeze integral and output zero
+            # Freezing preserves the integral "memory" needed to compensate feed-forward errors
             u_pi = 0.0
-            self._last_i_mode = "I:LEAK(deadband)"
+            self._last_i_mode = "I:FREEZE(deadband)"
         else:
             if integrator_hold:
                 # Dead time: don't integrate to avoid pumping

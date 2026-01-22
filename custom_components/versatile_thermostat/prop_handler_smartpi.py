@@ -142,7 +142,8 @@ class SmartPIHandler:
             current_ext_temp = t._cur_ext_temp
 
             # Trigger learning only on cycle timer (timestamp is not None)
-            if timestamp is not None and current_temp is not None:
+            # And do not learn if we are OFF (window open, etc.)
+            if timestamp is not None and current_temp is not None and t.vtherm_hvac_mode != VThermHvacMode_OFF:
                 # We simply pass current data. SmartPI determines dt and deltas against its internal snapshot.
                 t._prop_algorithm.update_learning(current_temp=current_temp, ext_current_temp=current_ext_temp, hvac_mode=t.vtherm_hvac_mode, current_temp_ts=time.monotonic())
 
