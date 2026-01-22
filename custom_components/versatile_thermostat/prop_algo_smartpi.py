@@ -544,6 +544,7 @@ class SmartPI:
 
         # Setpoint step boost state (for fast power ramp-up on setpoint change)
         self._setpoint_boost_active: bool = False
+        self._setpoint_changed_in_cycle: bool = False  # Track if setpoint changed during cycle
         self._prev_setpoint_for_boost: Optional[float] = None
 
         # Enhanced A/B Learning: Start-of-cycle snapshot
@@ -588,7 +589,9 @@ class SmartPI:
         self._learning_start_date = datetime.now()
         self._learning_resume_ts = None
         self._in_deadband = False
+        self._in_deadband = False
         self._setpoint_boost_active = False
+        self._setpoint_changed_in_cycle = False
         self._prev_setpoint_for_boost = None
         self.learn_win_active = False
         self.learn_win_start_ts = None
@@ -870,6 +873,7 @@ class SmartPI:
             "time": time.monotonic(),
             "u_applied": float(u_applied) if u_applied is not None else None,
         }
+        self._setpoint_changed_in_cycle = False
         u_log = f"{u_applied:.2f}" if u_applied is not None else "Pending"
         _LOGGER.debug("%s - SmartPI new cycle snapshot: Tin=%.2f, Text=%.2f, U=%s", self._name, temp_in, temp_ext, u_log)
 
@@ -915,6 +919,9 @@ class SmartPI:
         dt_s = max(now - ts_start, 0.0)
         dt_minutes = dt_s / 60.0
 
+        # Capture flags relevant to THIS cycle before starting the next one (which resets them)
+        setpoint_changed_in_this_cycle = self._setpoint_changed_in_cycle
+
         # 2. Reset snapshot for the NEXT cycle immediately
         # The next cycle starts NOW with current temps.
         # NOTE: u_applied for the NEXT cycle is not known yet (calculate() runs after).
@@ -944,6 +951,15 @@ class SmartPI:
         if ext_current_temp is None:
             self.est.learn_skip_count += 1
             self.est.learn_last_reason = "skip: no external temp"
+            self._reset_learning_window()
+            return
+
+        # 5. Setpoint change check (NEW)
+        # If setpoint changed during the cycle, the operating point is discontinuous.
+        # We must ABORT the window entirely to avoid mixing data.
+        if setpoint_changed_in_this_cycle:
+            self.est.learn_skip_count += 1
+            self.est.learn_last_reason = "skip: setpoint change"
             self._reset_learning_window()
             return
 
@@ -1376,6 +1392,9 @@ class SmartPI:
         MIN_DT_SECONDS = 3.0
 
         setpoint_changed = self._last_raw_setpoint is not None and abs(target_temp - self._last_raw_setpoint) > 0.01
+
+        if setpoint_changed:
+            self._setpoint_changed_in_cycle = True
 
         if dt_min < MIN_DT_SECONDS / 60.0 and not setpoint_changed and not is_first_run:
 
