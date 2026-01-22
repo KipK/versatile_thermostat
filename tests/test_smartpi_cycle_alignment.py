@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch, AsyncMock
 from homeassistant.core import HomeAssistant
 from homeassistant.const import STATE_ON, STATE_OFF
 
-from custom_components.versatile_thermostat.prop_algo_smartpi import SmartPI, DT_MIN_FRACTION
+from custom_components.versatile_thermostat.prop_algo_smartpi import SmartPI
 from custom_components.versatile_thermostat.prop_handler_smartpi import SmartPIHandler
 from custom_components.versatile_thermostat.thermostat_prop import ThermostatProp
 from custom_components.versatile_thermostat.vtherm_hvac_mode import VThermHvacMode_HEAT
@@ -118,8 +118,13 @@ async def test_smartpi_60s_timer_interference():
     # "waiting" message appears instead of "skip".
 
 @pytest.mark.asyncio
-async def test_smartpi_window_waiting_message():
-    """Verify that short windows report 'waiting' instead of 'skip'."""
+async def test_smartpi_learning_requires_cycle_boundary():
+    """Verify that learning operates on data from complete cycles.
+    
+    Since update_learning is only called at cycle boundaries (not mid-cycle),
+    dt_min will always be >= cycle_min, and we should get a learning result
+    (either learned, skip, or extending) - never 'waiting'.
+    """
     cycle_min = 10
     algo = SmartPI(
         cycle_min=cycle_min, 
@@ -135,8 +140,8 @@ async def test_smartpi_window_waiting_message():
     start_ts = time.time()
     algo._cycle_start_state["time"] = start_ts
     
-    # Update at 2 minutes (2 < 0.8 * 10)
-    current_ts = start_ts + (2 * 60)
+    # Update at exactly 1 cycle (10 minutes) - simulating cycle boundary
+    current_ts = start_ts + (cycle_min * 60)
     
     algo.update_learning(
         current_temp=20.1, 
@@ -144,13 +149,9 @@ async def test_smartpi_window_waiting_message():
         current_temp_ts=current_ts
     )
     
-    # Should be "waiting", not "skip"
-    # Note: Logic currently says "skip: window too short"
-    # After fix, should be "waiting: ..."
-    
     reason = algo.est.learn_last_reason
-    # We assert that it contains window info (progress) if we fixed it
-    assert "waiting: window filling" in reason
+    # Should NOT be "waiting" since we're at a cycle boundary
+    assert "waiting" not in reason.lower()
     
 @pytest.mark.asyncio
 async def test_smartpi_frozen_power_snapshot():
