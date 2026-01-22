@@ -157,7 +157,7 @@ LEARN_QUALITY_THRESHOLD = 0.25  # Min QI quality to accept learning
 QUANTIZATION_ROUND_TO = 0.001   # Rounding / binning for quantization detection
 
 # --- SmartPI Learning Window Constants ---
-DT_MIN_FRACTION = 0.8
+# Learning requires at least one full cycle (measured by _cycle_min)
 DT_MAX_MIN = 30
 MIN_ABS_DT = 0.03      # °C
 DELTA_MIN = 0.2        # °C (Matches DELTA_MIN_ON)
@@ -934,11 +934,7 @@ class SmartPI:
             return
 
         dt_min = (now - self.learn_win_start_ts) / 60.0
-        if dt_min < DT_MIN_FRACTION * self._cycle_min:
-            # Not an error, just growing the window
-            required = DT_MIN_FRACTION * self._cycle_min
-            self.est.learn_last_reason = f"waiting: window filling ({dt_min:.1f}/{required:.1f} min)"
-            return
+        # Note: dt_min >= _cycle_min is guaranteed since update_learning is only called at cycle boundaries
 
         dT = current_temp - self.learn_T_int_start
         abs_dT = abs(dT)
@@ -1794,7 +1790,6 @@ class SmartPI:
             "near_band_deg": round(self.near_band_deg, 3),
             "kp_near_factor": round(self.kp_near_factor, 3),
             "ki_near_factor": round(self.ki_near_factor, 3),
-            "sign_flip_leak": round(self.sign_flip_leak, 3),
             "sign_flip_leak": round(self.sign_flip_leak, 3),
             "sign_flip_active": self._sign_flip_active,
             # Output
