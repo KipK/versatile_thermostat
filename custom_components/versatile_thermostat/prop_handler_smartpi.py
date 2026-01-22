@@ -14,7 +14,6 @@ from datetime import timedelta
 
 from .prop_algo_smartpi import SmartPI, SMARTPI_RECALC_INTERVAL_SEC
 from .const import (
-    CONF_CYCLE_MIN,
     CONF_MINIMAL_ACTIVATION_DELAY,
     CONF_MINIMAL_DEACTIVATION_DELAY,
     CONF_MAX_ON_PERCENT,
@@ -57,8 +56,9 @@ class SmartPIHandler:
         safe_name = slugify(t.name)
         self._store = Store(t._hass, STORAGE_VERSION, STORAGE_KEY.format(safe_name))
 
-        # Read config (mirroring how it was done for TPI, but for SmartPI params)
-        cycle_min = entry.get(CONF_CYCLE_MIN, 5)
+        # Use the thermostat's cycle_min property directly for consistency
+        # (base_thermostat reads CONF_CYCLE_MIN in __init__)
+        cycle_min = t._cycle_min
         minimal_activation_delay = entry.get(CONF_MINIMAL_ACTIVATION_DELAY, 0)
         minimal_deactivation_delay = entry.get(CONF_MINIMAL_DEACTIVATION_DELAY, 0)
         max_on_percent = entry.get(CONF_MAX_ON_PERCENT, 1.0)
