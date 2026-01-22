@@ -1254,7 +1254,7 @@ class SmartPI:
             tau = SP_TAU_SLOW + (SP_TAU_FAST - SP_TAU_SLOW) * w
             
             # Robust alpha calculation
-            alpha = 1.0 - math.exp(-max(dt_min, 0.0) / str(max(tau, 1.0))) if tau > 0 else 1.0
+            alpha = 1.0 - math.exp(-max(dt_min, 0.0) / max(tau, 1.0)) if tau > 0 else 1.0
             
             # Fallback for very small dt (Taylor expansion approx: alpha ~= dt/tau)
             if tau > 0:
