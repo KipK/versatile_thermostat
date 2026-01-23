@@ -831,7 +831,8 @@ class SmartPI:
         # effectively scaling up FF progressively.
         if (
             self.cycles_since_reset < self.ff_warmup_cycles
-            or self.est.learn_ok_count < self.ff_warmup_ok_count
+            or self.est.learn_ok_count_a < 10
+            or self.est.learn_ok_count_b < 10
         ):
             return SmartPIPhase.WARMUP
 
@@ -1433,8 +1434,13 @@ class SmartPI:
         tau_info = self.est.tau_reliability()
         self._tau_reliable = tau_info.reliable
 
+        # Force unreliable if in WARMUP phase (insufficient learning samples)
+        # This ensures we stay in safe mode until we have enough data (a>=10, b>=10)
+        if self.phase == SmartPIPhase.WARMUP:
+            self._tau_reliable = False
+
         # Compute gains (simple heuristic based on tau)
-        if tau_info.reliable:
+        if self._tau_reliable:
             tau = tau_info.tau_min  # minutes
             # Heuristic: Kp scales with tau, Ki = Kp/tau
             kp_calc = 0.35 + 0.9 * math.sqrt(tau / 200.0)
