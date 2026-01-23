@@ -1094,6 +1094,16 @@ class SmartPI:
         return self._ki
 
     @property
+    def kp_reel(self) -> float:
+        """Return the actual Kp used for calculation (after near-band adjustment)."""
+        return self.Kp
+
+    @property
+    def ki_reel(self) -> float:
+        """Return the actual Ki used for calculation (after near-band adjustment)."""
+        return self.Ki
+
+    @property
     def u_ff(self) -> float:
         """Last feed-forward value."""
         return self._last_u_ff

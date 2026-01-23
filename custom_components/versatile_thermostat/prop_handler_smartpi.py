@@ -244,6 +244,8 @@ class SmartPIHandler:
                 "learning_start_dt": algo.learning_start_dt,
                 "Kp": algo.kp,
                 "Ki": algo.ki,
+                "Kp_reel": algo.kp_reel,
+                "Ki_reel": algo.ki_reel,
                 "integral_error": algo.integral_error,
                 "i_mode": algo.i_mode,
                 "sat": algo.sat,
