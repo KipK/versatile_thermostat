@@ -111,6 +111,12 @@ SETPOINT_BOOST_THRESHOLD = 0.3   # min setpoint change (°C) to trigger boost
 SETPOINT_BOOST_ERROR_MIN = 0.3   # min error (°C) to keep boost active
 SETPOINT_BOOST_RATE = 0.50       # boosted rate limit (/min) vs 0.15 normal
 
+# Setpoint change handling (mode change vs adjustment)
+# - Large change (>= threshold): mode change (eco ↔ comfort) -> reset PI state
+# - Small change (< threshold): minor adjustment -> bumpless transfer with limited output jump
+SETPOINT_MODE_DELTA_C = 0.5      # °C threshold for mode change detection
+SETPOINT_BUMPLESS_MAX_DU = 0.12  # Max allowed output change (0..1) for bumpless transfer
+
 # Tracking anti-windup (back-calculation) tuned for slow thermal systems
 AW_TRACK_TAU_S = 120.0        # tracking time constant in seconds (typ. 60-180s)
 AW_TRACK_MAX_DELTA_I = 5.0    # safety clamp on integral correction per cycle
@@ -1418,6 +1424,55 @@ class SmartPI:
 
         return self._filtered_setpoint
 
+
+    def _bump_integral_for_setpoint_change(
+        self,
+        t_set_old: float,
+        t_set_new: float,
+        t_in: float,
+    ) -> None:
+        """Adjust integral to minimize output jump on small setpoint changes (bumpless transfer).
+        
+        Theory: To keep u_pi ≈ Kp*e + Ki*I constant when setpoint changes:
+            ΔI = (Kp/Ki) * (e_old - e_new)
+        
+        IMPORTANT: For thermal systems with low Ki, this ΔI can be huge.
+        We limit the impact by capping the output variation: |Ki * ΔI| <= SETPOINT_BUMPLESS_MAX_DU
+        
+        Only use for small setpoint changes (< SETPOINT_MODE_DELTA_C).
+        
+        Args:
+            t_set_old: Previous setpoint (°C)
+            t_set_new: New setpoint (°C)
+            t_in: Current indoor temperature (°C)
+        """
+        if self.Ki <= KI_MIN:
+            return
+        
+        e_old = t_set_old - t_in
+        e_new = t_set_new - t_in
+        
+        # Theoretical ΔI to keep u_pi constant
+        dI = (self.Kp / self.Ki) * (e_old - e_new)
+        
+        # Limit bumpless: bound the output variation due to integral: Δu_I = Ki * ΔI
+        # => |ΔI| <= SETPOINT_BUMPLESS_MAX_DU / Ki
+        dI_max = SETPOINT_BUMPLESS_MAX_DU / max(self.Ki, KI_MIN)
+        dI = clamp(dI, -dI_max, dI_max)
+        
+        old_integral = self.integral
+        self.integral = self.integral + dI
+        
+        # Clamp to same limits as in calculate() (dynamic integral limit)
+        i_max = 2.0 / max(self.Ki, KI_MIN)
+        self.integral = clamp(self.integral, -i_max, i_max)
+        
+        _LOGGER.debug(
+            "%s - Bumpless setpoint change (Δ=%.3f°C): integral %.4f → %.4f (ΔI=%.4f, capped=%.4f)",
+            self._name, t_set_new - t_set_old, old_integral, self.integral, 
+            (self.Kp / self.Ki) * (e_old -e_new), dI
+        )
+
     # ------------------------------
     # Main control law
     # ------------------------------
@@ -1495,9 +1550,30 @@ class SmartPI:
         MIN_DT_SECONDS = 3.0
 
         setpoint_changed = self._last_raw_setpoint is not None and abs(target_temp - self._last_raw_setpoint) > 0.01
+        sp_delta = abs(target_temp - self._last_raw_setpoint) if self._last_raw_setpoint is not None else 0.0
 
         if setpoint_changed:
             self._setpoint_changed_in_cycle = True
+            
+            # Two-tier setpoint change handling (from regul6.py)
+            if sp_delta >= SETPOINT_MODE_DELTA_C:
+                # Large change: mode change (eco ↔ comfort) -> reset PI state
+                old_integral = self.integral
+                self.integral = 0.0
+                self._e_filt = None
+                # Note: No need to reset u_prev (rate limiter still applies)
+                # The setpoint_changed flag will bypass rate limit in the current cycle
+                _LOGGER.info(
+                    "%s - Mode change detected (Δ=%.2f°C >= %.2f°C): PI state reset (integral %.4f → 0.0)",
+                    self._name, sp_delta, SETPOINT_MODE_DELTA_C, old_integral
+                )
+            else:
+                # Small change: bumpless transfer with limited output jump
+                self._bump_integral_for_setpoint_change(
+                    t_set_old=self._last_raw_setpoint,
+                    t_set_new=target_temp,
+                    t_in=current_temp,
+                )
 
         if dt_min < MIN_DT_SECONDS / 60.0 and not setpoint_changed and not is_first_run:
 
