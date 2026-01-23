@@ -174,6 +174,11 @@ U_ON_MIN = 0.20
 DELTA_MIN_OFF = 0.5        # °C
 DELTA_MIN_ON = 0.2         # °C
 
+# --- SmartPI Near Band Defaults ---
+DEFAULT_NEAR_BAND_DEG = 0.30
+DEFAULT_KP_NEAR_FACTOR = 0.80
+DEFAULT_KI_NEAR_FACTOR = 0.40
+
 
 @dataclass(frozen=True)
 class TauReliability:
@@ -431,9 +436,9 @@ class SmartPI:
         ff_scale_unreliable_max: float = 0.30,
         # --- Servo overshoot suppression knobs ---
         setpoint_weight_b: float = 0.3,
-        near_band_deg: float = 0.30,
-        kp_near_factor: float = 0.80,
-        ki_near_factor: float = 0.40,
+        near_band_deg: float = DEFAULT_NEAR_BAND_DEG,
+        kp_near_factor: float = DEFAULT_KP_NEAR_FACTOR,
+        ki_near_factor: float = DEFAULT_KI_NEAR_FACTOR,
         sign_flip_leak: float = 0.40,
         sign_flip_leak_cycles: int = 3,
         sign_flip_band_mult: float = 2.0,
@@ -1525,6 +1530,20 @@ class SmartPI:
             # Re-clamp to ensure gains stay within bounds after reduction
             kp = clamp(kp, KP_MIN, KP_MAX)
             ki = clamp(ki, KI_MIN, KI_MAX)
+
+        # DEBUG: Log logic flow for near-band coefficient selection
+        if self._tau_reliable:
+            # Only trace when active to avoid flooding logs in WARMUP unless important
+            # Using debug level 5 equivalent (standard debug)
+            _LOGGER.debug(
+                "%s - Calc SmartPI gains: in_near_band=%s, error=%.4f (band=%.4f), "
+                "Classic[Kp=%.4f, Ki=%.4f], "
+                "Applied[Kp=%.4f, Ki=%.4f]",
+                self._name, in_near_band, e, self.near_band_deg,
+                kp_base if in_near_band else kp,
+                (kp_base / max(tau_info.tau_min, 10.0)) if in_near_band and tau_info.reliable else ki, # Approximate "Classic" Ki for log
+                kp, ki
+            )
 
         # Store current gains (for diagnostics)
         self.Kp = kp
