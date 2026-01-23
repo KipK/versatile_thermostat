@@ -1595,6 +1595,19 @@ class SmartPI:
             # In hysteresis zone: maintain previous state
             in_deadband_now = self._in_deadband
 
+        # Bumpless transfer: on deadband exit, re-initialize integral
+        # so that u_ff + Kp*e_p + Ki*I = u_prev (no output discontinuity)
+        # Note: Do not apply bumpless transfer if setpoint changed (we want immediate reaction)
+        if self._in_deadband and not in_deadband_now and not setpoint_changed:
+            # Exiting deadband: compute integral for bumpless transfer
+            if self.Ki > KI_MIN:
+                # I_new = (u_prev - u_ff - Kp * e_p) / Ki
+                i_bumpless = (self.u_prev - u_ff - self.Kp * e_p) / self.Ki
+                self.integral = clamp(i_bumpless, -i_max, i_max)
+                _LOGGER.debug(
+                    "%s - Bumpless deadband exit: I adjusted to %.4f (u_prev=%.3f)",
+                    self._name, self.integral, self.u_prev
+                )
 
         # Update deadband state
         self._in_deadband = in_deadband_now
