@@ -1489,6 +1489,14 @@ class SmartPI:
         if self._setpoint_boost_active or not self._tau_reliable:
             # Bypass weighting for fast response if boosting or if model is not yet reliable (compensates lack of FF)
             e_p = float(e)
+        elif hvac_mode == VThermHvacMode_HEAT and e < 0:
+             # Overheat correction (T > SP): full braking power (disable weighting)
+             # This prevents the accumulating integral from overcoming the proportional term
+             e_p = float(e)
+        elif hvac_mode == VThermHvacMode_COOL and e < 0:
+             # Overcool correction (T < SP): full braking power (disable weighting)
+             # Note: in cool mode error is inverted (SP - T) -> (T - SP), so e < 0 means T < SP (too cold)
+             e_p = float(e)
         else:
             e_p = float(self.setpoint_weight_b * e)
         # if hvac_mode == VThermHvacMode_COOL:
