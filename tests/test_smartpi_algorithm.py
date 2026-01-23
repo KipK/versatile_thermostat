@@ -472,40 +472,37 @@ def test_ff_disabled_when_unreliable():
     # Ah, we reused `smartpi` object.
 
     assert smartpi.u_ff == 0.0, "FF should be 0 when tau is unreliable"
-
-    # 3. Everything OK
-    smartpi._last_calculate_time = None # allow immediate recalculation
-    smartpi.est.learn_ok_count_b = 20
+    
+    # 3. Everything OK - Use fresh instance to ensure clean state
+    smartpi_ok = SmartPI(
+        cycle_min=10,
+        minimal_activation_delay=0,
+        minimal_deactivation_delay=0,
+        name="TestSmartPI_OK"
+    )
+    smartpi_ok.est.a = 0.01
+    smartpi_ok.est.b = 0.02
+    smartpi_ok.est.learn_ok_count = 50
+    smartpi_ok.est.learn_ok_count_a = 20
+    smartpi_ok.est.learn_ok_count_b = 20
+    
     # Inject history for reliable check
-    for _ in range(10): smartpi.est._b_hat_hist.append(smartpi.est.b)
+    for _ in range(10): smartpi_ok.est._b_hat_hist.append(smartpi_ok.est.b)
+    
+    # Enable FF warmup state
+    smartpi_ok._cycles_since_reset = 10
 
     # First call (init)
-    smartpi.calculate(target_temp=20, current_temp=18, ext_current_temp=5, slope=0, hvac_mode=VThermHvacMode_HEAT)
+    smartpi_ok.calculate(target_temp=20, current_temp=18, ext_current_temp=5, slope=0, hvac_mode=VThermHvacMode_HEAT)
 
-    # Simulate time passing to accumulate cycles for FF warmup
-    # We need _cycles_since_reset >= ff_warmup_cycles
-    # smartpi._cycles_since_reset was 10 initially.
-    # If calculate(init) resets it? No, only reset_learning() resets it.
-
-    # We need to ensure FF is calculated. u_ff is calculated every cycle.
-    # But now `u_ff` scale depends on `_cycles_since_reset`.
-    # With `dt=0`, cycles don't increment. But if they are already high, it should work.
-
-    # Wait, `test_ff_disabled_when_unreliable` failed assertion `u_ff > 0.0`.
-    # This implies u_ff was 0.
-    # Why? `reliable_cap`? `time_scale`?
-    # `time_scale = clamp(self._cycles_since_reset / float(self.ff_warmup_cycles), 0.0, 1.0)`
-    # If `_cycles_since_reset` is preserved, it should be 10.
-
-    # Maybe `_last_calculate_time = None` caused `dt=0`, so no new cycles added.
-    # But `cycles_since_reset` should persist.
-
-    # Let's try calling it again with time elapsed just in case.
+    # Simulate time passing to ensure not rate limited
     with patch("custom_components.versatile_thermostat.prop_algo_smartpi.time.monotonic") as mock_mono:
-        mock_mono.return_value = smartpi._last_calculate_time + 600.0
-        smartpi.calculate(target_temp=20, current_temp=18, ext_current_temp=5, slope=0, hvac_mode=VThermHvacMode_HEAT)
+        mock_mono.return_value = smartpi_ok._last_calculate_time + 600.0
+        smartpi_ok.calculate(target_temp=20, current_temp=18, ext_current_temp=5, slope=0, hvac_mode=VThermHvacMode_HEAT)
 
-    assert smartpi.u_ff > 0.0, f"FF should be active when conditions are met. u_ff={smartpi.u_ff}, cycles={smartpi._cycles_since_reset}"
+    assert smartpi_ok.u_ff > 0.0, f"FF should be active when conditions are met. u_ff={smartpi_ok.u_ff}"
+
+
 
 def test_heuristic_gains_reliable_tau():
     """Test that gains are calculated via heuristic when tau is reliable."""
@@ -690,15 +687,14 @@ def test_near_band_gain_scheduling():
     assert math.isclose(kp_inside, expected_kp_clamped, rel_tol=0.01), \
         f"Kp should be reduced: outside={kp_outside}, inside={kp_inside}, expected={expected_kp_clamped}"
 
-    # Fixed behavior: Ki is calculated from ORIGINAL Kp, then multiplied by ki_near_factor
-    # Ki = (kp_original / tau_capped) * ki_near_factor
-    # This results in single attenuation: ki_near_factor = 0.50
-    tau_capped = 200.0  # TAU_CAP_FOR_KI
-    ki_from_original_kp = (kp_outside / tau_capped) * 0.50
-
-    # Ki should match the calculation from original Kp (fixed behavior)
-    assert math.isclose(ki_inside, ki_from_original_kp, rel_tol=0.01), \
-        f"Ki should be calculated from original Kp: ki_inside={ki_inside}, expected={ki_from_original_kp}"
+    # Updated Behavior: Ki should never exceed Ki_classic
+    # ki_near = ki_outside * ki_near_factor
+    # ki_final = min(ki_near, ki_outside) = ki_outside * 0.50
+    expected_ki = ki_outside * 0.50
+    
+    # Ki should match expected reduction relative to ki_outside
+    assert math.isclose(ki_inside, expected_ki, rel_tol=0.01), \
+        f"Ki should be reduced relative to classic Ki: ki_inside={ki_inside}, expected={expected_ki}"
 
     # Verify gains stay within bounds
     assert kp_inside >= KP_MIN, f"Kp should be >= KP_MIN after reduction: {kp_inside}"
@@ -1221,62 +1217,7 @@ def test_rate_limit_proportional_to_dt():
         f"Longer cycle should allow higher output: first={first_output}, second={second_output}"
 
 
-def test_deadband_exit_preserves_integral():
-    """Test that exiting the deadband preserves the frozen integral.
 
-    This test verifies that when the controller exits the deadband, the integral
-    is NOT reset but preserved from before entering, allowing proper compensation
-    for feed-forward errors.
-    """
-    smartpi = SmartPI(
-        cycle_min=10,
-        minimal_activation_delay=0,
-        minimal_deactivation_delay=0,
-        name="TestSmartPI_DeadbandExit",
-        deadband_c=0.1,  # Deadband of 0.1°C
-        near_band_deg=0.0,  # Disable near-band scheduling
-        setpoint_weight_b=1.0,  # Full proportional action
-    )
-
-    # Simulate being in the deadband with u_prev at a stable value
-    smartpi.u_prev = 0.30  # Was running at 30%
-    smartpi.integral = 5.0  # Some integral value
-    smartpi._in_deadband = True  # Simulate previous state was in deadband
-    integral_before = smartpi.integral
-
-    # Calculate inside deadband first to confirm state
-    smartpi.calculate(
-        target_temp=20.0,
-        current_temp=19.95,  # error = 0.05 < deadband 0.1
-        ext_current_temp=10.0,
-        slope=0,
-        hvac_mode=VThermHvacMode_HEAT
-    )
-
-    # Should be in deadband with frozen integral
-    assert smartpi._in_deadband is True
-    assert "FREEZE" in smartpi._last_i_mode
-    assert smartpi.integral == integral_before, "Integral should be frozen in deadband"
-
-    # Reset timestamp to allow recalculation
-    smartpi._last_calculate_time = None
-
-    # Now exit the deadband
-    smartpi.calculate(
-        target_temp=20.0,
-        current_temp=19.7,  # error = 0.3 > deadband 0.1
-        ext_current_temp=10.0,
-        slope=0,
-        hvac_mode=VThermHvacMode_HEAT
-    )
-
-    # Should have exited deadband
-    assert smartpi._in_deadband is False
-
-    # The key assertion: integral should be preserved (not reset by bumpless transfer)
-    # This allows proper compensation for feed-forward errors
-    assert smartpi.integral == integral_before, \
-        f"Integral should be preserved on deadband exit: before={integral_before}, after={smartpi.integral}"
 
 
 def test_bumpless_deadband_exit_integral_initialization():

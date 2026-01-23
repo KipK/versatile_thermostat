@@ -85,8 +85,7 @@ KP_MAX = 2.50
 KI_MIN = 0.001
 KI_MAX = 0.050
 
-# Cap for tau in Ki calculation (prevents extremely small Ki for slow systems)
-TAU_CAP_FOR_KI = 200.0
+
 
 # Anti-windup / integrator behavior
 INTEGRAL_LEAK = 0.995  # leak factor per cycle when inside deadband
@@ -1511,24 +1510,19 @@ class SmartPI:
         self._prev_error = e
 
         # Near-setpoint gain scheduling (soft landing)
+        # Rule: near-band must never be more aggressive than classic gains.
+        # In particular, Ki must not increase in near-band (reduces overshoot / hunting).
+        kp_classic = kp
+        ki_classic = ki
+
         in_near_band = (self.near_band_deg > 0.0) and (abs(e) <= self.near_band_deg)
         if in_near_band:
-            kp_base = kp  # Save original Kp before reduction
+            # Softer proportional action near target
+            kp = clamp(kp_classic * self.kp_near_factor, KP_MIN, KP_MAX)
 
-            # Reduce Kp for softer proportional action
-            kp = kp_base * self.kp_near_factor
-
-            # Recalculate Ki from ORIGINAL Kp (kp_base), not reduced Kp
-            # This avoids double attenuation (kp_near_factor * ki_near_factor)
-            if tau_info.reliable:
-                tau_capped = clamp(tau_info.tau_min, 10.0, TAU_CAP_FOR_KI)
-                ki = clamp(kp_base / tau_capped, KI_MIN, KI_MAX)
-
-            # Apply attenuation factor to Ki
-            ki *= self.ki_near_factor
-
-            # Re-clamp to ensure gains stay within bounds after reduction
-            kp = clamp(kp, KP_MIN, KP_MAX)
+            # Reduce integral action near target
+            ki_near = ki_classic * self.ki_near_factor
+            ki = min(ki_near, ki_classic)
             ki = clamp(ki, KI_MIN, KI_MAX)
 
         # DEBUG: Log logic flow for near-band coefficient selection
@@ -1540,8 +1534,7 @@ class SmartPI:
                 "Classic[Kp=%.4f, Ki=%.4f], "
                 "Applied[Kp=%.4f, Ki=%.4f]",
                 self._name, in_near_band, e, self.near_band_deg,
-                kp_base if in_near_band else kp,
-                (kp_base / max(tau_info.tau_min, 10.0)) if in_near_band and tau_info.reliable else ki, # Approximate "Classic" Ki for log
+                kp_classic, ki_classic,
                 kp, ki
             )
 
