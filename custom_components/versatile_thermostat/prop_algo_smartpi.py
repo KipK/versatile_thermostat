@@ -1,3 +1,11 @@
+########################################################################
+#                                                                      #
+#                      Smart-PI Algorithm                              #
+#                      ------------------                              #
+#  Auto-adaptive PI controller for Versatile Thermostat (VTH).         #
+#                                                                      #
+########################################################################
+
 """
 SmartPI Algorithm - Auto-adaptive PI controller for Versatile Thermostat (VTH).
 
@@ -63,6 +71,12 @@ def clamp(x: float, lo: float, hi: float) -> float:
         return hi
     return x
 
+
+########################################################################
+#                                                                      #
+#                      CONSTANTS & ENUMS                               #
+#                                                                      #
+########################################################################
 
 class SmartPIPhase(str, Enum):
     """Phases of the Smart-PI algorithm."""
@@ -185,6 +199,12 @@ class TauReliability:
     reliable: bool
     tau_min: float  # minutes (min of candidates used)
 
+
+########################################################################
+#                                                                      #
+#                      ESTIMATOR CLASS                                 #
+#                                                                      #
+########################################################################
 
 class ABEstimator:
     """
@@ -400,6 +420,12 @@ class ABEstimator:
         return TauReliability(reliable=reliable, tau_min=tau)
 
 
+########################################################################
+#                                                                      #
+#                      MAIN ALGO CLASS                                 #
+#                                                                      #
+########################################################################
+
 class SmartPI:
     """
     SmartPI Algorithm - Auto-adaptive PI controller for Versatile Thermostat (VTH).
@@ -562,6 +588,12 @@ class SmartPI:
     # ------------------------------
     # Persistence
     # ------------------------------
+
+    ########################################################################
+    #                                                                      #
+    #                      PERSISTENCE & STATE                             #
+    #                                                                      #
+    ########################################################################
 
     def reset_learning(self) -> None:
         """Reset all learned parameters to defaults."""
@@ -903,6 +935,14 @@ class SmartPI:
         Uses the difference between Current State (End) and _cycle_start_state (Start).
         """
         # If we don't have a start snapshot, we can't calculate a reliable delta over the cycle.
+        ########################################################################
+        #                                                                      #
+        #                      STEP 1 - Context Retrival               #
+        #                      -------------------------               #
+        #  Retrieve current state and cycle timings                            #
+        #                                                                      #
+        ########################################################################
+
         if self._cycle_start_state is None:
             # This happens on first boot or after reset. Initialize for next time.
             u_init = previous_power if previous_power is not None else 0.0
@@ -940,6 +980,14 @@ class SmartPI:
             self.est.learn_last_reason = "skip: cycle power undefined"
             return
 
+        ########################################################################
+        #                                                                      #
+        #                      STEP 2 - Interruption checks            #
+        #                      ----------------------------            #
+        #  Check for resumes and available sensors                             #
+        #                                                                      #
+        ########################################################################
+
         # 3. Interruption / resume check
         if self._learning_resume_ts:
             # We use monotonic time for self._learning_resume_ts
@@ -967,6 +1015,14 @@ class SmartPI:
             self.est.learn_last_reason = "skip: setpoint change"
             self._reset_learning_window()
             return
+
+        ########################################################################
+        #                                                                      #
+        #                      STEP 3 - Multi-Cycle Logic              #
+        #                      --------------------------              #
+        #  Handle multi-cycle learning window and power check                  #
+        #                                                                      #
+        ########################################################################
 
         # 5. Multi-cycle learning window logic
         if not self.learn_win_active:
@@ -1021,6 +1077,14 @@ class SmartPI:
             self.est.learn_last_reason = "skip: window duty invalid"
             return
 
+        ########################################################################
+        #                                                                      #
+        #                      STEP 4 - Learning Submission            #
+        #                      ----------------------------            #
+        #  Submit samples for a or b estimation                                #
+        #                                                                      #
+        ########################################################################
+
         u_eff = self.learn_u_int / self.learn_t_int_s
         dT_dt = dT / dt_min
 
@@ -1048,8 +1112,12 @@ class SmartPI:
         self.est.learn_last_reason = "skip: low excitation (u mid)"
         return
 
-    # ------------------------------
-    # Props / API Compat
+    ########################################################################
+    #                                                                      #
+    #                      API & PROPERTIES                                #
+    #                                                                      #
+    ########################################################################
+
     # ------------------------------
 
     @property
@@ -1223,6 +1291,12 @@ class SmartPI:
     # Asymmetric setpoint filter
     # ------------------------------
 
+    ########################################################################
+    #                                                                      #
+    #                      SETPOINT FILTERING                              #
+    #                                                                      #
+    ########################################################################
+
     def _filter_setpoint(
         self,
         target_temp: float,
@@ -1348,6 +1422,12 @@ class SmartPI:
     # Main control law
     # ------------------------------
 
+    ########################################################################
+    #                                                                      #
+    #                      CONTROL LAW                                     #
+    #                                                                      #
+    ########################################################################
+
     def calculate(
         self,
         target_temp: float | None,
@@ -1374,6 +1454,14 @@ class SmartPI:
         making it robust to irregular call intervals. A minimum dt threshold prevents
         excessive noise from very rapid calls.
         """
+        ########################################################################
+        #                                                                      #
+        #                      STEP 1 - Input Validation               #
+        #                      -------------------------               #
+        #  Validation and dt calculation                                       #
+        #                                                                      #
+        ########################################################################
+
         now = time.monotonic()
 
         # Input validation
@@ -1402,7 +1490,7 @@ class SmartPI:
             is_first_run = True
 
         # Minimum dt threshold to prevent noise from very rapid calls (< 3 seconds)
-        # BUT we must bypass this if the setpoint has changed to ensure immediate reaction (e.g. user sliding the bar)
+        # BUT we must bypass this if the setpoint has changed to ensure immediate reaction
         # We also bypass if it's the first run (dt=0) to ensure immediate output generation.
         MIN_DT_SECONDS = 3.0
 
@@ -1429,6 +1517,14 @@ class SmartPI:
         if self._accumulated_dt >= self._cycle_min:
             self._cycles_since_reset += 1
             self._accumulated_dt -= self._cycle_min
+
+        ########################################################################
+        #                                                                      #
+        #                      STEP 2 - Model Data                     #
+        #                      -------------------                     #
+        #  Retrieve current a, b and gain candidates                            #
+        #                                                                      #
+        ########################################################################
 
         # Get model parameters
         a = self.est.a
@@ -1461,6 +1557,14 @@ class SmartPI:
 
         self._kp = kp
         self._ki = ki
+
+        ########################################################################
+        #                                                                      #
+        #                      STEP 3 - Setpoint Filtering             #
+        #                      ---------------------------             #
+        #  Apply smoothing to setpoint for soft-landing                        #
+        #                                                                      #
+        ########################################################################
 
         # Apply asymmetric setpoint filter to reduce overshoot on setpoint changes
         # Always call _filter_setpoint() to keep _filtered_setpoint synchronized for diagnostics
@@ -1495,6 +1599,14 @@ class SmartPI:
         #     e_p = -e_p
 
         self._last_error_p = e_p
+
+        ########################################################################
+        #                                                                      #
+        #                      STEP 4 - Gain Scheduling                #
+        #                      ------------------------                #
+        #  Adapt gains based on band and boost state                           #
+        #                                                                      #
+        ########################################################################
 
         # Sign-flip detection (for optional integral discharge)
         if self._prev_error is not None and (e * self._prev_error) < 0.0:
@@ -1541,6 +1653,14 @@ class SmartPI:
         # Store current gains (for diagnostics)
         self.Kp = kp
         self.Ki = ki
+
+        ########################################################################
+        #                                                                      #
+        #                      STEP 5 - Feed-Forward                   #
+        #                      ---------------------                   #
+        #  Predictive power based on loss model                                #
+        #                                                                      #
+        ########################################################################
 
         # EMA filtering of error (for diagnostics / future options)
         # Using time constant equivalent
@@ -1603,6 +1723,14 @@ class SmartPI:
             else:
                 self._sign_flip_active = False
                 self._sign_flip_end_ts = None
+
+        ########################################################################
+        #                                                                      #
+        #                      STEP 6 - PI Controller Stage            #
+        #                      ----------------------------            #
+        #  Compute error-driven proportional and integral terms                #
+        #                                                                      #
+        ########################################################################
 
         # --- PI control with anti-windup ---
         # Deadband with hysteresis to reduce oscillations at boundary:
@@ -1684,6 +1812,14 @@ class SmartPI:
         self._last_u_pi = u_pi
         self._last_u_cmd = u_cmd
 
+        ########################################################################
+        #                                                                      #
+        #                      STEP 7 - Soft Constraints               #
+        #                      -------------------------               #
+        #  Rate limits and setpoint boost                                      #
+        #                                                                      #
+        ########################################################################
+
         # ------------------------------
         # Apply constraints (rate-limit, max_on_percent), then timing enforcement
         # ------------------------------
@@ -1745,6 +1881,14 @@ class SmartPI:
 
         # Update timings; this function may change self._on_percent
         self._calculate_times()
+
+        ########################################################################
+        #                                                                      #
+        #                      STEP 8 - Anti-Windup Tracking           #
+        #                      -----------------------------           #
+        #  Back-calculation for actuator saturation                            #
+        #                                                                      #
+        ########################################################################
 
         # What is actually realized after timing enforcement
         u_applied = self._on_percent
@@ -1820,6 +1964,12 @@ class SmartPI:
     # ------------------------------
     # Timings and diagnostics
     # ------------------------------
+
+    ########################################################################
+    #                                                                      #
+    #                      DIAGNOSTICS & TIMINGS                           #
+    #                                                                      #
+    ########################################################################
 
     def _calculate_times(self) -> None:
         """Compute ON/OFF times from duty-cycle, respecting minimal ON/OFF delays."""
