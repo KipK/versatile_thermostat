@@ -1623,6 +1623,22 @@ class SmartPI(CycleManager):
 
         ########################################################################
         #                                                                      #
+        #                      STEP 3.5 - Error Filtering              #
+        #                      --------------------------              #
+        #  EMA filtering of error to reduce noise transparency                 #
+        #                                                                      #
+        ########################################################################
+
+        # EMA filtering of error (for diagnostics and gain scheduling stability)
+        # Using time constant equivalent
+        alpha_err = 1.0 - math.exp(-max(dt_min, 0.001) / ERROR_FILTER_TAU)
+        if self._e_filt is None:
+            self._e_filt = e
+        else:
+            self._e_filt = (1 - alpha_err) * self._e_filt + alpha_err * e
+
+        ########################################################################
+        #                                                                      #
         #                      STEP 4 - Gain Scheduling                #
         #                      ------------------------                #
         #  Adapt gains based on band and boost state                           #
@@ -1648,7 +1664,10 @@ class SmartPI(CycleManager):
         kp_classic = kp
         ki_classic = ki
 
-        in_near_band = (self.near_band_deg > 0.0) and (abs(e) <= self.near_band_deg)
+        # Near-band detection using FILTERED error if available
+        # This prevents gain fluctuation due to sensor noise
+        err_for_band = self._e_filt if self._e_filt is not None else e
+        in_near_band = (self.near_band_deg > 0.0) and (abs(err_for_band) <= self.near_band_deg)
         if in_near_band:
             # Softer proportional action near target
             kp = clamp(kp_classic * self.kp_near_factor, KP_MIN, KP_MAX)
@@ -1683,13 +1702,6 @@ class SmartPI(CycleManager):
         #                                                                      #
         ########################################################################
 
-        # EMA filtering of error (for diagnostics / future options)
-        # Using time constant equivalent
-        alpha_err = 1.0 - math.exp(-max(dt_min, 0.001) / ERROR_FILTER_TAU)
-        if self._e_filt is None:
-            self._e_filt = e
-        else:
-            self._e_filt = (1 - alpha_err) * self._e_filt + alpha_err * e
 
         # Feed-forward calculation
         # Use target_temp_internal for coherence with the PI controller (filtered setpoint)
