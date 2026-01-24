@@ -97,7 +97,7 @@ KI_SAFE = 0.010
 
 # Allowed ranges for computed gains
 KP_MIN = 0.10
-KP_MAX = 2.50
+KP_MAX = 3.50
 KI_MIN = 0.001
 KI_MAX = 0.050
 
@@ -198,7 +198,7 @@ DELTA_MIN_ON = 0.2         # °C
 # --- SmartPI Near Band Defaults ---
 DEFAULT_NEAR_BAND_DEG = 0.30
 DEFAULT_KP_NEAR_FACTOR = 0.80
-DEFAULT_KI_NEAR_FACTOR = 0.40
+DEFAULT_KI_NEAR_FACTOR = 0.5
 
 
 @dataclass(frozen=True)
@@ -423,8 +423,8 @@ class ABEstimator:
             return TauReliability(reliable=False, tau_min=9999.0)
 
         tau = 1.0 / med_b
-        # 10 min to ~66 hours (4000 min)
-        reliable = 10.0 <= tau <= 4000.0
+        # 10 min to ~66 hours (6000 min)
+        reliable = 10.0 <= tau <= 6000.0
         return TauReliability(reliable=reliable, tau_min=tau)
 
 
