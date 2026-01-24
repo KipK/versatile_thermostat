@@ -590,6 +590,10 @@ class SmartPI(CycleManager):
         # Enhanced A/B Learning: Start-of-cycle snapshot
         # self._cycle_start_state is now managed by CycleManager via _current_cycle_params
 
+        # Thermal Guard for setpoint decrease
+        # Prevents integral accumulation while T > T_set after a decrease
+        self._hysteresis_thermal_guard: bool = False
+
         if saved_state:
             self.load_state(saved_state)
 
@@ -645,7 +649,9 @@ class SmartPI(CycleManager):
         self.learn_T_ext_start = 0.0
         self.learn_u_int = 0.0
         self.learn_t_int_s = 0.0
+        self.learn_t_int_s = 0.0
         self.learn_u_first = None
+        self._hysteresis_thermal_guard = False
         _LOGGER.info("%s - SmartPI learning and history reset", self._name)
 
     def notify_resume_after_interruption(self, skip_cycles: int = None) -> None:
@@ -813,6 +819,9 @@ class SmartPI(CycleManager):
                 except (ValueError, TypeError):
                     self._prev_setpoint_for_boost = None
 
+            # Load thermal guard state
+            self._hysteresis_thermal_guard = bool(state.get("hysteresis_thermal_guard", False))
+
             # Mark that state was loaded (not fresh init)
             self.est.learn_last_reason = "loaded"
 
@@ -862,6 +871,7 @@ class SmartPI(CycleManager):
             "in_deadband": self._in_deadband,
             "setpoint_boost_active": self._setpoint_boost_active,
             "prev_setpoint_for_boost": self._prev_setpoint_for_boost,
+            "hysteresis_thermal_guard": self._hysteresis_thermal_guard,
             "phase": self.phase,
         }
 
@@ -1525,13 +1535,41 @@ class SmartPI(CycleManager):
                     "%s - Mode change detected (Δ=%.2f°C >= %.2f°C): PI state reset (integral %.4f → 0.0, errors -> %.2f)",
                     self._name, sp_delta, SETPOINT_MODE_DELTA_C, old_integral, new_e
                 )
+                
+                # Check for decrease to activate thermal guard (even on large change)
+                if (target_temp < self._last_raw_setpoint) and hvac_mode != VThermHvacMode_COOL:
+                    self._hysteresis_thermal_guard = True
+                    _LOGGER.info("%s - Thermal guard activated (Large Decrease)", self._name)
+                elif (target_temp > self._last_raw_setpoint) and hvac_mode != VThermHvacMode_COOL:
+                    self._hysteresis_thermal_guard = False
+
             else:
-                # Small change: bumpless transfer with limited output jump
-                self._bump_integral_for_setpoint_change(
-                    t_set_old=self._last_raw_setpoint,
-                    t_set_new=target_temp,
-                    t_in=current_temp,
-                )
+                # Small change logic
+                is_decrease = (target_temp < self._last_raw_setpoint)
+                
+                if is_decrease and hvac_mode != VThermHvacMode_COOL:
+                     # Small decrease (Heating):
+                     # 1. Activate Thermal Guard
+                     self._hysteresis_thermal_guard = True
+                     # 2. Skip Bumpless Transfer (to prevent artificial increase)
+                     _LOGGER.info("%s - Small decrease detected (Δ=%.2f°C): Guard ON, Bumpless SKIPPED", self._name, sp_delta)
+                elif not is_decrease and hvac_mode != VThermHvacMode_COOL:
+                     # Increase (Heating):
+                     # 1. Deactivate Thermal Guard
+                     self._hysteresis_thermal_guard = False
+                     # 2. Apply Bumpless Transfer
+                     self._bump_integral_for_setpoint_change(
+                        t_set_old=self._last_raw_setpoint,
+                        t_set_new=target_temp,
+                        t_in=current_temp,
+                    )
+                else:
+                    # COOL mode or other: Default behavior (bumpless)
+                     self._bump_integral_for_setpoint_change(
+                        t_set_old=self._last_raw_setpoint,
+                        t_set_new=target_temp,
+                        t_in=current_temp,
+                    )
 
         if dt_min < MIN_DT_SECONDS / 60.0 and not setpoint_changed and not is_first_run:
 
@@ -1844,9 +1882,26 @@ class SmartPI(CycleManager):
                     u_pi = u_pi_pre
                 else:
                     # Normal integration using actual elapsed time (dt_min)
-                    self.integral += e * dt_min
+                    d_integral = e * dt_min
+                    
+                    # Thermal Guard: freeze/drop integral if in hysteresis after decrease
+                    if self._hysteresis_thermal_guard:
+                        if current_temp > target_temp: # Overshoot condition
+                            # Only allow decrease (negative d_integral)
+                            if d_integral > 0:
+                                d_integral = 0.0
+                                self._last_i_mode = "I:GUARD(freeze)"
+                            else:
+                                self._last_i_mode = "I:GUARD(drop)"
+                        else:
+                            # Temperature has dropped below setpoint -> Release guard
+                            self._hysteresis_thermal_guard = False
+                            self._last_i_mode = "I:RUN"
+                    else:
+                        self._last_i_mode = "I:RUN"
+                        
+                    self.integral += d_integral
                     self.integral = clamp(self.integral, -i_max, i_max)
-                    self._last_i_mode = "I:RUN"
                     u_pi = self.Kp * e_p + self.Ki * self.integral
 
         # Combine FF and PI, then clamp to [0,1]
@@ -1984,6 +2039,11 @@ class SmartPI(CycleManager):
                 # Interpret AW_TRACK_MAX_DELTA_I as "per minute" and scale by dt_min.
                 max_di = AW_TRACK_MAX_DELTA_I * max(dt_min, 0.0)
                 d_integral = clamp(d_integral, -max_di, max_di)
+                
+                # Thermal Guard: freeze/drop integral if in hysteresis after decrease
+                if self._hysteresis_thermal_guard and (current_temp is not None and target_temp is not None):
+                     if current_temp > target_temp:
+                         d_integral = min(0.0, d_integral)
 
                 self.integral += d_integral
                 self.integral = clamp(self.integral, -i_max, i_max)
@@ -2092,4 +2152,5 @@ class SmartPI(CycleManager):
             "in_deadband": self._in_deadband,
             # Setpoint boost state
             "setpoint_boost_active": self._setpoint_boost_active,
+            "hysteresis_thermal_guard": self._hysteresis_thermal_guard,
         }
