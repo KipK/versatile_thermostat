@@ -59,6 +59,8 @@ from .vtherm_hvac_mode import (
     VThermHvacMode_HEAT,
     VThermHvacMode_OFF,
 )
+from .cycle_manager import CycleManager
+from homeassistant.core import HomeAssistant
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -432,7 +434,7 @@ class ABEstimator:
 #                                                                      #
 ########################################################################
 
-class SmartPI:
+class SmartPI(CycleManager):
     """
     SmartPI Algorithm - Auto-adaptive PI controller for Versatile Thermostat (VTH).
 
@@ -451,6 +453,7 @@ class SmartPI:
 
     def __init__(
         self,
+        hass: HomeAssistant,
         # Original integration arguments (positional)
         cycle_min: float,
         minimal_activation_delay: int,
@@ -475,9 +478,10 @@ class SmartPI:
         sign_flip_band_mult: float = 2.0,
         use_setpoint_filter: bool = True,
     ) -> None:
+        super().__init__(hass, name, cycle_min, minimal_deactivation_delay)
 
         self._name = name
-        self._cycle_min = float(cycle_min)
+        # self._cycle_min is managed by CycleManager
         self.deadband_c = float(deadband_c)
         self.aggressiveness = float(aggressiveness)
 
@@ -584,7 +588,7 @@ class SmartPI:
         self._prev_setpoint_for_boost: Optional[float] = None
 
         # Enhanced A/B Learning: Start-of-cycle snapshot
-        self._cycle_start_state: Optional[Dict[str, float]] = None
+        # self._cycle_start_state is now managed by CycleManager via _current_cycle_params
 
         if saved_state:
             self.load_state(saved_state)
@@ -905,140 +909,83 @@ class SmartPI:
         self.learn_t_int_s = 0.0
         self.learn_u_first = None
 
-    def start_new_cycle(self, u_applied: Optional[float], temp_in: float, temp_ext: float) -> None:
-        """
-        Snapshot state at the START of a control cycle.
-        This provides the baseline (T_start, etc.) for calculating dT at the END of the cycle.
-        """
-        self._cycle_start_state = {
-            "temp_in": float(temp_in),
-            "temp_ext": float(temp_ext),
-            "time": time.monotonic(),
-            "u_applied": float(u_applied) if u_applied is not None else None,
-        }
+    async def on_cycle_started(self, on_time_sec: float, off_time_sec: float, on_percent: float, hvac_mode: str) -> None:
+        """Called when a cycle starts."""
+        await super().on_cycle_started(on_time_sec, off_time_sec, on_percent, hvac_mode)
         self._setpoint_changed_in_cycle = False
-        u_log = f"{u_applied:.2f}" if u_applied is not None else "Pending"
-        _LOGGER.debug("%s - SmartPI new cycle snapshot: Tin=%.2f, Text=%.2f, U=%s", self._name, temp_in, temp_ext, u_log)
+        # Update internal state to match applied values (legacy support for diagnostics)
+        self._on_time_sec = int(on_time_sec)
+        self._off_time_sec = int(off_time_sec)
+        self._on_percent = on_percent
 
-    def update_learning(
-        self,
-        current_temp: float,
-        ext_current_temp: float,
-        # Legacy/Unused args from old implementation kept for compatibility
-        previous_temp: float = None,
-        previous_power: float = None,
-        hvac_mode: VThermHvacMode = VThermHvacMode_HEAT,
-        cycle_dt: float = None,
-        ext_previous_temp: float = None,
-        *,
-        current_temp_ts: float | None = None,
-        previous_temp_ts: float | None = None,
-        ext_current_temp_ts: float | None = None,
-        ext_previous_temp_ts: float | None = None,
-    ) -> None:
-        """
-        Update learning model at the END of a cycle.
-        Uses the difference between Current State (End) and _cycle_start_state (Start).
-        """
-        # If we don't have a start snapshot, we can't calculate a reliable delta over the cycle.
-        ########################################################################
-        #                                                                      #
-        #                      STEP 1 - Context Retrival               #
-        #                      -------------------------               #
-        #  Retrieve current state and cycle timings                            #
-        #                                                                      #
-        ########################################################################
+    async def on_cycle_completed(self, new_params: dict, prev_params: dict | None) -> bool:
+        """Handle end of cycle (learning). Return False to extend window."""
+        await super().on_cycle_completed(new_params, prev_params)
 
-        if self._cycle_start_state is None:
-            # This happens on first boot or after reset. Initialize for next time.
-            u_init = previous_power if previous_power is not None else 0.0
-            temp_ext_init = ext_current_temp if ext_current_temp is not None else 0.0
-            self.start_new_cycle(u_init, current_temp, temp_ext_init)
-            self.est.learn_skip_count += 1
-            self.est.learn_last_reason = "skip: no start snapshot"
-            return
+        if prev_params is None:
+             # First cycle or check-in, nothing to learn yet
+             return True
 
-        # 1. Retrieve Cycle Start Data (from START of this cycle)
-        start = self._cycle_start_state
-        t_int_start = start["temp_in"]
-        t_ext_start = start["temp_ext"]
-        ts_start = start["time"]
-        ts_start = start["time"]
-        u_applied = start["u_applied"]
+        # 1. Retrieve Context
+        t_int_start = prev_params.get("temp_in")
+        t_ext_start = prev_params.get("temp_ext")
+        u_applied = prev_params.get("on_percent") 
+        ts_start = prev_params.get("timestamp")
+        
+        current_temp = new_params.get("temp_in")
+        ext_current_temp = new_params.get("temp_ext")
+        timestamp = new_params.get("timestamp")
+        
+        # Calculate dt using timestamps from CycleManager params
+        if timestamp is None or ts_start is None:
+             # Should not happen if data provider is correct
+             return True
+             
+        dt_s = (timestamp - ts_start).total_seconds()
+        dt_min = dt_s / 60.0 # Used for learning checks
+        now = time.monotonic() # For valid _learning_resume_ts check
 
-        now = time.monotonic()
-        dt_s = max(now - ts_start, 0.0)
-        dt_minutes = dt_s / 60.0
-
-        # Capture flags relevant to THIS cycle before starting the next one (which resets them)
+        # Capture flags relevant to THIS cycle
         setpoint_changed_in_this_cycle = self._setpoint_changed_in_cycle
 
-        # 2. Reset snapshot for the NEXT cycle immediately
-        # The next cycle starts NOW with current temps.
-        # NOTE: u_applied for the NEXT cycle is not known yet (calculate() runs after).
-        # It must be updated later or we assume 0 until updated.
-        # We start with u=None (Pending)
-        temp_ext_next = ext_current_temp if ext_current_temp is not None else t_ext_start
-        self.start_new_cycle(None, current_temp, temp_ext_next)
-
-        if u_applied is None:
-            self.est.learn_skip_count += 1
-            self.est.learn_last_reason = "skip: cycle power undefined"
-            return
-
-        ########################################################################
-        #                                                                      #
-        #                      STEP 2 - Interruption checks            #
-        #                      ----------------------------            #
-        #  Check for resumes and available sensors                             #
-        #                                                                      #
-        ########################################################################
-
-        # 3. Interruption / resume check
+        # 2. Interruption / Resume Check
         if self._learning_resume_ts:
-            # We use monotonic time for self._learning_resume_ts
             if now < self._learning_resume_ts:
                 self.est.learn_skip_count += 1
                 self.est.learn_last_reason = "skip: resume cool-down"
                 self._reset_learning_window()
-                return
+                return True # Cut cycle (don't extend bad conditions)
             else:
-                # Done waiting
                 self._learning_resume_ts = None
 
-        # 4. Learning requires external temperature
+        # 3. Validation
+        if u_applied is None:
+            self.est.learn_skip_count += 1
+            self.est.learn_last_reason = "skip: cycle power undefined"
+            return True
+
         if ext_current_temp is None:
             self.est.learn_skip_count += 1
             self.est.learn_last_reason = "skip: no external temp"
             self._reset_learning_window()
-            return
+            return True
 
-        # 5. Setpoint change check (NEW)
-        # If setpoint changed during the cycle, the operating point is discontinuous.
-        # We must ABORT the window entirely to avoid mixing data.
         if setpoint_changed_in_this_cycle:
             self.est.learn_skip_count += 1
             self.est.learn_last_reason = "skip: setpoint change"
             self._reset_learning_window()
-            return
+            return True
 
-        ########################################################################
-        #                                                                      #
-        #                      STEP 3 - Multi-Cycle Logic              #
-        #                      --------------------------              #
-        #  Handle multi-cycle learning window and power check                  #
-        #                                                                      #
-        ########################################################################
-
-        # 5. Multi-cycle learning window logic
+        # 4. Multi-cycle learning window logic
         if not self.learn_win_active:
             self.learn_win_active = True
-            self.learn_win_start_ts = ts_start
+            # Use data from the START of the agglomerated window
+            self.learn_win_start_ts = time.monotonic() - dt_s # Approx start time in monotonic
             self.learn_T_int_start = t_int_start
             self.learn_T_ext_start = t_ext_start
             self.learn_u_int = 0.0
             self.learn_t_int_s = 0.0
-            self.learn_u_first = u_applied  # strict power check reference
+            self.learn_u_first = u_applied
             self.est.learn_last_reason = "learn: window start"
         else:
             # Window extension: check power stability
@@ -1046,53 +993,45 @@ class SmartPI:
                 self.est.learn_skip_count += 1
                 self.est.learn_last_reason = "skip: power instability"
                 self._reset_learning_window()
-                return
+                return True
 
         # Integrate u_applied over the cycle duration
         self.learn_u_int += clamp(u_applied, 0.0, 1.0) * dt_s
         self.learn_t_int_s += dt_s
-
-        if not self.learn_win_start_ts:
-            self._reset_learning_window()
-            self.est.learn_last_reason = "skip: window duty invalid"
-            return
-
-        dt_min = (now - self.learn_win_start_ts) / 60.0
-        # Note: dt_min >= _cycle_min is guaranteed since update_learning is only called at cycle boundaries
+        
+        # Calculate actual dt for the window
+        # Note: We rely on learn_t_int_s as a proxy for window duration if monotonic time is tricky?
+        # But we need wall time for dT calculation? No, just dt.
+        # Let's use accumulated seconds / 60
+        window_dt_min = self.learn_t_int_s / 60.0
 
         dT = current_temp - self.learn_T_int_start
         abs_dT = abs(dT)
         delta_T = self.learn_T_int_start - self.learn_T_ext_start
-
+        
+        # 5. Extension Checks
         if abs(delta_T) < DELTA_MIN:
             self._reset_learning_window()
             self.est.learn_last_reason = "skip: delta too small"
-            return
+            return True
 
-        if abs_dT < MIN_ABS_DT and dt_min < DT_MAX_MIN:
+        if abs_dT < MIN_ABS_DT and window_dt_min < DT_MAX_MIN:
             self.est.learn_last_reason = "skip: extending window (dT too small)"
-            return
+            return False # <--- EXTEND WINDOW
 
-        if abs_dT < MIN_ABS_DT and dt_min >= DT_MAX_MIN:
+        if abs_dT < MIN_ABS_DT and window_dt_min >= DT_MAX_MIN:
             self._reset_learning_window()
             self.est.learn_last_reason = "skip: window timeout (dT too small)"
-            return
+            return True
 
         if self.learn_t_int_s <= 0.0:
             self._reset_learning_window()
             self.est.learn_last_reason = "skip: window duty invalid"
-            return
+            return True
 
-        ########################################################################
-        #                                                                      #
-        #                      STEP 4 - Learning Submission            #
-        #                      ----------------------------            #
-        #  Submit samples for a or b estimation                                #
-        #                                                                      #
-        ########################################################################
-
+        # 6. Learning Submission
         u_eff = self.learn_u_int / self.learn_t_int_s
-        dT_dt = dT / dt_min
+        dT_dt = dT / window_dt_min
 
         if u_eff < U_OFF_MAX:
             self.est.learn(
@@ -1101,22 +1040,24 @@ class SmartPI:
                 t_int=self.learn_T_int_start,
                 t_ext=self.learn_T_ext_start,
             )
-            self._reset_learning_window()
-            return
-
-        if u_eff > U_ON_MIN:
+        elif u_eff > U_ON_MIN:
             self.est.learn(
                 dT_int_per_min=dT_dt,
                 u=u_eff,
                 t_int=self.learn_T_int_start,
                 t_ext=self.learn_T_ext_start,
             )
-            self._reset_learning_window()
-            return
+        else:
+             self.est.learn_last_reason = "skip: low excitation (u mid)"
 
         self._reset_learning_window()
-        self.est.learn_last_reason = "skip: low excitation (u mid)"
-        return
+        
+        # Cycle accepted -> Count it
+        # Logic from calculate() moved here:
+        self._cycles_since_reset += 1
+        return True
+
+
 
     ########################################################################
     #                                                                      #
@@ -1292,6 +1233,13 @@ class SmartPI:
     @property
     def setpoint_boost_active(self) -> bool:
         return self._setpoint_boost_active
+
+    @property
+    def cycle_start_dt(self) -> str | None:
+        """Return the start time of the current cycle."""
+        if self._cycle_start_date:
+            return self._cycle_start_date.isoformat()
+        return None
 
     # ------------------------------
     # Asymmetric setpoint filter
@@ -1587,12 +1535,9 @@ class SmartPI:
         # Update timestamp for next dt calculation
         self._last_calculate_time = now
 
-        # Count cycles (approximate) for FF warm-up logic
-        # Increment when we've accumulated roughly one cycle worth of time
-        self._accumulated_dt += dt_min
-        if self._accumulated_dt >= self._cycle_min:
-            self._cycles_since_reset += 1
-            self._accumulated_dt -= self._cycle_min
+        # Cycle management moved to CycleManager
+        # self._accumulated_dt logic removed from here as counting is done in on_cycle_completed
+
 
         ########################################################################
         #                                                                      #
@@ -2024,14 +1969,6 @@ class SmartPI:
         # Store final applied command for next cycle rate-limiting
         # Store final applied command for next cycle rate-limiting
         self.u_prev = u_applied
-
-        # Update the current cycle snapshot with the actual U that will be applied
-        # This completes the start_new_cycle() logic initiated in update_learning()
-        if self._cycle_start_state is not None:
-            # Only update if pending (None). If reset/start had a value, or we already set it, keep it.
-            # This freezes the power used for learning to the FIRST calculation of the cycle.
-            if self._cycle_start_state.get("u_applied") is None:
-                self._cycle_start_state["u_applied"] = float(u_applied)
 
         # Update timing properties (_on_time_sec, etc.)
         self._on_percent = u_applied

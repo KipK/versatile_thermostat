@@ -71,6 +71,7 @@ class SmartPIHandler:
         # Create SmartPI instance
         # Note: saved_state is loaded asynchronously later
         t._prop_algorithm = SmartPI(
+            hass=t._hass,
             cycle_min=cycle_min,
             minimal_activation_delay=minimal_activation_delay,
             minimal_deactivation_delay=minimal_deactivation_delay,
@@ -103,9 +104,8 @@ class SmartPIHandler:
             # Check availability of sensors
             if t._cur_temp is not None and t._cur_ext_temp is not None:
                 # Use restored u_applied if available, else 0
-                u_init = t._prop_algorithm.u_applied if t._prop_algorithm.u_applied is not None else 0.0
-                t._prop_algorithm.start_new_cycle(u_init, t._cur_temp, t._cur_ext_temp)
-                _LOGGER.debug("%s - SmartPI startup: initialized cycle start state", t)
+                # CycleManager handles initialization automatically in process_cycle
+                _LOGGER.debug("%s - SmartPI startup: ready for cycle management", t)
 
         # Check if we need to start the periodic recalculation timer
         await self.on_state_changed()
@@ -144,8 +144,22 @@ class SmartPIHandler:
             # Trigger learning only on cycle timer (timestamp is not None)
             # And do not learn if we are OFF (window open, etc.)
             if timestamp is not None and current_temp is not None and t.vtherm_hvac_mode != VThermHvacMode_OFF:
-                # We simply pass current data. SmartPI determines dt and deltas against its internal snapshot.
-                t._prop_algorithm.update_learning(current_temp=current_temp, ext_current_temp=current_ext_temp, hvac_mode=t.vtherm_hvac_mode, current_temp_ts=time.monotonic())
+                async def _data_provider():
+                    return {
+                        "temp_in": t._cur_temp,
+                        "temp_ext": t._cur_ext_temp,
+                        "timestamp": timestamp,
+                        "on_percent": t._prop_algorithm.on_percent,
+                        "on_time_sec": t._prop_algorithm.on_time_sec,
+                        "off_time_sec": t._prop_algorithm.off_time_sec,
+                        "hvac_mode": t.vtherm_hvac_mode
+                    }
+
+                async def _event_sender(params):
+                    # Events are applied by the handler below (lines 165+)
+                    pass
+
+                await t._prop_algorithm.process_cycle(timestamp, _data_provider, _event_sender, force)
 
             # Calculate uses current temp, ext temp, etc.
             t._prop_algorithm.calculate(
@@ -184,12 +198,10 @@ class SmartPIHandler:
             self._start_recalc_timer()
 
             # When resuming from OFF state (e.g., window close), reset the cycle start state
-            # to prevent using stale timestamps that would cause incorrect learning window duration
+            # to prevent using stale timestamps. CycleManager will re-init on next process_cycle.
             if timer_was_stopped and t._prop_algorithm and isinstance(t._prop_algorithm, SmartPI):
-                u_init = t._prop_algorithm.u_applied if t._prop_algorithm.u_applied is not None else 0.0
-                cur_temp = t._cur_temp if t._cur_temp is not None else 0.0
-                cur_ext = t._cur_ext_temp if t._cur_ext_temp is not None else 0.0
-                t._prop_algorithm.start_new_cycle(u_init, cur_temp, cur_ext)
+                # Force CycleManager to re-initialize by clearing start date
+                t._prop_algorithm._cycle_start_date = None
                 t._prop_algorithm._reset_learning_window()
                 _LOGGER.debug("%s - SmartPI resumed from OFF: cycle and learning window reset", t.name)
         else:
@@ -277,6 +289,7 @@ class SmartPIHandler:
                 "forced_by_timing": algo.forced_by_timing,
                 "in_deadband": algo.in_deadband,
                 "setpoint_boost_active": algo.setpoint_boost_active,
+                "cycle_start_dt": algo.cycle_start_dt,
                 "phase": algo.phase,
             }
 
