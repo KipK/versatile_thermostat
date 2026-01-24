@@ -1667,7 +1667,7 @@ class SmartPI(CycleManager):
         # Near-band detection using FILTERED error if available
         # This prevents gain fluctuation due to sensor noise
         err_for_band = self._e_filt if self._e_filt is not None else e
-        in_near_band = (self.near_band_deg > 0.0) and (abs(err_for_band) <= self.near_band_deg)
+        in_near_band = self._tau_reliable and (self.near_band_deg > 0.0) and (abs(err_for_band) <= self.near_band_deg)
         if in_near_band:
             # Softer proportional action near target
             kp = clamp(kp_classic * self.kp_near_factor, KP_MIN, KP_MAX)
@@ -1774,7 +1774,9 @@ class SmartPI(CycleManager):
         db_entry = self.deadband_c
         db_exit = self.deadband_c + DEADBAND_HYSTERESIS
 
-        if abs_e < db_entry:
+        if not self._tau_reliable:
+            in_deadband_now = False
+        elif abs_e < db_entry:
             # Clearly inside deadband
             in_deadband_now = True
         elif abs_e > db_exit:

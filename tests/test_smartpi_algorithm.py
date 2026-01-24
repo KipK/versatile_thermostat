@@ -400,6 +400,15 @@ def test_deadband_freeze():
         deadband_c=0.1
     )
 
+    # Force reliable state for deadband testing
+    smartpi.est.learn_ok_count = 20
+    smartpi.est.learn_ok_count_a = 20
+    smartpi.est.learn_ok_count_b = 20
+    smartpi.est.b = 0.002
+    smartpi._cycles_since_reset = 10
+    # Add history for stability check
+    for _ in range(10): smartpi.est._b_hat_hist.append(smartpi.est.b)
+
     smartpi.integral = 10.0
     smartpi.u_prev = 0.5
     integral_before = smartpi.integral
@@ -1149,6 +1158,15 @@ def test_anti_windup_tracking_respects_deadband():
         max_on_percent=0.5,
     )
 
+    # Force reliable state for deadband testing
+    smartpi.est.learn_ok_count = 20
+    smartpi.est.learn_ok_count_a = 20
+    smartpi.est.learn_ok_count_b = 20
+    smartpi.est.b = 0.002
+    smartpi._cycles_since_reset = 10
+    # Add history for stability check
+    for _ in range(10): smartpi.est._b_hat_hist.append(smartpi.est.b)
+
     # Start with some integral
     smartpi.integral = 10.0
     smartpi.u_prev = 0.5
@@ -1304,6 +1322,15 @@ def test_in_deadband_in_diagnostics():
         deadband_c=0.1
     )
 
+    # Force reliable state for deadband testing
+    smartpi.est.learn_ok_count = 20
+    smartpi.est.learn_ok_count_a = 20
+    smartpi.est.learn_ok_count_b = 20
+    smartpi.est.b = 0.002
+    smartpi._cycles_since_reset = 10
+    # Add history for stability check
+    for _ in range(10): smartpi.est._b_hat_hist.append(smartpi.est.b)
+
     # Calculate inside deadband
     smartpi.calculate(
         target_temp=20.0,
@@ -1359,6 +1386,15 @@ def test_deadband_hysteresis_entry_and_exit():
         deadband_c=deadband_c,
         near_band_deg=0.0,
     )
+
+    # Force reliable state for deadband testing
+    smartpi.est.learn_ok_count = 20
+    smartpi.est.learn_ok_count_a = 20
+    smartpi.est.learn_ok_count_b = 20
+    smartpi.est.b = 0.002
+    smartpi._cycles_since_reset = 10
+    # Add history for stability check
+    for _ in range(10): smartpi.est._b_hat_hist.append(smartpi.est.b)
 
     # Start outside deadband (error = 0.3 > exit threshold)
     smartpi._in_deadband = False
@@ -1420,6 +1456,15 @@ def test_deadband_hysteresis_prevents_chattering():
         deadband_c=0.10,  # Entry threshold
         near_band_deg=0.0,
     )
+
+    # Force reliable state for deadband testing
+    smartpi.est.learn_ok_count = 20
+    smartpi.est.learn_ok_count_a = 20
+    smartpi.est.learn_ok_count_b = 20
+    smartpi.est.b = 0.002
+    smartpi._cycles_since_reset = 10
+    # Add history for stability check
+    for _ in range(10): smartpi.est._b_hat_hist.append(smartpi.est.b)
 
     # Enter deadband
     smartpi.calculate(
