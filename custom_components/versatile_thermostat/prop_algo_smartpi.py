@@ -1508,12 +1508,22 @@ class SmartPI(CycleManager):
                 # Large change: mode change (eco ↔ comfort) -> reset PI state
                 old_integral = self.integral
                 self.integral = 0.0
-                self._e_filt = None
+
+                # Force reset error state to avoid "wrong" error history (e.g. sign flip)
+                # Calculate new error immediately
+                new_e = float(target_temp - current_temp)
+                if hvac_mode == VThermHvacMode_COOL:
+                     new_e = -new_e
+
+                self._e_filt = new_e
+                self._last_error = new_e
+                self._prev_error = new_e
+
                 # Note: No need to reset u_prev (rate limiter still applies)
                 # The setpoint_changed flag will bypass rate limit in the current cycle
                 _LOGGER.info(
-                    "%s - Mode change detected (Δ=%.2f°C >= %.2f°C): PI state reset (integral %.4f → 0.0)",
-                    self._name, sp_delta, SETPOINT_MODE_DELTA_C, old_integral
+                    "%s - Mode change detected (Δ=%.2f°C >= %.2f°C): PI state reset (integral %.4f → 0.0, errors -> %.2f)",
+                    self._name, sp_delta, SETPOINT_MODE_DELTA_C, old_integral, new_e
                 )
             else:
                 # Small change: bumpless transfer with limited output jump
