@@ -97,7 +97,7 @@ KI_SAFE = 0.010
 
 # Allowed ranges for computed gains
 KP_MIN = 0.10
-KP_MAX = 3.50
+KP_MAX = 5.0
 KI_MIN = 0.001
 KI_MAX = 0.050
 
@@ -199,7 +199,7 @@ DELTA_MIN_ON = 0.2         # °C
 # --- SmartPI Near Band Defaults ---
 DEFAULT_NEAR_BAND_DEG = 0.30
 DEFAULT_KP_NEAR_FACTOR = 0.80
-DEFAULT_KI_NEAR_FACTOR = 0.5
+DEFAULT_KI_NEAR_FACTOR = 0.6
 
 
 @dataclass(frozen=True)
@@ -1875,6 +1875,20 @@ class SmartPI(CycleManager):
                 # Dead time: don't integrate to avoid pumping
                 u_pi = self.Kp * e_p + self.Ki * self.integral
                 self._last_i_mode = "I:HOLD"
+
+                # Overshoot / near-overshoot zone (heating): Tin >= SP_int - eps
+                if hvac_mode != VThermHvacMode_COOL and current_temp >= (
+                    target_temp_internal - OVERSHOOT_I_CLAMP_EPS_C
+                ):
+                    # Only bleed if I>0; bleeding negative I would increase u (bad in overshoot)
+                    if self.integral > 0.0:
+                        # Use existing INTEGRAL_LEAK (per cycle) as a controlled bleed toward 0.
+                        # Convert to the actual elapsed fraction of a cycle:
+                        leak_eff = INTEGRAL_LEAK ** (
+                            dt_min / max(1e-9, float(self._cycle_min))
+                        )
+                        self.integral *= leak_eff
+                        self._last_i_mode = "I:BLEED(hold_ovr)"
             else:
                 # Preview output without updating integral
                 u_pi_pre = self.Kp * e_p + self.Ki * self.integral
