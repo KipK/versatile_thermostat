@@ -118,6 +118,7 @@ SETPOINT_BOOST_RATE = 0.50       # boosted rate limit (/min) vs 0.15 normal
 # - Small change (< threshold): minor adjustment -> bumpless transfer with limited output jump
 SETPOINT_MODE_DELTA_C = 0.5      # °C threshold for mode change detection
 SETPOINT_BUMPLESS_MAX_DU = 0.12  # Max allowed output change (0..1) for bumpless transfer
+OVERSHOOT_I_CLAMP_EPS_C = 0.10  # Guard band below setpoint where integral cannot increase (°C)
 
 # Tracking anti-windup (back-calculation) tuned for slow thermal systems
 AW_TRACK_TAU_S = 120.0        # tracking time constant in seconds (typ. 60-180s)
@@ -1413,6 +1414,11 @@ class SmartPI(CycleManager):
         # Theoretical ΔI to keep u_pi constant
         dI = (self.Kp / self.Ki) * (e_old - e_new)
         
+        # Overshoot I-clamp: when we are close to or above the (new) setpoint,
+        # do not allow bumpless logic to increase the integral (would push heating in the wrong direction).
+        if t_in >= (t_set_new - OVERSHOOT_I_CLAMP_EPS_C) and dI > 0.0:
+            dI = 0.0
+        
         # Limit bumpless: bound the output variation due to integral: Δu_I = Ki * ΔI
         # => |ΔI| <= SETPOINT_BUMPLESS_MAX_DU / Ki
         dI_max = SETPOINT_BUMPLESS_MAX_DU / max(self.Ki, KI_MIN)
@@ -1891,7 +1897,16 @@ class SmartPI(CycleManager):
                 else:
                     # Normal integration using actual elapsed time (dt_min)
                     d_integral = e * dt_min
+                    self._last_i_mode = "I:RUN"
                     
+                    # Overshoot / near-overshoot I-clamp (heating):
+                    # If we are close to or above the setpoint, do not integrate positively.
+                    # This prevents the integrator from increasing heat when we should be reducing it.
+                    if hvac_mode != VThermHvacMode_COOL and current_temp >= (target_temp_internal - OVERSHOOT_I_CLAMP_EPS_C):
+                        if d_integral > 0.0:
+                            d_integral = 0.0
+                            self._last_i_mode = "I:CLAMP(near_ovr)"
+
                     # Thermal Guard: freeze/drop integral if in hysteresis after decrease
                     if self._hysteresis_thermal_guard:
                         if current_temp > target_temp: # Overshoot condition
@@ -1905,8 +1920,6 @@ class SmartPI(CycleManager):
                             # Temperature has dropped below setpoint -> Release guard
                             self._hysteresis_thermal_guard = False
                             self._last_i_mode = "I:RUN"
-                    else:
-                        self._last_i_mode = "I:RUN"
                         
                     self.integral += d_integral
                     self.integral = clamp(self.integral, -i_max, i_max)
@@ -2024,7 +2037,7 @@ class SmartPI(CycleManager):
         )
         self._last_forced_by_timing = forced_by_timing
 
-        if (not integrator_hold) and (self.Ki > KI_MIN) and (not self._in_deadband):
+        if (not integrator_hold) and (self.Ki > KI_MIN) and (not self._in_deadband) and (not str(self._last_i_mode).startswith("I:CLAMP")):
             if forced_by_timing:
                 # Skip tracking: timing quantization should not influence integral
                 self._last_aw_du = 0.0
