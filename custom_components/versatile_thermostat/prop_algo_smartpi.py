@@ -1449,6 +1449,7 @@ class SmartPI(CycleManager):
         slope: float | None,
         hvac_mode: VThermHvacMode,
         integrator_hold: bool = False,
+        power_shedding: bool = False,
     ) -> None:
         """
         Compute the next duty-cycle command.
@@ -1457,6 +1458,7 @@ class SmartPI(CycleManager):
         -----
         - slope parameter is accepted for API compatibility (unused for now).
         - integrator_hold can be used during dead time / actuator constraints to avoid pumping.
+        - power_shedding: if True, forces the output to 0 and resets internal state (e.g. overloading)
 
         Side effects:
         - Updates internal duty-cycle (_on_percent) and ON/OFF timings
@@ -1484,11 +1486,17 @@ class SmartPI(CycleManager):
             self._calculate_times()
             return
 
-        if hvac_mode == VThermHvacMode_OFF:
+        if hvac_mode == VThermHvacMode_OFF or power_shedding:
             self._on_percent = 0.0
             self.u_prev = 0.0
             # Reset rate-limiting so next HEAT/COOL activation gets immediate calculation
             self._last_calculate_time = None
+            
+            # Reset PI integral to prevent windup during OFF/Overpowering
+            if self.integral != 0.0:
+                _LOGGER.debug("%s - Resetting integral to 0.0 (HVAC OFF or Power Shedding)", self._name)
+                self.integral = 0.0
+            
             self._calculate_times()
             return
 

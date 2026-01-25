@@ -168,6 +168,7 @@ class SmartPIHandler:
                 ext_current_temp=t._cur_ext_temp,
                 slope=t.last_temperature_slope,
                 hvac_mode=t.vtherm_hvac_mode,
+                power_shedding=t.power_manager.is_overpowering_detected if t.power_manager else False,
             )
 
         # Stop here if we are off

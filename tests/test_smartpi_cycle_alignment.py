@@ -47,6 +47,7 @@ async def test_smartpi_60s_timer_interference():
     # Init algorithm directly
     cycle_min = 10
     algo = SmartPI(
+        hass=MagicMock(),
         cycle_min=cycle_min, 
         minimal_activation_delay=0, 
         minimal_deactivation_delay=0, 
@@ -127,6 +128,7 @@ async def test_smartpi_learning_requires_cycle_boundary():
     """
     cycle_min = 10
     algo = SmartPI(
+        hass=MagicMock(),
         cycle_min=cycle_min, 
         minimal_activation_delay=0,
         minimal_deactivation_delay=0,
@@ -161,6 +163,7 @@ async def test_smartpi_frozen_power_snapshot():
     """
     cycle_min = 10
     algo = SmartPI(
+        hass=MagicMock(),
         cycle_min=cycle_min, 
         minimal_activation_delay=0,
         minimal_deactivation_delay=0,
@@ -218,6 +221,7 @@ async def test_smartpi_reboot_discards_active_window():
     This ensures a fresh start after reboot (interruption).
     """
     algo = SmartPI(
+        hass=MagicMock(),
         cycle_min=10, 
         minimal_activation_delay=0, 
         minimal_deactivation_delay=0, 
@@ -253,6 +257,7 @@ async def test_smartpi_power_stability_abort():
     (strict power requirement).
     """
     algo = SmartPI(
+        hass=MagicMock(),
         cycle_min=10, 
         minimal_activation_delay=0, 
         minimal_deactivation_delay=0, 
@@ -307,6 +312,7 @@ async def test_smartpi_resume_from_off_resets_cycle():
     handler._store = AsyncMock()
     
     algo = SmartPI(
+        hass=MagicMock(),
         cycle_min=10, 
         minimal_activation_delay=0, 
         minimal_deactivation_delay=0, 

@@ -77,6 +77,7 @@ async def test_smartpi_math_with_mocked_time(hass: HomeAssistant):
         mock_time.return_value = 1000.0
         
         algo = SmartPI(
+            hass=MagicMock(),
             cycle_min=10, 
             name="test_pi",
             minimal_activation_delay=0,

@@ -6,6 +6,7 @@ varying input values (delta for b, u for a) to compute slopes.
 
 from custom_components.versatile_thermostat.prop_algo_smartpi import ABEstimator, SmartPI
 from custom_components.versatile_thermostat.vtherm_hvac_mode import VThermHvacMode_HEAT
+from unittest.mock import MagicMock
 
 
 def test_median_convergence_b():
@@ -75,6 +76,7 @@ def test_median_convergence_a():
 def test_smartpi_gain_adaptation():
     """Test that Kp/Ki adapt based on thermal time constant."""
     smartpi = SmartPI(
+        hass=MagicMock(),
         cycle_min=10,
         minimal_activation_delay=0,
         minimal_deactivation_delay=0,

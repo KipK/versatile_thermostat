@@ -21,7 +21,7 @@ from custom_components.versatile_thermostat.prop_algo_smartpi import (
     MAX_STEP_PER_MINUTE,
 )
 import math
-from custom_components.versatile_thermostat.vtherm_hvac_mode import VThermHvacMode_HEAT, VThermHvacMode_COOL
+from custom_components.versatile_thermostat.vtherm_hvac_mode import VThermHvacMode_HEAT, VThermHvacMode_COOL, VThermHvacMode_OFF
 from homeassistant.core import HomeAssistant
 from datetime import datetime
 from unittest.mock import patch, MagicMock
@@ -2061,3 +2061,56 @@ async def test_smartpi_startup_initializes_cycle(hass: HomeAssistant, smartpi_th
         # If it was skipped due to "no start snapshot", reason would be "skip: no start snapshot"
         # If it proceeds, it might skip due to "low excitation" or "collecting b meas", but NOT "no start snapshot"
         assert algo.est.learn_last_reason != "skip: no start snapshot"
+
+def test_integral_reset_on_off_mode():
+    """Test that integral is reset when switched to OFF mode."""
+    smartpi = SmartPI(hass=MagicMock(), 
+        cycle_min=10,
+        minimal_activation_delay=0,
+        minimal_deactivation_delay=0,
+        name="TestSmartPI_ResetOFF"
+    )
+
+    # 1. Build up some integral
+    smartpi.integral = 5.0
+    smartpi.u_prev = 0.5
+    
+    # Calculate in OFF mode
+    smartpi.calculate(
+        target_temp=20.0,
+        current_temp=18.0, 
+        ext_current_temp=5.0,
+        slope=0,
+        hvac_mode=VThermHvacMode_OFF
+    )
+
+    assert smartpi.integral == 0.0, "Integral should be reset to 0 in OFF mode"
+    assert smartpi.on_percent == 0.0
+    assert smartpi._last_calculate_time is None, "Rate limiting should be reset"
+
+def test_integral_reset_on_force_off():
+    """Test that integral is reset when forced off (overpowering)."""
+    smartpi = SmartPI(hass=MagicMock(), 
+        cycle_min=10,
+        minimal_activation_delay=0,
+        minimal_deactivation_delay=0,
+        name="TestSmartPI_ForceOFF"
+    )
+
+    # 1. Build up some integral
+    smartpi.integral = 5.0
+    smartpi.u_prev = 0.5
+
+    # Calculate in HEAT mode but with power_shedding=True
+    smartpi.calculate(
+        target_temp=20.0,
+        current_temp=18.0, 
+        ext_current_temp=5.0,
+        slope=0,
+        hvac_mode=VThermHvacMode_HEAT,
+        power_shedding=True
+    )
+
+    assert smartpi.integral == 0.0, "Integral should be reset to 0 when forced off"
+    assert smartpi.on_percent == 0.0
+    assert smartpi._last_calculate_time is None, "Rate limiting should be reset"

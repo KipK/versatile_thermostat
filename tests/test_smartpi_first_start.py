@@ -14,6 +14,7 @@ def test_smartpi_first_start_no_integral_jump():
     With the fix (dt_min=0), integral += error * 0 -> 0.
     """
     smartpi = SmartPI(
+        hass=MagicMock(),
         cycle_min=10,
         minimal_activation_delay=0,
         minimal_deactivation_delay=0,
@@ -68,6 +69,7 @@ def test_smartpi_monotonic_time_robustness(mock_mono):
     mock_mono.return_value = 1000.0
 
     smartpi = SmartPI(
+        hass=MagicMock(),
         cycle_min=10,
         minimal_activation_delay=0,
         minimal_deactivation_delay=0,
@@ -107,6 +109,7 @@ def test_smartpi_first_start_with_mock(mock_mono):
     mock_mono.return_value = 5000.0
 
     smartpi = SmartPI(
+        hass=MagicMock(),
         cycle_min=10,
         minimal_activation_delay=0,
         minimal_deactivation_delay=0,

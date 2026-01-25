@@ -121,6 +121,7 @@ class ThermostatProp(BaseThermostat[T], Generic[T]):
                 self._cur_ext_temp,
                 self.last_temperature_slope,
                 self.vtherm_hvac_mode or VThermHvacMode_OFF,
+                power_shedding=self.power_manager.is_overpowering_detected if self.power_manager else False,
             )
 
     async def _control_heating_specific(self, timestamp, force=False):

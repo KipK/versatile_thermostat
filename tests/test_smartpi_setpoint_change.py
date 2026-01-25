@@ -5,6 +5,7 @@ from custom_components.versatile_thermostat.prop_algo_smartpi import (
     SmartPI,
     VThermHvacMode_HEAT,
 )
+from unittest.mock import MagicMock
 
 # Set up logging to catch the "extending window" message if needed
 logging.basicConfig(level=logging.DEBUG)
@@ -17,6 +18,7 @@ def test_smartpi_setpoint_change_aborts_learning():
     # 1. Initialize SmartPI
     # cycle_min = 10 minutes
     smart_pi = SmartPI(
+        hass=MagicMock(),
         cycle_min=10,
         minimal_activation_delay=0,
         minimal_deactivation_delay=0,
