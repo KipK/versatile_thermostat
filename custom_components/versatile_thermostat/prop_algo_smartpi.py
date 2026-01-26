@@ -2057,10 +2057,11 @@ class SmartPI(CycleManager):
                 self._last_aw_du = 0.0
             else:
                 # Model-predicted command using current integrator state
-                u_model = u_ff + (self.Kp * e_p + self.Ki * self.integral)
-
+                #u_model = u_ff + (self.Kp * e_p + self.Ki * self.integral)
+                du = u_applied - u_limited
                 # Tracking error between applied command and model command
-                du = u_applied - u_model
+                #du = u_applied - u_model
+                du = u_limited - u_applied
                 self._last_aw_du = du
 
                 # Discrete tracking gain beta = dt / Tt (bounded 0..1)
