@@ -2052,37 +2052,37 @@ class SmartPI(CycleManager):
         self._last_forced_by_timing = forced_by_timing
 
         if (not integrator_hold) and (self.Ki > KI_MIN) and (not self._in_deadband) and (not str(self._last_i_mode).startswith("I:CLAMP")):
-            if forced_by_timing:
-                # Skip tracking: timing quantization should not influence integral
-                self._last_aw_du = 0.0
-            else:
-                # Model-predicted command using current integrator state
-                #u_model = u_ff + (self.Kp * e_p + self.Ki * self.integral)
-                du = u_applied - u_limited
-                # Tracking error between applied command and model command
-                #du = u_applied - u_model
-                du = u_limited - u_applied
-                self._last_aw_du = du
+            # if forced_by_timing:
+            #     # Skip tracking: timing quantization should not influence integral
+            #     self._last_aw_du = 0.0
+            # else:
+            # Model-predicted command using current integrator state
+            #u_model = u_ff + (self.Kp * e_p + self.Ki * self.integral)
+            du = u_applied - u_limited
+            # Tracking error between applied command and model command
+            #du = u_applied - u_model
+            du = u_limited - u_applied
+            self._last_aw_du = du
 
-                # Discrete tracking gain beta = dt / Tt (bounded 0..1)
-                dt_sec = dt_min * 60.0
-                beta = clamp(dt_sec / max(AW_TRACK_TAU_S, dt_sec), 0.0, 1.0)
+            # Discrete tracking gain beta = dt / Tt (bounded 0..1)
+            dt_sec = dt_min * 60.0
+            beta = clamp(dt_sec / max(AW_TRACK_TAU_S, dt_sec), 0.0, 1.0)
 
-                # Update integral so that Ki * I compensates du
-                d_integral = beta * (du / self.Ki)
+            # Update integral so that Ki * I compensates du
+            d_integral = beta * (du / self.Ki)
 
-                # Safety clamp must be time-scaled to remain invariant when dt varies.
-                # Interpret AW_TRACK_MAX_DELTA_I as "per minute" and scale by dt_min.
-                max_di = AW_TRACK_MAX_DELTA_I * max(dt_min, 0.0)
-                d_integral = clamp(d_integral, -max_di, max_di)
-                
-                # Thermal Guard: freeze/drop integral if in hysteresis after decrease
-                if self._hysteresis_thermal_guard and (current_temp is not None and target_temp is not None):
-                     if current_temp > target_temp:
-                         d_integral = min(0.0, d_integral)
+            # Safety clamp must be time-scaled to remain invariant when dt varies.
+            # Interpret AW_TRACK_MAX_DELTA_I as "per minute" and scale by dt_min.
+            max_di = AW_TRACK_MAX_DELTA_I * max(dt_min, 0.0)
+            d_integral = clamp(d_integral, -max_di, max_di)
+            
+            # Thermal Guard: freeze/drop integral if in hysteresis after decrease
+            if self._hysteresis_thermal_guard and (current_temp is not None and target_temp is not None):
+                    if current_temp > target_temp:
+                        d_integral = min(0.0, d_integral)
 
-                self.integral += d_integral
-                self.integral = clamp(self.integral, -i_max, i_max)
+            self.integral += d_integral
+            self.integral = clamp(self.integral, -i_max, i_max)
         else:
             self._last_aw_du = 0.0
 
@@ -2091,7 +2091,7 @@ class SmartPI(CycleManager):
         self.u_prev = u_applied
 
         # Update timing properties (_on_time_sec, etc.)
-        self._on_percent = u_applied
+        #self._on_percent = u_applied
         self._calculate_times()
 
     # ------------------------------
