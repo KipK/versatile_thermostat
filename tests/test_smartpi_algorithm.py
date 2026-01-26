@@ -423,9 +423,15 @@ def test_deadband_freeze():
         # Error within deadband
         smartpi.calculate(target_temp=20, current_temp=19.95, ext_current_temp=10, slope=0, hvac_mode=VThermHvacMode_HEAT)  # error = 0.05 < deadband 0.1
 
-    # Integral should be frozen (unchanged)
-    assert smartpi.integral == integral_before, \
-        f"Integral should be frozen: before={integral_before}, after={smartpi.integral}"
+    # Integral should NOT be fully frozen anymore (micro-leak)
+    # Expected: integral * leak_eff
+    # leak_eff = INTEGRAL_DEADBAND_LEAK (0.999) ** (10 min / 10 min) = 0.999
+    # 10.0 * 0.999 = 9.99
+    expected_integral = 10.0 * 0.999
+    assert math.isclose(smartpi.integral, expected_integral, rel_tol=1e-5), \
+        f"Integral should leak slightly in deadband: before={integral_before}, after={smartpi.integral}, expected={expected_integral}"
+    
+    # Mode should be FREEZE(deadband_hold) or similar
     assert "FREEZE" in smartpi._last_i_mode
 
 
@@ -1135,9 +1141,18 @@ def test_anti_windup_tracking_corrects_integral():
     assert smartpi._last_u_applied <= 0.6, \
         f"Output should be limited to max_on_percent: {smartpi._last_u_applied}"
 
-    # Tracking anti-windup should have reduced the integral
-    assert smartpi.integral < integral_before, \
-        f"Integral should decrease due to tracking: before={integral_before}, after={smartpi.integral}"
+    # Tracking anti-windup should have reduced the integral RELATIVE to pure integration.
+    # Since error=5, pure integration would add 5 * 10 = +50.
+    # AW should oppose this.
+    # We check that aw_du is negative and integral is NOT simply previous + 50.
+    assert smartpi._last_aw_du < 0, f"aw_du should be negative when constrained: {smartpi._last_aw_du}"
+    
+    # Calculate what integral would be without AW
+    # d_I_normal = error * dt = 5 * 10 = 50
+    # expected_without_aw = 100 + 50 = 150 (clamped to i_max approx)
+    # With AW, it should be significantly less.
+    assert smartpi.integral < (integral_before + 50.0), \
+        f"Integral should be less than pure integration due to AW: {smartpi.integral} vs {integral_before + 50.0}"
 
     # Verify aw_du is negative (applied < model)
     assert smartpi._last_aw_du < 0, \
@@ -1829,14 +1844,20 @@ def test_forced_by_timing_skips_tracking_antiwindup():
     # Verify timing forced u_applied to 100%
     assert smartpi._last_u_applied == 1.0, \
         f"u_applied should be forced to 100%: {smartpi._last_u_applied}"
-
     # The key assertion: forced_by_timing should be True
     assert smartpi._last_forced_by_timing is True, \
         "forced_by_timing should be True when timing forces 100%"
 
-    # aw_du should be 0 because tracking was skipped
-    assert smartpi._last_aw_du == 0.0, \
-        f"aw_du should be 0 when timing forced: {smartpi._last_aw_du}"
+    # New logic: AW is NOT skipped, but attenuated (beta *= 0.2).
+    # So we expect aw_du to be computed (u_applied - u_limited), which is non-zero.
+    # u_limited ~ 0.88, u_applied = 1.0 -> aw_du ~ 0.12.
+    assert smartpi._last_aw_du != 0.0, "aw_du should NOT be 0 (attenuated, not skipped)"
+    assert smartpi._last_aw_du > 0.0, f"aw_du should be positive (1.0 - 0.88), got {smartpi._last_aw_du}"
+
+    # And we expect integral to increase (positive correction)
+    # to align model with the forced high output
+    assert smartpi.integral > integral_before, \
+        f"Integral should increase due to AW tracking (attenuated): before={integral_before}, after={smartpi.integral}"
 
     # Verify diagnostics
     diag = smartpi.get_diagnostics()

@@ -140,6 +140,19 @@ DEFAULT_DEADBAND_C = 0.05
 # different deadband configurations and typical sensor noise levels.
 DEADBAND_HYSTERESIS = 0.025
 
+# Deadband+/Near-band asymmetry (thermal comfort / anticipation)
+# - Deadband+ (hold): allow a small non-zero "maintenance" power near setpoint
+#   to anticipate recovery after a setpoint decrease on high-inertia systems.
+# - Asymmetry: slightly larger bands above setpoint (e<0 in HEAT) to avoid chatter.
+DEADBAND_ABOVE_EXTRA_C = 0.05           # extra deadband width above setpoint (°C)
+DEADBAND_HYSTERESIS_ABOVE_C = 0.030     # hysteresis above setpoint (°C)
+DEADBAND_HOLD_MAX_U = 0.25              # max maintenance power inside deadband (0..1)
+DEADBAND_HOLD_RELEASE_ERR_C = 0.15      # if e < -this, force u_hold=0 (°C)
+INTEGRAL_DEADBAND_LEAK = 0.999          # very soft leak per cycle while in deadband
+
+NEAR_BAND_BELOW_EXTRA_C = 0.10          # extra near-band width below setpoint (anticipation) (°C)
+NEAR_BAND_HYSTERESIS_C = 0.05           # near-band hysteresis (°C)
+
 # Asymmetric setpoint EMA filter parameters
 # Asymmetric setpoint EMA filter parameters (Time Constants in minutes)
 # Alpha = 1 - exp(-dt / Tau)
@@ -575,6 +588,8 @@ class SmartPI(CycleManager):
 
         # Deadband state tracking for bumpless transfer on exit
         self._in_deadband: bool = False
+        # Near-band state tracking (hysteresis)
+        self._in_near_band: bool = False
 
         # Tracking anti-windup diagnostics
         self._last_u_cmd: float = 0.0       # command after [0,1] clamp
@@ -640,7 +655,7 @@ class SmartPI(CycleManager):
         self._learning_start_date = datetime.now()
         self._learning_resume_ts = None
         self._in_deadband = False
-        self._in_deadband = False
+        self._in_near_band = False
         self._setpoint_boost_active = False
         self._setpoint_changed_in_cycle = False
         self._prev_setpoint_for_boost = None
@@ -810,6 +825,8 @@ class SmartPI(CycleManager):
 
             # Load deadband state
             self._in_deadband = bool(state.get("in_deadband", False))
+            # Near-band hysteresis state is not persisted (safe reset on reload)
+            self._in_near_band = False
 
             # Load setpoint boost state
             self._setpoint_boost_active = bool(state.get("setpoint_boost_active", False))
@@ -1726,10 +1743,27 @@ class SmartPI(CycleManager):
         kp_classic = kp
         ki_classic = ki
 
-        # Near-band detection using FILTERED error if available
-        # This prevents gain fluctuation due to sensor noise
+        # Near-band detection using FILTERED error if available (hysteresis + asymmetry)
+        # This prevents gain fluctuation due to sensor noise and avoids chattering.
         err_for_band = self._e_filt if self._e_filt is not None else e
-        in_near_band = self._tau_reliable and (self.near_band_deg > 0.0) and (abs(err_for_band) <= self.near_band_deg)
+
+        if not self._tau_reliable or self.near_band_deg <= 0.0:
+            in_near_band_now = False
+        else:
+            # Asymmetric near-band (HEAT direction is encoded in sign of e):
+            # - e > 0  (below setpoint in HEAT): slightly larger near-band for anticipation
+            # - e <= 0 (at/above setpoint in HEAT): default near-band
+            nb_entry = self.near_band_deg + (NEAR_BAND_BELOW_EXTRA_C if err_for_band > 0.0 else 0.0)
+            nb_exit = nb_entry + NEAR_BAND_HYSTERESIS_C
+
+            if not self._in_near_band:
+                in_near_band_now = abs(err_for_band) <= nb_entry
+            else:
+                # Stay in near-band until we clearly exit (hysteresis)
+                in_near_band_now = abs(err_for_band) <= nb_exit
+
+        self._in_near_band = in_near_band_now
+        in_near_band = in_near_band_now
         if in_near_band:
             # Softer proportional action near target
             kp = clamp(kp_classic * self.kp_near_factor, KP_MIN, KP_MAX)
@@ -1828,13 +1862,17 @@ class SmartPI(CycleManager):
         ########################################################################
 
         # --- PI control with anti-windup ---
-        # Deadband with hysteresis to reduce oscillations at boundary:
-        # - Enter deadband when |e| < deadband_c
-        # - Exit deadband only when |e| > deadband_c + DEADBAND_HYSTERESIS
-        # - In the hysteresis zone, maintain previous state
+        # Deadband with hysteresis to reduce oscillations at boundary (asymmetric + hold):
+        # - Deadband- (below setpoint, e>0 in HEAT): classic "no PI action" band
+        # - Deadband+ (at/above setpoint, e<=0 in HEAT): slightly larger band to avoid chatter
+        # - Inside deadband: freeze integral (memory), allow a limited "maintenance" output
+        #   driven by model feed-forward (u_ff) and stored integral, to anticipate recovery.
         abs_e = abs(e)
-        db_entry = self.deadband_c
-        db_exit = self.deadband_c + DEADBAND_HYSTERESIS
+
+        # Entry/exit thresholds (asymmetric on sign of e)
+        db_entry = self.deadband_c + (DEADBAND_ABOVE_EXTRA_C if e < 0.0 else 0.0)
+        db_hyst = (DEADBAND_HYSTERESIS_ABOVE_C if e < 0.0 else DEADBAND_HYSTERESIS)
+        db_exit = db_entry + db_hyst
 
         if not self._tau_reliable:
             in_deadband_now = False
@@ -1866,10 +1904,27 @@ class SmartPI(CycleManager):
         self._in_deadband = in_deadband_now
 
         if in_deadband_now:
-            # In deadband: freeze integral and output zero
-            # Freezing preserves the integral "memory" needed to compensate feed-forward errors
-            u_pi = 0.0
-            self._last_i_mode = "I:FREEZE(deadband)"
+            # In deadband:
+            # - No proportional action (P=0)
+            # - Freeze integral update, but apply a very soft leak toward 0 (dt-aware)
+            # - Allow a limited non-zero "maintenance" output ONLY if u_ff is valid (>0)
+            leak_eff = INTEGRAL_DEADBAND_LEAK ** (dt_min / max(1e-9, float(self._cycle_min)))
+            self.integral *= leak_eff
+            self.integral = clamp(self.integral, -i_max, i_max)
+
+            # Guard: if we are clearly above setpoint (e sufficiently negative), do not hold power.
+            if e < -DEADBAND_HOLD_RELEASE_ERR_C:
+                u_hold_total = 0.0
+            else:
+                # Only hold if model feed-forward is available (anticipation)
+                if u_ff > 0.0 and self.Ki > KI_MIN:
+                    u_hold_total = clamp(u_ff + (self.Ki * self.integral), 0.0, DEADBAND_HOLD_MAX_U)
+                else:
+                    u_hold_total = 0.0
+
+            # Represent hold as PI contribution so u_ff + u_pi = u_hold_total
+            u_pi = u_hold_total - u_ff
+            self._last_i_mode = "I:FREEZE(deadband_hold)"
         else:
             if integrator_hold:
                 # Dead time: don't integrate to avoid pumping
@@ -2057,12 +2112,11 @@ class SmartPI(CycleManager):
             #     self._last_aw_du = 0.0
             # else:
             # Model-predicted command using current integrator state
-            #u_model = u_ff + (self.Kp * e_p + self.Ki * self.integral)
-            #du = u_applied - u_limited
-            # Tracking error between applied command and model command
-            #du = u_applied - u_model
-            #du = u_limited - u_applied
-            du = u_applied - u_limited
+            # u_model = u_ff + (self.Kp * e_p + self.Ki * self.integral)
+            # Tracking error between applied command and model command (before soft constraints)
+            # We compare what was applied (u_applied) vs what the PI wanted (u_cmd)
+            # This captures: rate-limiting, max_on_percent, AND timing quantization.
+            du = u_applied - u_cmd
             self._last_aw_du = du
 
             # Discrete tracking gain beta = dt / Tt (bounded 0..1)
@@ -2097,7 +2151,7 @@ class SmartPI(CycleManager):
 
         # Update timing properties (_on_time_sec, etc.)
         self._on_percent = u_applied
-        #self._calculate_times()
+        self._calculate_times()
 
     # ------------------------------
     # Timings and diagnostics
