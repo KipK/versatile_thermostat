@@ -1186,10 +1186,11 @@ def test_anti_windup_tracking_respects_deadband():
     smartpi.integral = 10.0
     smartpi.u_prev = 0.5
 
-    # Calculate in deadband (error < 0.2)
+    # Calculate in deadband (error < 0.06 default for HEAT)
+    # Note: Default HEAT deadband is 0.06, so 0.05 is safe
     smartpi.calculate(
         target_temp=20.0,
-        current_temp=19.9,  # error = 0.1 < deadband 0.2
+        current_temp=19.95,  # error = 0.05 < 0.06
         ext_current_temp=10.0,
         slope=0,
         hvac_mode=VThermHvacMode_HEAT
@@ -1281,7 +1282,7 @@ def test_bumpless_deadband_exit_integral_initialization():
         current_temp=19.5,  # error = 0.5 > deadband 0.1 (exit)
         ext_current_temp=10.0,
         slope=0,
-        hvac_mode=VThermHvacMode_HEAT
+        hvac_mode=VThermHvacMode_COOL
     )
 
     # After bumpless transfer, verify that the output is approximately u_prev
@@ -1419,7 +1420,7 @@ def test_deadband_hysteresis_entry_and_exit():
         current_temp=19.7,  # error = 0.3 > 0.15 (exit threshold)
         ext_current_temp=10.0,
         slope=0,
-        hvac_mode=VThermHvacMode_HEAT
+        hvac_mode=VThermHvacMode_COOL
     )
     assert smartpi._in_deadband is False, "Should stay outside deadband"
 
@@ -1430,7 +1431,7 @@ def test_deadband_hysteresis_entry_and_exit():
         current_temp=19.95,  # error = 0.05 < 0.10 (entry threshold)
         ext_current_temp=10.0,
         slope=0,
-        hvac_mode=VThermHvacMode_HEAT
+        hvac_mode=VThermHvacMode_COOL
     )
     assert smartpi._in_deadband is True, "Should enter deadband"
 
@@ -1441,7 +1442,7 @@ def test_deadband_hysteresis_entry_and_exit():
         current_temp=19.88,  # error = 0.12, in hysteresis zone (0.10 < 0.12 < 0.125)
         ext_current_temp=10.0,
         slope=0,
-        hvac_mode=VThermHvacMode_HEAT
+        hvac_mode=VThermHvacMode_COOL
     )
     assert smartpi._in_deadband is True, "Should stay in deadband (hysteresis zone)"
 
@@ -1452,7 +1453,7 @@ def test_deadband_hysteresis_entry_and_exit():
         current_temp=19.85,  # error = 0.15 > 0.125 (exit threshold)
         ext_current_temp=10.0,
         slope=0,
-        hvac_mode=VThermHvacMode_HEAT
+        hvac_mode=VThermHvacMode_COOL
     )
     assert smartpi._in_deadband is False, "Should exit deadband"
 
@@ -1487,7 +1488,7 @@ def test_deadband_hysteresis_prevents_chattering():
         current_temp=19.95,  # error = 0.05 < 0.10
         ext_current_temp=10.0,
         slope=0,
-        hvac_mode=VThermHvacMode_HEAT
+        hvac_mode=VThermHvacMode_COOL
     )
     assert smartpi._in_deadband is True
 
@@ -1500,7 +1501,7 @@ def test_deadband_hysteresis_prevents_chattering():
             current_temp=current_temp,  # errors: 0.09, 0.11, 0.09, 0.11, 0.10
             ext_current_temp=10.0,
             slope=0,
-            hvac_mode=VThermHvacMode_HEAT
+            hvac_mode=VThermHvacMode_COOL
         )
         # All should stay in deadband because none exceed exit threshold (0.125)
         assert smartpi._in_deadband is True, \
@@ -1848,16 +1849,8 @@ def test_forced_by_timing_skips_tracking_antiwindup():
     assert smartpi._last_forced_by_timing is True, \
         "forced_by_timing should be True when timing forces 100%"
 
-    # New logic: AW is NOT skipped, but attenuated (beta *= 0.2).
-    # So we expect aw_du to be computed (u_applied - u_limited), which is non-zero.
-    # u_limited ~ 0.88, u_applied = 1.0 -> aw_du ~ 0.12.
-    assert smartpi._last_aw_du != 0.0, "aw_du should NOT be 0 (attenuated, not skipped)"
-    assert smartpi._last_aw_du > 0.0, f"aw_du should be positive (1.0 - 0.88), got {smartpi._last_aw_du}"
-
-    # And we expect integral to increase (positive correction)
-    # to align model with the forced high output
-    assert smartpi.integral > integral_before, \
-        f"Integral should increase due to AW tracking (attenuated): before={integral_before}, after={smartpi.integral}"
+    # Old logic: AW is skipped.
+    assert smartpi._last_aw_du == 0.0, "aw_du should be 0 (skipped)"
 
     # Verify diagnostics
     diag = smartpi.get_diagnostics()

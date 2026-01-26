@@ -588,7 +588,7 @@ class SmartPI(CycleManager):
         self.learn_T_int_start: float = 0.0
         self.learn_T_ext_start: float = 0.0
         self.learn_u_int: float = 0.0
-        self.learn_u_int: float = 0.0
+
         self.learn_t_int_s: float = 0.0
         # For strict power check during window extension
         self.learn_u_first: float | None = None
@@ -1272,7 +1272,7 @@ class SmartPI(CycleManager):
     def in_deadband(self) -> bool:
         return self._in_deadband
 
-@property
+    @property
     def in_near_band(self) -> bool:
         return self._in_near_band
 
@@ -1810,7 +1810,7 @@ class SmartPI(CycleManager):
                 "%s - Calc SmartPI gains: in_near_band=%s, error=%.4f (band=%.4f), "
                 "Classic[Kp=%.4f, Ki=%.4f], "
                 "Applied[Kp=%.4f, Ki=%.4f]",
-                self._name, in_near_band, e, self.near_band_deg,
+                self._name, in_near_band_now, e, self.near_band_deg,
                 kp_classic, ki_classic,
                 kp, ki
             )
