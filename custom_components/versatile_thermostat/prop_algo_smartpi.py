@@ -2058,10 +2058,11 @@ class SmartPI(CycleManager):
             # else:
             # Model-predicted command using current integrator state
             #u_model = u_ff + (self.Kp * e_p + self.Ki * self.integral)
-            du = u_applied - u_limited
+            #du = u_applied - u_limited
             # Tracking error between applied command and model command
             #du = u_applied - u_model
-            du = u_limited - u_applied
+            #du = u_limited - u_applied
+            du = u_applied - u_limited
             self._last_aw_du = du
 
             # Discrete tracking gain beta = dt / Tt (bounded 0..1)
@@ -2091,8 +2092,8 @@ class SmartPI(CycleManager):
         self.u_prev = u_applied
 
         # Update timing properties (_on_time_sec, etc.)
-        #self._on_percent = u_applied
-        self._calculate_times()
+        self._on_percent = u_applied
+        #self._calculate_times()
 
     # ------------------------------
     # Timings and diagnostics
