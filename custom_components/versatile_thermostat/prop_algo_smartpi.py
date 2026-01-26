@@ -140,18 +140,31 @@ DEFAULT_DEADBAND_C = 0.05
 # different deadband configurations and typical sensor noise levels.
 DEADBAND_HYSTERESIS = 0.025
 
-# Deadband+/Near-band asymmetry (thermal comfort / anticipation)
-# - Deadband+ (hold): allow a small non-zero "maintenance" power near setpoint
-#   to anticipate recovery after a setpoint decrease on high-inertia systems.
-# - Asymmetry: slightly larger bands above setpoint (e<0 in HEAT) to avoid chatter.
-DEADBAND_ABOVE_EXTRA_C = 0.05           # extra deadband width above setpoint (°C)
-DEADBAND_HYSTERESIS_ABOVE_C = 0.030     # hysteresis above setpoint (°C)
-DEADBAND_HOLD_MAX_U = 0.25              # max maintenance power inside deadband (0..1)
-DEADBAND_HOLD_RELEASE_ERR_C = 0.15      # if e < -this, force u_hold=0 (°C)
-INTEGRAL_DEADBAND_LEAK = 0.999          # very soft leak per cycle while in deadband
+# --- Asymmetric Deadband / Near-band (HEAT only) ---
+# Intent (thermal "rule of thumb"):
+# - Make the "quiet zone" a bit wider when slightly below the setpoint (e>0) so the controller
+#   does not wait too long before restarting after a setpoint decrease.
+# - Make the zone tighter above the setpoint (e<0) to reduce overshoot/hunting.
+# Guardrails: asymmetry is applied only in HEAT; COOL keeps symmetric logic.
 
-NEAR_BAND_BELOW_EXTRA_C = 0.10          # extra near-band width below setpoint (anticipation) (°C)
-NEAR_BAND_HYSTERESIS_C = 0.05           # near-band hysteresis (°C)
+# Deadband (°C) and its hysteresis (°C)
+DEADBAND_BELOW_C = 0.06
+DEADBAND_ABOVE_C = 0.04
+DEADBAND_HYST_BELOW_C = 0.02
+DEADBAND_HYST_ABOVE_C = 0.02
+
+# Deadband+ (DB+): minimum holding power when slightly below setpoint inside deadband
+DEADBAND_PLUS_MIN_U = 0.08   # 8% duty-cycle
+DEADBAND_PLUS_MAX_U = 0.20   # hard cap (safety)
+
+# Micro-leak on integral while in deadband (dt-aware). Value is per "cycle".
+INTEGRAL_DEADBAND_MICROLEAK = 0.999
+
+# Near-band asymmetry:
+# - below setpoint: use configured near_band_deg (self.near_band_deg)
+# - above setpoint: scale it down with a factor
+NEAR_BAND_ABOVE_FACTOR = 0.80
+NEAR_BAND_HYSTERESIS_C = 0.05
 
 # Asymmetric setpoint EMA filter parameters
 # Asymmetric setpoint EMA filter parameters (Time Constants in minutes)
@@ -588,7 +601,7 @@ class SmartPI(CycleManager):
 
         # Deadband state tracking for bumpless transfer on exit
         self._in_deadband: bool = False
-        # Near-band state tracking (hysteresis)
+        # Near-band hysteresis state (for stable gain scheduling)
         self._in_near_band: bool = False
 
         # Tracking anti-windup diagnostics
@@ -825,8 +838,8 @@ class SmartPI(CycleManager):
 
             # Load deadband state
             self._in_deadband = bool(state.get("in_deadband", False))
-            # Near-band hysteresis state is not persisted (safe reset on reload)
-            self._in_near_band = False
+            self._in_near_band = bool(state.get("in_near_band", False))
+
 
             # Load setpoint boost state
             self._setpoint_boost_active = bool(state.get("setpoint_boost_active", False))
@@ -887,6 +900,7 @@ class SmartPI(CycleManager):
             "initial_temp_for_filter": self._initial_temp_for_filter,
             "learning_resume_ts": resume_wall_ts,
             "in_deadband": self._in_deadband,
+            "in_near_band": self._in_near_band,
             "setpoint_boost_active": self._setpoint_boost_active,
             "prev_setpoint_for_boost": self._prev_setpoint_for_boost,
             "hysteresis_thermal_guard": self._hysteresis_thermal_guard,
@@ -1257,6 +1271,10 @@ class SmartPI(CycleManager):
     @property
     def in_deadband(self) -> bool:
         return self._in_deadband
+
+@property
+    def in_near_band(self) -> bool:
+        return self._in_near_band
 
     @property
     def setpoint_boost_active(self) -> bool:
@@ -1743,29 +1761,40 @@ class SmartPI(CycleManager):
         kp_classic = kp
         ki_classic = ki
 
-        # Near-band detection using FILTERED error if available (hysteresis + asymmetry)
-        # This prevents gain fluctuation due to sensor noise and avoids chattering.
+        # Near-band detection using FILTERED error if available
+        # This prevents gain fluctuation due to sensor noise
         err_for_band = self._e_filt if self._e_filt is not None else e
 
-        if not self._tau_reliable or self.near_band_deg <= 0.0:
+        # Near-band hysteresis (stable gain scheduling).
+        # For HEAT mode only, we allow an asymmetric near-band:
+        # - slightly wider below setpoint (e>0) to start soft-landing earlier on re-heat
+        # - slightly tighter above setpoint (e<0) to reduce overshoot tendency
+        if not self._tau_reliable:
             in_near_band_now = False
         else:
-            # Asymmetric near-band (HEAT direction is encoded in sign of e):
-            # - e > 0  (below setpoint in HEAT): slightly larger near-band for anticipation
-            # - e <= 0 (at/above setpoint in HEAT): default near-band
-            nb_entry = self.near_band_deg + (NEAR_BAND_BELOW_EXTRA_C if err_for_band > 0.0 else 0.0)
-            nb_exit = nb_entry + NEAR_BAND_HYSTERESIS_C
+            if hvac_mode != VThermHvacMode_COOL:
+                nb_below = max(self.near_band_deg, 0.0)
+                nb_above = max(self.near_band_deg * NEAR_BAND_ABOVE_FACTOR, 0.0)
+                nb_hyst = max(NEAR_BAND_HYSTERESIS_C, 0.0)
 
-            if not self._in_near_band:
-                in_near_band_now = abs(err_for_band) <= nb_entry
+                nb_entry = nb_below if err_for_band >= 0.0 else nb_above
+                nb_exit = nb_entry + nb_hyst
+
+                abs_err = abs(err_for_band)
+                if abs_err <= nb_entry:
+                    in_near_band_now = True
+                elif abs_err >= nb_exit:
+                    in_near_band_now = False
+                else:
+                    in_near_band_now = self._in_near_band
             else:
-                # Stay in near-band until we clearly exit (hysteresis)
-                in_near_band_now = abs(err_for_band) <= nb_exit
+                # COOL: keep symmetric near-band behavior (safer)
+                in_near_band_now = (self.near_band_deg > 0.0) and (abs(err_for_band) <= self.near_band_deg)
 
         self._in_near_band = in_near_band_now
-        in_near_band = in_near_band_now
-        if in_near_band:
-            # Softer proportional action near target
+
+        if in_near_band_now:
+# Softer proportional action near target
             kp = clamp(kp_classic * self.kp_near_factor, KP_MIN, KP_MAX)
 
             # Reduce integral action near target
@@ -1862,37 +1891,50 @@ class SmartPI(CycleManager):
         ########################################################################
 
         # --- PI control with anti-windup ---
-        # Deadband with hysteresis to reduce oscillations at boundary (asymmetric + hold):
-        # - Deadband- (below setpoint, e>0 in HEAT): classic "no PI action" band
-        # - Deadband+ (at/above setpoint, e<=0 in HEAT): slightly larger band to avoid chatter
-        # - Inside deadband: freeze integral (memory), allow a limited "maintenance" output
-        #   driven by model feed-forward (u_ff) and stored integral, to anticipate recovery.
+        # Deadband with hysteresis to reduce oscillations at boundary:
+        # - Enter deadband when |e| < deadband_c
+        # - Exit deadband only when |e| > deadband_c + DEADBAND_HYSTERESIS
+        # - In the hysteresis zone, maintain previous state
         abs_e = abs(e)
 
-        # Entry/exit thresholds (asymmetric on sign of e)
-        db_entry = self.deadband_c + (DEADBAND_ABOVE_EXTRA_C if e < 0.0 else 0.0)
-        db_hyst = (DEADBAND_HYSTERESIS_ABOVE_C if e < 0.0 else DEADBAND_HYSTERESIS)
-        db_exit = db_entry + db_hyst
-
+        # Deadband with hysteresis.
+        # Default: symmetric around 0. For HEAT, we optionally use an asymmetric deadband:
+        # - slightly wider below setpoint (e>0) to keep a stable "hold" zone and avoid late restart
+        # - slightly tighter above setpoint (e<0) to avoid overshoot.
         if not self._tau_reliable:
             in_deadband_now = False
-        elif abs_e < db_entry:
-            # Clearly inside deadband
-            in_deadband_now = True
-        elif abs_e > db_exit:
-            # Clearly outside deadband
-            in_deadband_now = False
         else:
-            # In hysteresis zone: maintain previous state
-            in_deadband_now = self._in_deadband
+            if hvac_mode != VThermHvacMode_COOL:
+                db_below = max(DEADBAND_BELOW_C, 0.0)
+                db_above = max(DEADBAND_ABOVE_C, 0.0)
+                h_below = max(DEADBAND_HYST_BELOW_C, 0.0)
+                h_above = max(DEADBAND_HYST_ABOVE_C, 0.0)
+
+                db_entry = db_below if e >= 0.0 else db_above
+                db_exit = (db_below + h_below) if e >= 0.0 else (db_above + h_above)
+
+                if abs_e < db_entry:
+                    in_deadband_now = True
+                elif abs_e > db_exit:
+                    in_deadband_now = False
+                else:
+                    in_deadband_now = self._in_deadband
+            else:
+                # COOL: keep symmetric behavior (safer)
+                db_entry = self.deadband_c
+                db_exit = self.deadband_c + DEADBAND_HYSTERESIS
+                if abs_e < db_entry:
+                    in_deadband_now = True
+                elif abs_e > db_exit:
+                    in_deadband_now = False
+                else:
+                    in_deadband_now = self._in_deadband
 
         # Bumpless transfer: on deadband exit, re-initialize integral
         # so that u_ff + Kp*e_p + Ki*I = u_prev (no output discontinuity)
         # Note: Do not apply bumpless transfer if setpoint changed (we want immediate reaction)
         if self._in_deadband and not in_deadband_now and not setpoint_changed:
-            # Exiting deadband: compute integral for bumpless transfer
             if self.Ki > KI_MIN:
-                # I_new = (u_prev - u_ff - Kp * e_p) / Ki
                 i_bumpless = (self.u_prev - u_ff - self.Kp * e_p) / self.Ki
                 self.integral = clamp(i_bumpless, -i_max, i_max)
                 _LOGGER.debug(
@@ -1904,27 +1946,33 @@ class SmartPI(CycleManager):
         self._in_deadband = in_deadband_now
 
         if in_deadband_now:
-            # In deadband:
-            # - No proportional action (P=0)
-            # - Freeze integral update, but apply a very soft leak toward 0 (dt-aware)
-            # - Allow a limited non-zero "maintenance" output ONLY if u_ff is valid (>0)
-            leak_eff = INTEGRAL_DEADBAND_LEAK ** (dt_min / max(1e-9, float(self._cycle_min)))
-            self.integral *= leak_eff
+            # In deadband: no PI action; allow FF and (optionally) a small "hold" power when slightly below SP.
+            # This prevents "late restart" after a setpoint decrease on slow thermal systems.
+            u_pi = 0.0
+            self._last_i_mode = "I:FREEZE(deadband)"
+
+            # Optional micro-leak on integral to avoid long-memory bias (dt-aware).
+            cycle_ref = max(float(self._cycle_min), 1.0)
+            leak_factor = INTEGRAL_DEADBAND_MICROLEAK ** (dt_min / cycle_ref)
+            self.integral *= leak_factor
             self.integral = clamp(self.integral, -i_max, i_max)
 
-            # Guard: if we are clearly above setpoint (e sufficiently negative), do not hold power.
-            if e < -DEADBAND_HOLD_RELEASE_ERR_C:
-                u_hold_total = 0.0
-            else:
-                # Only hold if model feed-forward is available (anticipation)
-                if u_ff > 0.0 and self.Ki > KI_MIN:
-                    u_hold_total = clamp(u_ff + (self.Ki * self.integral), 0.0, DEADBAND_HOLD_MAX_U)
-                else:
-                    u_hold_total = 0.0
+            # Deadband+ (DB+): if we are slightly below SP (HEAT, e>0), add a minimum holding power.
+            # Guardrails:
+            # - only when model is reliable (so FF has meaning)
+            # - only if user already has some FF/model confidence (learn_ok_count_a)
+            # - never apply above setpoint (e<=0), never in COOL
+            if (
+                hvac_mode != VThermHvacMode_COOL
+                and e > 0.0
+                and self._tau_reliable
+                and self.est.learn_ok_count_a >= 10
+            ):
+                u_hold = clamp(DEADBAND_PLUS_MIN_U, 0.0, DEADBAND_PLUS_MAX_U)
+                # Make sure we never reduce an existing FF command.
+                u_total = max(u_ff, u_hold)
+                u_pi = u_total - u_ff
 
-            # Represent hold as PI contribution so u_ff + u_pi = u_hold_total
-            u_pi = u_hold_total - u_ff
-            self._last_i_mode = "I:FREEZE(deadband_hold)"
         else:
             if integrator_hold:
                 # Dead time: don't integrate to avoid pumping
@@ -2107,41 +2155,43 @@ class SmartPI(CycleManager):
         self._last_forced_by_timing = forced_by_timing
 
         if (not integrator_hold) and (self.Ki > KI_MIN) and (not self._in_deadband) and (not str(self._last_i_mode).startswith("I:CLAMP")):
-            # if forced_by_timing:
-            #     # Skip tracking: timing quantization should not influence integral
-            #     self._last_aw_du = 0.0
-            # else:
-            # Model-predicted command using current integrator state
-            # u_model = u_ff + (self.Kp * e_p + self.Ki * self.integral)
-            # Tracking error between applied command and model command (before soft constraints)
-            # We compare what was applied (u_applied) vs what the PI wanted (u_cmd)
-            # This captures: rate-limiting, max_on_percent, AND timing quantization.
-            du = u_applied - u_cmd
-            self._last_aw_du = du
-
-            # Discrete tracking gain beta = dt / Tt (bounded 0..1)
-            dt_sec = dt_min * 60.0
-            beta = clamp(dt_sec / max(AW_TRACK_TAU_S, dt_sec), 0.0, 1.0)
-            
-            # attenuate AW when min ON/OFF quantization forces 0/100
             if forced_by_timing:
-                beta *= 0.2 
+                # Skip tracking: timing quantization should not influence integral
+                self._last_aw_du = 0.0
+            else:
+                # Model-predicted command using current integrator state
+                u_model = u_ff + (self.Kp * e_p + self.Ki * self.integral)
 
-            # Update integral so that Ki * I compensates du
-            d_integral = beta * (du / self.Ki)
+                # Tracking error between applied command and model command
+                u_aw_ref = u_limited
 
-            # Safety clamp must be time-scaled to remain invariant when dt varies.
-            # Interpret AW_TRACK_MAX_DELTA_I as "per minute" and scale by dt_min.
-            max_di = AW_TRACK_MAX_DELTA_I * max(dt_min, 0.0)
-            d_integral = clamp(d_integral, -max_di, max_di)
-            
-            # Thermal Guard: freeze/drop integral if in hysteresis after decrease
-            if self._hysteresis_thermal_guard and (current_temp is not None and target_temp is not None):
-                    if current_temp > target_temp:
-                        d_integral = min(0.0, d_integral)
+                # If max_on_percent is active and clamps the requested command,
+                # track against the unclamped request to prevent integral windup.
+                if self._max_on_percent is not None and u_cmd > self._max_on_percent + 1e-9:
+                    u_aw_ref = u_cmd
 
-            self.integral += d_integral
-            self.integral = clamp(self.integral, -i_max, i_max)
+                du = u_applied - u_aw_ref
+                self._last_aw_du = du
+
+                # Discrete tracking gain beta = dt / Tt (bounded 0..1)
+                dt_sec = dt_min * 60.0
+                beta = clamp(dt_sec / max(AW_TRACK_TAU_S, dt_sec), 0.0, 1.0)
+
+                # Update integral so that Ki * I compensates du
+                d_integral = beta * (du / self.Ki)
+
+                # Safety clamp must be time-scaled to remain invariant when dt varies.
+                # Interpret AW_TRACK_MAX_DELTA_I as "per minute" and scale by dt_min.
+                max_di = AW_TRACK_MAX_DELTA_I * max(dt_min, 0.0)
+                d_integral = clamp(d_integral, -max_di, max_di)
+                
+                # Thermal Guard: freeze/drop integral if in hysteresis after decrease
+                if self._hysteresis_thermal_guard and (current_temp is not None and target_temp is not None):
+                     if current_temp > target_temp:
+                         d_integral = min(0.0, d_integral)
+
+                self.integral += d_integral
+                self.integral = clamp(self.integral, -i_max, i_max)
         else:
             self._last_aw_du = 0.0
 
@@ -2245,6 +2295,8 @@ class SmartPI(CycleManager):
             "forced_by_timing": self._last_forced_by_timing,
             # Deadband state
             "in_deadband": self._in_deadband,
+            "in_near_band": self._in_near_band,
+            "in_near_band": self._in_near_band,
             # Setpoint boost state
             "setpoint_boost_active": self._setpoint_boost_active,
             "hysteresis_thermal_guard": self._hysteresis_thermal_guard,
