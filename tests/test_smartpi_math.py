@@ -16,6 +16,7 @@ from custom_components.versatile_thermostat.const import (
     CONF_TEMP_SENSOR,
 )
 from custom_components.versatile_thermostat.prop_algo_smartpi import SmartPI
+from custom_components.versatile_thermostat.vtherm_hvac_mode import VThermHvacMode_HEAT
 
 from .commons import create_thermostat, send_temperature_change_event
 
@@ -85,9 +86,16 @@ async def test_smartpi_math_with_mocked_time(hass: HomeAssistant):
         )
         algo.est = MagicMock()
         
-        # Start cycle
-        # u=0.0 (Heat Loss scenario)
-        algo.start_new_cycle(u_applied=0.0, temp_in=20.0, temp_ext=0.0)
+        start_ts_dt = datetime.fromtimestamp(1000.0) # mock time is 1000
+        algo._current_cycle_params = {
+            "timestamp": start_ts_dt,
+            "on_percent": 0.0,
+            "temp_in": 20.0,
+            "temp_ext": 0.0,
+            "hvac_mode": VThermHvacMode_HEAT
+        }
+        algo._cycle_start_date = start_ts_dt
+        await algo.on_cycle_started(0, 0, 0.0, VThermHvacMode_HEAT)
         
         # Advance time by 10 mins (600s)
         mock_time.return_value = 1600.0
@@ -95,11 +103,13 @@ async def test_smartpi_math_with_mocked_time(hass: HomeAssistant):
         # End cycle: Temp dropped to 19.0
         # dT = -1.0, dt = 10min -> dT/dt = -0.1
         # delta = 20.0 - 0.0 = 20.0
-        algo.update_learning(
-            current_temp=19.0,
-            ext_current_temp=0.0,
-            hvac_mode=1 # HEAT
-        )
+        new_params = {
+            "temp_in": 19.0,
+            "temp_ext": 0.0,
+            "timestamp": datetime.fromtimestamp(1600.0), # +10 min
+            "hvac_mode": VThermHvacMode_HEAT
+        }
+        await algo.on_cycle_completed(new_params, algo._current_cycle_params)
         
         # Should learn B
         # u < 0.05, delta > 0.5
@@ -114,23 +124,34 @@ async def test_smartpi_math_with_mocked_time(hass: HomeAssistant):
         # Case 2: High power, heating up -> Learn A
         # Setup next cycle manually implies start_new_cycle was called implicitly by update_learning
         # We need to simulate that 'calculate' ran and set u_applied=1.0 for this cycle
-        algo._cycle_start_state["u_applied"] = 1.0 # Simulate Calculate setting it
-        algo._cycle_start_state["temp_in"] = 19.0
-        algo._cycle_start_state["temp_ext"] = 0.0
-        algo._cycle_start_state["time"] = 1600.0
+        
+        start_ts_2 = datetime.fromtimestamp(1600.0)
+        algo._current_cycle_params = {
+            "timestamp": start_ts_2,
+            "on_percent": 1.0, # Simulate Calculate setting it
+            "temp_in": 19.0,
+            "temp_ext": 0.0,
+            "hvac_mode": VThermHvacMode_HEAT
+        }
+        algo._cycle_start_date = start_ts_2
+        await algo.on_cycle_started(0, 0, 1.0, VThermHvacMode_HEAT)
         
         # Advance time
         mock_time.return_value = 2200.0 # +10min
         
         # End cycle: Temp rose to 20.0
         # dT = +1.0, dT/dt = 0.1
-        algo.update_learning(
-            current_temp=20.0,
-            ext_current_temp=0.0,
-            hvac_mode=1
-        )
+        new_params_2 = {
+            "temp_in": 20.0,
+            "temp_ext": 0.0,
+            "timestamp": datetime.fromtimestamp(2200.0),
+            "hvac_mode": VThermHvacMode_HEAT
+        }
+        await algo.on_cycle_completed(new_params_2, algo._current_cycle_params)
         
         algo.est.learn.assert_called_once()
         call_args = algo.est.learn.call_args[1]
         assert call_args['u'] == 1.0
+        # Wait, previous replacement had assert call_args['dT_int_per_min'] - 0.1
+        # I should check what was there.
         assert abs(call_args['dT_int_per_min'] - 0.1) < 0.001
