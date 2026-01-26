@@ -2068,6 +2068,10 @@ class SmartPI(CycleManager):
             # Discrete tracking gain beta = dt / Tt (bounded 0..1)
             dt_sec = dt_min * 60.0
             beta = clamp(dt_sec / max(AW_TRACK_TAU_S, dt_sec), 0.0, 1.0)
+            
+            # attenuate AW when min ON/OFF quantization forces 0/100
+            if forced_by_timing:
+                beta *= 0.2 
 
             # Update integral so that Ki * I compensates du
             d_integral = beta * (du / self.Ki)
