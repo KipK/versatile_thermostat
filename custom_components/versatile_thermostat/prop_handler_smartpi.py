@@ -292,6 +292,9 @@ class SmartPIHandler:
                 "setpoint_boost_active": algo.setpoint_boost_active,
                 "cycle_start_dt": algo.cycle_start_dt,
                 "phase": algo.phase,
+                # Dead time (Phase 1)
+                "deadtime_s": algo.deadtime_s,
+                "deadtime_reliable": algo.deadtime_reliable,
             }
 
     async def service_reset_smart_pi_learning(self):

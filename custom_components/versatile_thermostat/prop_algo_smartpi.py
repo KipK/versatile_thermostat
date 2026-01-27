@@ -227,12 +227,320 @@ DEFAULT_NEAR_BAND_DEG = 0.30
 DEFAULT_KP_NEAR_FACTOR = 0.80
 DEFAULT_KI_NEAR_FACTOR = 0.6
 
+# --- Dead Time Learning Constants (Phase 1) ---
+# Step detection thresholds
+DT_SP_STEP_MIN_DEG = 1.0          # Minimum setpoint step to trigger learning (°C)
+DT_SP_STABLE_TOL_DEG = 0.5        # Tolerance for setpoint stability (°C)
+
+# Stability windows
+DT_PRE_SP_STABLE_MIN_S = 1800     # 30 min - SP must be stable before step
+DT_POST_SP_STABLE_MIN_S = 1200    # 20 min - SP must be stable after step
+
+# Temperature rise detection
+DT_SLOPE_WIN_S = 600              # 10 min - window for slope calculation
+DT_SLOPE_MIN_DEG_PER_H = 0.06     # Minimum slope to detect heating response
+DT_SLOPE_PERSIST_S = 600          # 10 min - slope must persist
+
+# Dead time bounds
+DT_DEADTIME_MIN_S = 120           # 2 min minimum
+DT_DEADTIME_MAX_S = 7200          # 2 hours maximum
+
+# Reliability
+DT_MIN_SAMPLES_RELIABLE = 3       # Minimum samples for reliable estimate
+
+# Freeze periods
+DT_FREEZE_AFTER_SETPOINT_S = 1800 # 30 min - freeze NEW triggers after SP change
+DT_FREEZE_AFTER_BOOT_S = 3600     # 60 min - freeze learning after boot
+
+# History sizes
+DT_SP_HISTORY_SIZE = 200          # ~1.5h @ 30s per sample
+DT_TIN_HISTORY_SIZE = 200         # ~1.5h @ 30s per sample
+DT_MAX_SAMPLES = 10               # Keep last 10 dead time samples
+
 
 @dataclass(frozen=True)
 class TauReliability:
     """Result of tau (time constant) reliability check."""
     reliable: bool
     tau_min: float  # minutes (min of candidates used)
+
+
+@dataclass
+class DeadTimeEvent:
+    """A pending dead time measurement event."""
+    ts: float          # Timestamp when step occurred (monotonic)
+    sp_before: float   # Setpoint before step
+    sp_after: float    # Setpoint after step
+
+
+class DeadTimeEstimator:
+    """
+    Estimates thermal dead time (θ_heat) by observing the delay between
+    setpoint steps and temperature response.
+
+    Learning is triggered by significant positive setpoint changes in HEAT mode.
+    The pending measurement continues even if a freeze is applied after the trigger.
+    """
+
+    def __init__(self, max_samples: int = DT_MAX_SAMPLES):
+        self._max_samples = max_samples
+        self._samples: Deque[float] = deque(maxlen=max_samples)
+        self._deadtime_s: Optional[float] = None
+        self._reliable: bool = False
+
+        # Pending measurement state (survives freeze)
+        self._pending_event: Optional[DeadTimeEvent] = None
+        self._pending_tin_history: Deque[Tuple[float, float]] = deque(maxlen=DT_TIN_HISTORY_SIZE)
+
+        # Setpoint history for stability checks
+        self._sp_history: Deque[Tuple[float, float]] = deque(maxlen=DT_SP_HISTORY_SIZE)
+
+        # Freeze state (prevents NEW triggers, not pending completion)
+        self._freeze_until_ts: Optional[float] = None
+
+    def reset(self) -> None:
+        """Reset all learned dead time data."""
+        self._samples.clear()
+        self._deadtime_s = None
+        self._reliable = False
+        self._pending_event = None
+        self._pending_tin_history.clear()
+        self._sp_history.clear()
+        self._freeze_until_ts = None
+
+    @property
+    def deadtime_s(self) -> Optional[float]:
+        """Dead time estimate in seconds, or None if not yet learned."""
+        return self._deadtime_s
+
+    @property
+    def reliable(self) -> bool:
+        """True if dead time estimate is reliable (enough samples)."""
+        return self._reliable
+
+    @property
+    def sample_count(self) -> int:
+        """Number of valid dead time samples collected."""
+        return len(self._samples)
+
+    @property
+    def pending(self) -> bool:
+        """True if a measurement is in progress."""
+        return self._pending_event is not None
+
+    def freeze_learning(self, duration_s: float) -> None:
+        """
+        Freeze NEW dead time triggers for the specified duration.
+        Does NOT cancel pending measurements already started.
+        """
+        now = time.monotonic()
+        self._freeze_until_ts = now + duration_s
+
+    def _is_frozen(self) -> bool:
+        """Check if new triggers are frozen."""
+        if self._freeze_until_ts is None:
+            return False
+        if time.monotonic() >= self._freeze_until_ts:
+            self._freeze_until_ts = None
+            return False
+        return True
+
+    def _check_sp_stable(self, ts_end: float, duration_s: float, tolerance: float) -> bool:
+        """Check if setpoint was stable in [ts_end - duration_s, ts_end]."""
+        ts_start = ts_end - duration_s
+        points = [(ts, sp) for ts, sp in self._sp_history
+                  if ts_start <= ts <= ts_end]
+        if len(points) < 3:  # Need minimum samples
+            return False
+        sp_values = [sp for _, sp in points]
+        return (max(sp_values) - min(sp_values)) <= tolerance
+
+    def _detect_tin_rise(self, after_ts: float) -> Optional[float]:
+        """
+        Detect when Tin starts rising persistently after the given timestamp.
+        Returns the timestamp of rise start, or None if not detected.
+        """
+        samples = [(ts, tin) for ts, tin in self._pending_tin_history if ts >= after_ts]
+        if len(samples) < 10:
+            return None
+
+        min_slope = DT_SLOPE_MIN_DEG_PER_H / 3600.0  # Convert to °C/s
+
+        for i in range(len(samples) - 1):
+            t0, tin0 = samples[i]
+
+            # Find samples in slope window [t0, t0 + SLOPE_WIN_S]
+            win_samples = [(ts, tin) for ts, tin in samples
+                           if t0 <= ts <= t0 + DT_SLOPE_WIN_S]
+            if len(win_samples) < 2:
+                continue
+
+            t_last, tin_last = win_samples[-1]
+            dt = t_last - t0
+            if dt < 60:  # Need at least 1 min
+                continue
+
+            slope = (tin_last - tin0) / dt
+            if slope < min_slope:
+                continue
+
+            # Check persistence in [t0, t0 + SLOPE_WIN_S + PERSIST_S]
+            persist_samples = [(ts, tin) for ts, tin in samples
+                               if t0 <= ts <= t0 + DT_SLOPE_WIN_S + DT_SLOPE_PERSIST_S]
+            if len(persist_samples) < 3:
+                continue
+
+            t_persist, tin_persist = persist_samples[-1]
+            total_dt = t_persist - t0
+            if total_dt < DT_SLOPE_WIN_S:
+                continue
+
+            avg_slope = (tin_persist - tin0) / total_dt
+            if avg_slope >= min_slope:
+                return t0
+
+        return None
+
+    def record_sample(self, setpoint: float, tin: float) -> Optional[str]:
+        """
+        Record a setpoint and temperature sample for dead time learning.
+        Should be called at each calculate() call.
+
+        Returns a status string for diagnostics, or None.
+        """
+        now = time.monotonic()
+
+        # Always record SP history
+        self._sp_history.append((now, setpoint))
+
+        # If pending measurement, record Tin and check for completion
+        if self._pending_event is not None:
+            self._pending_tin_history.append((now, tin))
+            event = self._pending_event
+
+            # Timeout check: abort if no result after 2x max deadtime
+            if now > event.ts + DT_DEADTIME_MAX_S * 2:
+                self._pending_event = None
+                self._pending_tin_history.clear()
+                return "timeout"
+
+            # Check post-step SP stability
+            elapsed = now - event.ts
+            if elapsed >= DT_POST_SP_STABLE_MIN_S:
+                post_stable = self._check_sp_stable(
+                    now, DT_POST_SP_STABLE_MIN_S, DT_SP_STABLE_TOL_DEG
+                )
+                if not post_stable:
+                    self._pending_event = None
+                    self._pending_tin_history.clear()
+                    return "abort:sp_unstable"
+
+            # Detect temperature rise
+            rise_ts = self._detect_tin_rise(event.ts)
+            if rise_ts is not None:
+                dt_sample = rise_ts - event.ts
+
+                if DT_DEADTIME_MIN_S <= dt_sample <= DT_DEADTIME_MAX_S:
+                    self._samples.append(dt_sample)
+                    self._update_estimate()
+                    self._pending_event = None
+                    self._pending_tin_history.clear()
+                    return f"learned:{dt_sample:.0f}s"
+                else:
+                    self._pending_event = None
+                    self._pending_tin_history.clear()
+                    return f"reject:out_of_bounds({dt_sample:.0f}s)"
+
+        return None
+
+    def on_setpoint_change(self, sp_old: float, sp_new: float, hvac_mode: str) -> str:
+        """
+        Handle setpoint change event.
+        Triggers dead time measurement if conditions are met.
+
+        Returns status string for diagnostics.
+        """
+        # Check if new triggers are frozen
+        if self._is_frozen():
+            return "skip:frozen"
+
+        # Only learn in HEAT mode on positive steps
+        if hvac_mode == VThermHvacMode_COOL:
+            return "skip:cool_mode"
+
+        step = sp_new - sp_old
+        if step < DT_SP_STEP_MIN_DEG:
+            return f"skip:step_too_small({step:.2f})"
+
+        now = time.monotonic()
+
+        # Check pre-step stability (SP was stable BEFORE this change)
+        pre_stable = self._check_sp_stable(
+            now, DT_PRE_SP_STABLE_MIN_S, DT_SP_STABLE_TOL_DEG
+        )
+        if not pre_stable:
+            return "skip:sp_unstable_before"
+
+        # Cancel any previous pending (shouldn't happen often)
+        if self._pending_event is not None:
+            self._pending_event = None
+            self._pending_tin_history.clear()
+
+        # Start new pending measurement
+        self._pending_event = DeadTimeEvent(
+            ts=now,
+            sp_before=sp_old,
+            sp_after=sp_new
+        )
+        self._pending_tin_history.clear()
+
+        return f"trigger:step={step:.2f}"
+
+    def _update_estimate(self) -> None:
+        """Update the dead time estimate from collected samples."""
+        if len(self._samples) == 0:
+            self._deadtime_s = None
+            self._reliable = False
+            return
+
+        self._deadtime_s = statistics.median(self._samples)
+        self._reliable = len(self._samples) >= DT_MIN_SAMPLES_RELIABLE
+
+    def save_state(self) -> Dict[str, Any]:
+        """Return state for persistence."""
+        freeze_wall_ts = None
+        if self._freeze_until_ts is not None:
+            remaining = self._freeze_until_ts - time.monotonic()
+            if remaining > 0:
+                freeze_wall_ts = time.time() + remaining
+
+        return {
+            "deadtime_samples": list(self._samples),
+            "deadtime_s": self._deadtime_s,
+            "deadtime_reliable": self._reliable,
+            "deadtime_freeze_ts": freeze_wall_ts,
+        }
+
+    def load_state(self, state: Dict[str, Any]) -> None:
+        """Load state from persistence."""
+        if not state:
+            return
+
+        samples = state.get("deadtime_samples", [])
+        self._samples = deque(samples, maxlen=self._max_samples)
+        self._deadtime_s = state.get("deadtime_s")
+        self._reliable = state.get("deadtime_reliable", False)
+
+        freeze_wall_ts = state.get("deadtime_freeze_ts")
+        if freeze_wall_ts is not None:
+            remaining = freeze_wall_ts - time.time()
+            if remaining > 0:
+                self._freeze_until_ts = time.monotonic() + remaining
+
+        # Clear pending state (don't restore across restarts)
+        self._pending_event = None
+        self._pending_tin_history.clear()
+        self._sp_history.clear()
 
 
 ########################################################################
@@ -623,6 +931,10 @@ class SmartPI(CycleManager):
         # Prevents integral accumulation while T > T_set after a decrease
         self._hysteresis_thermal_guard: bool = False
 
+        # Dead time estimator (Phase 1: learning only)
+        self._deadtime_est = DeadTimeEstimator()
+        self._deadtime_last_status: Optional[str] = None
+
         if saved_state:
             self.load_state(saved_state)
 
@@ -681,6 +993,8 @@ class SmartPI(CycleManager):
         self.learn_t_int_s = 0.0
         self.learn_u_first = None
         self._hysteresis_thermal_guard = False
+        self._deadtime_est.reset()
+        self._deadtime_last_status = None
         _LOGGER.info("%s - SmartPI learning and history reset", self._name)
 
     def notify_resume_after_interruption(self, skip_cycles: int = None) -> None:
@@ -853,6 +1167,12 @@ class SmartPI(CycleManager):
             # Load thermal guard state
             self._hysteresis_thermal_guard = bool(state.get("hysteresis_thermal_guard", False))
 
+            # Load dead time state
+            deadtime_state = state.get("deadtime_state", {})
+            self._deadtime_est.load_state(deadtime_state)
+            # Apply boot freeze for new triggers
+            self._deadtime_est.freeze_learning(DT_FREEZE_AFTER_BOOT_S)
+
             # Mark that state was loaded (not fresh init)
             self.est.learn_last_reason = "loaded"
 
@@ -904,6 +1224,7 @@ class SmartPI(CycleManager):
             "setpoint_boost_active": self._setpoint_boost_active,
             "prev_setpoint_for_boost": self._prev_setpoint_for_boost,
             "hysteresis_thermal_guard": self._hysteresis_thermal_guard,
+            "deadtime_state": self._deadtime_est.save_state(),
             "phase": self.phase,
         }
 
@@ -1287,6 +1608,16 @@ class SmartPI(CycleManager):
             return self._cycle_start_date.isoformat()
         return None
 
+    @property
+    def deadtime_s(self) -> Optional[float]:
+        """Dead time estimate in seconds."""
+        return self._deadtime_est.deadtime_s
+
+    @property
+    def deadtime_reliable(self) -> bool:
+        """True if dead time estimate is reliable."""
+        return self._deadtime_est.reliable
+
     # ------------------------------
     # Asymmetric setpoint filter
     # ------------------------------
@@ -1561,7 +1892,17 @@ class SmartPI(CycleManager):
 
         if setpoint_changed:
             self._setpoint_changed_in_cycle = True
-            
+
+            # Dead time: notify of setpoint change BEFORE freeze
+            if hvac_mode != VThermHvacMode_OFF:
+                dt_status = self._deadtime_est.on_setpoint_change(
+                    self._last_raw_setpoint, target_temp, hvac_mode
+                )
+                if dt_status:
+                    _LOGGER.debug("%s - DeadTime: %s", self._name, dt_status)
+                # Freeze NEW triggers (pending measurement continues)
+                self._deadtime_est.freeze_learning(DT_FREEZE_AFTER_SETPOINT_S)
+
             # Two-tier setpoint change handling (from regul6.py)
             if sp_delta >= SETPOINT_MODE_DELTA_C:
                 # Large change: mode change (eco ↔ comfort) -> reset PI state
@@ -2199,6 +2540,12 @@ class SmartPI(CycleManager):
         # Store final applied command for next cycle rate-limiting
         self.u_prev = u_applied
 
+        # Dead time: record sample for learning
+        if target_temp is not None and current_temp is not None:
+            self._deadtime_last_status = self._deadtime_est.record_sample(target_temp, current_temp)
+            if self._deadtime_last_status and self._deadtime_last_status.startswith("learned"):
+                _LOGGER.info("%s - DeadTime %s", self._name, self._deadtime_last_status)
+
         # Update timing properties (_on_time_sec, etc.)
         self._on_percent = u_applied
         self._calculate_times()
@@ -2300,4 +2647,10 @@ class SmartPI(CycleManager):
             # Setpoint boost state
             "setpoint_boost_active": self._setpoint_boost_active,
             "hysteresis_thermal_guard": self._hysteresis_thermal_guard,
+            # Dead time (Phase 1)
+            "deadtime_s": None if self._deadtime_est.deadtime_s is None else round(self._deadtime_est.deadtime_s, 0),
+            "deadtime_reliable": self._deadtime_est.reliable,
+            "deadtime_sample_count": self._deadtime_est.sample_count,
+            "deadtime_pending": self._deadtime_est.pending,
+            "deadtime_last_status": self._deadtime_last_status,
         }
