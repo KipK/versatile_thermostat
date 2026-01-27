@@ -255,7 +255,7 @@ DT_FREEZE_AFTER_BOOT_S = 3600     # 60 min - freeze learning after boot
 # History sizes
 DT_SP_HISTORY_SIZE = 200          # ~1.5h @ 30s per sample
 DT_TIN_HISTORY_SIZE = 200         # ~1.5h @ 30s per sample
-DT_MAX_SAMPLES = 10               # Keep last 10 dead time samples
+DT_MAX_SAMPLES = 11               # Keep last 11 dead time samples
 
 
 @dataclass(frozen=True)
