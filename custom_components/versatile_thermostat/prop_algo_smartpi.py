@@ -1898,8 +1898,7 @@ class SmartPI(CycleManager):
                 dt_status = self._deadtime_est.on_setpoint_change(
                     self._last_raw_setpoint, target_temp, hvac_mode
                 )
-                if dt_status:
-                    _LOGGER.debug("%s - DeadTime: %s", self._name, dt_status)
+                _LOGGER.info("%s - DeadTime on_setpoint_change: %s", self._name, dt_status)
                 # Freeze NEW triggers (pending measurement continues)
                 self._deadtime_est.freeze_learning(DT_FREEZE_AFTER_SETPOINT_S)
 
