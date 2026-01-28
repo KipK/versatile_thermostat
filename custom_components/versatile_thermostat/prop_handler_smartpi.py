@@ -295,6 +295,8 @@ class SmartPIHandler:
                 # Dead time (Phase 1)
                 "deadtime_s": algo.deadtime_s,
                 "deadtime_reliable": algo.deadtime_reliable,
+                "deadtime_pending": algo._deadtime_est.pending,
+                "deadtime_last_status": algo._deadtime_last_status,
             }
 
     async def service_reset_smart_pi_learning(self):
