@@ -163,8 +163,8 @@ INTEGRAL_DEADBAND_MICROLEAK = 0.999
 # Near-band asymmetry:
 # - below setpoint: use configured near_band_deg (self.near_band_deg)
 # - above setpoint: scale it down with a factor
-NEAR_BAND_ABOVE_FACTOR = 0.60
-NEAR_BAND_HYSTERESIS_C = 0.03
+NEAR_BAND_ABOVE_FACTOR = 0.40
+NEAR_BAND_HYSTERESIS_C = 0.05
 
 # Asymmetric setpoint EMA filter parameters
 # Asymmetric setpoint EMA filter parameters (Time Constants in minutes)
