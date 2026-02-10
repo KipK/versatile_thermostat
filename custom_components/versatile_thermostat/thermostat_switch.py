@@ -48,7 +48,6 @@ class ThermostatOverSwitch(ThermostatProp[UnderlyingSwitch]):
         self._is_inversed: bool | None = None
         self._lst_vswitch_on: list[str] = []
         self._lst_vswitch_off: list[str] = []
-        self._lst_vswitch_off: list[str] = []
         super().__init__(hass, unique_id, name, config_entry)
 
     @property
@@ -60,9 +59,6 @@ class ThermostatOverSwitch(ThermostatProp[UnderlyingSwitch]):
     def is_inversed(self) -> bool:
         """True if the switch is inversed (for pilot wire and diode)"""
         return self._is_inversed is True
-
-
-
 
     @overrides
     def post_init(self, config_entry: ConfigData):

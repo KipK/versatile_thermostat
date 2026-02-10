@@ -1184,7 +1184,6 @@ class BaseThermostat(ClimateEntity, RestoreEntity, Generic[T]):
         """Get the eventual ProportionalAlgorithm"""
         return None
 
-
     @property
     def last_temperature_measure(self) -> datetime | None:
         """Get the last temperature datetime"""
