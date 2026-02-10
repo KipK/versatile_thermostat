@@ -201,6 +201,8 @@ class SmartPIHandler:
         # Stop here if we are off
         if t.vtherm_hvac_mode == VThermHvacMode_OFF:
             _LOGGER.debug("%s - End of cycle (HVAC_MODE_OFF)", t)
+            t._on_time_sec = 0
+            t._off_time_sec = int(t.cycle_min * 60)
             if t.is_device_active:
                 await t.async_underlying_entity_turn_off()
         else:
@@ -222,6 +224,10 @@ class SmartPIHandler:
             new_on_percent = t.prop_algorithm.on_percent
             on_percent_changed = abs(new_on_percent - self._last_on_percent) > 0.001
             self._last_on_percent = new_on_percent
+
+            # Store on/off times on thermostat for sensors and attributes
+            t._on_time_sec = on_time_sec
+            t._off_time_sec = off_time_sec
 
             for under in t.underlyings:
                 await under.start_cycle(
