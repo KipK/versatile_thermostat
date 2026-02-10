@@ -256,4 +256,42 @@ Key parameters accessible for debugging or fine-tuning (in code):
 
 | `LEARN_QUALITY_THRESHOLD` | 0.25 | Minimum quality (R²) to accept a regression |
 
+
+## 8. Safety-First Governance
+
+To ensure the stability of the thermal model against real-world uncertainties, Smart-PI integrates a supervision layer called **Safety-First Governance**. Its role is to detect physical regimes inappropriate for learning and to freeze parameter adaptation.
+
+### 8.1 Governance Regimes (`GovernanceRegime`)
+
+At each cycle, the algorithm identifies the regime the system is in:
+
+- **WARMUP**: Startup phase (a few cycles) where transient dynamics are too strong.
+- **EXCITED_STABLE**: Ideal regime for learning (outside deadband, with sufficient excitation).
+- **NEAR_BAND**: Immediate proximity to the setpoint; gains are reduced, learning is frozen.
+- **DEAD_BAND**: System at equilibrium; no useful information for learning.
+- **HOLD**: Setpoint is stable and error is zero; parameters are maintained.
+- **PERTURBED**: Detection of a strong external disturbance (e.g., window open, massive solar gain).
+- **DEGRADED**: Invalid sensor or missing data.
+- **SATURATED**: Actuator saturated at 0% or 100% for too long.
+
+### 8.2 Governance Decisions (`GovernanceDecision`)
+
+Based on the detected regime, the supervisor makes a decision for thermal model adaptation and PI gains:
+
+- **ADAPT_ON**: Allows updates to parameters $a$ and $b$.
+- **FREEZE**: Temporarily freezes learning but keeps the current state.
+- **HARD_FREEZE**: Freezes learning and resets certain safety mechanisms (e.g., anti-windup).
+- **SOFT_FREEZE_DOWN**: Only allows decreasing gains or the integral for safety reasons.
+
+### 8.3 Diagnostic Codes (`FreezeReason`)
+
+In case of a freeze, the `freeze_reason` attribute helps understand the cause:
+- `REGIME_TRANSITION`: Regime transition in progress.
+- `SENSOR_INVALID`: Temperature or setpoint unreliable.
+- `BOOT_GUARD`: Protection during the first few minutes of startup.
+- `SATURATION`: Actuator saturated.
+- `SYSTEM_INEFFICIENT`: System not reacting as expected by the model.
+
+---
+
 This document serves as a reference for the maintenance and evolution of the Smart-PI algorithm.
