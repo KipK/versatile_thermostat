@@ -71,24 +71,23 @@ async def test_smartpi_periodic_recalc(
         },
     )
 
+    hass.states.async_set("switch.mock_switch", "off")
+
     entity: BaseThermostat = await create_thermostat(
         hass, entry, "climate.smartpirecalctest"
     )
     assert entity
     assert entity._prop_algorithm
     assert entity._proportional_function == PROPORTIONAL_FUNCTION_SMART_PI
-
+    
+    
+    # Initialize the entity (simulating VTherm API startup)
+    await entity.async_startup(None)
+    
     # Spy on async_control_heating method (this is what the periodic timer calls)
     with patch.object(entity, 'async_control_heating', wraps=entity.async_control_heating) as mock_control:
         
         # 2. Set to HEAT mode to start the timer
-        print(f"DEBUG: Entity type: {type(entity)}")
-        print(f"DEBUG: MRO: {type(entity).mro()}")
-        if hasattr(entity.update_states, '__func__'):
-            print(f"DEBUG: update_states qualname: {entity.update_states.__func__.__qualname__}")
-        else:
-             print(f"DEBUG: update_states: {entity.update_states}")
-        
         await entity.async_set_hvac_mode(HVACMode.HEAT)
         await hass.async_block_till_done()
 
@@ -96,7 +95,6 @@ async def test_smartpi_periodic_recalc(
         assert entity._smartpi_recalc_timer_remove is not None, \
             f"Timer not started. Mode={entity.vtherm_hvac_mode}, " \
             f"PropFunc={entity._proportional_function}, " \
-            f"AutoTpiMgr={entity._auto_tpi_manager}, " \
             f"SmartPI={entity._prop_algorithm}"
         
         # Reset mock to ignore initial calls during startup/mode change

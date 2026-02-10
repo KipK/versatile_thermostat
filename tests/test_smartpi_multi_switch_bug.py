@@ -58,6 +58,13 @@ async def test_smartpi_multi_switch_hysteresis_fix(hass: HomeAssistant, skip_has
     assert entity.underlying_entity(0).initial_delay_sec == 0
     assert entity.underlying_entity(1).initial_delay_sec == 300
 
+    # Ensure mock switches exist for initialization
+    hass.states.async_set("switch.mock_switch1", "off")
+    hass.states.async_set("switch.mock_switch2", "off")
+
+    # Initialize the entity (simulating VTherm API startup)
+    await entity.async_startup(None)
+
     # 2. Set mode to HEAT and target temp to trigger heating (Hysteresis check)
     # Target 20, current 15 -> Error 5 -> should be ON 100% in Hysteresis
     await entity.async_set_hvac_mode(VThermHvacMode_HEAT)
