@@ -24,7 +24,6 @@ from custom_components.versatile_thermostat.const import (
     CONF_MINIMAL_ACTIVATION_DELAY,
     CONF_MINIMAL_DEACTIVATION_DELAY,
     CONF_SMART_PI_DEADBAND,
-    CONF_SMART_PI_AGGRESSIVENESS,
     CONF_EXTERNAL_TEMP_SENSOR,
     CONF_TEMP_MIN,
     CONF_TEMP_MAX,
@@ -128,7 +127,6 @@ async def test_smart_pi_config_flow(
         result["flow_id"],
         user_input={
             CONF_SMART_PI_DEADBAND: 0.05,
-            CONF_SMART_PI_AGGRESSIVENESS: 1.0,
             CONF_MINIMAL_ACTIVATION_DELAY: 30,
             CONF_MINIMAL_DEACTIVATION_DELAY: 15,
         },

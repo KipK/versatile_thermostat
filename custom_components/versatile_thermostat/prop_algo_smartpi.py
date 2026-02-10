@@ -1028,6 +1028,7 @@ class SmartPI(CycleManager):
         self._t_heat_episode_start: float | None = None
         self._t_cool_episode_start: float | None = None
         self._deadtime_skip_count_a: int = 0
+        self._deadtime_skip_count_b: int = 0
         
         # Feature flag for integral freeze during deadtime (Default OFF)
         self.feature_integral_freeze: bool = False
@@ -1119,6 +1120,7 @@ class SmartPI(CycleManager):
         self._heat_request_prev = False
         self._t_heat_episode_start = None
         self._deadtime_skip_count_a = 0
+        self._deadtime_skip_count_b = 0
         self._kp_source = "heuristic"
         
         # Reset Phase 2
@@ -1348,6 +1350,7 @@ class SmartPI(CycleManager):
             self.dt_est.deadtime_cool_reliable = bool(state.get("deadtime_cool_reliable", False))
             self.dt_est._history_cool = deque(state.get("deadtime_samples_cool", []), maxlen=self.dt_est._history_cool.maxlen)
             self._deadtime_skip_count_a = int(state.get("deadtime_skip_count_a", 0))
+            self._deadtime_skip_count_b = int(state.get("deadtime_skip_count_b", 0))
 
             # --- Phase 2: Near-Band ---
             nb_below = state.get("near_band_below_deg_auto")
@@ -1425,6 +1428,7 @@ class SmartPI(CycleManager):
             "deadtime_cool_reliable": self.dt_est.deadtime_cool_reliable,
             "deadtime_samples_cool": list(self.dt_est._history_cool),
             "deadtime_skip_count_a": self._deadtime_skip_count_a,
+            "deadtime_skip_count_b": self._deadtime_skip_count_b,
             "phase": self.phase,
             "last_calibration_time": self._last_calibration_time,
             "calibration_state": self._calibration_state,
@@ -1610,6 +1614,17 @@ class SmartPI(CycleManager):
                     self._reset_learning_window()
                 return
 
+        if not ignore_deadtime_skip and self.dt_est.deadtime_cool_reliable and self._t_cool_episode_start is not None and self.dt_est.deadtime_cool_s is not None:
+             elapsed_episode = now - self._t_cool_episode_start
+             if elapsed_episode < self.dt_est.deadtime_cool_s:
+                # We are in Cooling Deadtime
+                self.est.learn_skip_count += 1
+                self.est.learn_last_reason = "skip: deadtime window (cool)"
+                self._deadtime_skip_count_b += 1
+                if self.learn_win_active:
+                     self._reset_learning_window()
+                return
+
         # 4. Learning Window Accumulation
         if not self.learn_win_active:
             # Before starting window, check if backdated start would be in deadtime
@@ -1621,6 +1636,14 @@ class SmartPI(CycleManager):
                     # Window would start during deadtime - skip
                     self.est.learn_skip_count += 1
                     self.est.learn_last_reason = "skip: window would start in deadtime"
+                    return
+
+            # Also check Cool Deadtime overlap if relevant
+            if not ignore_deadtime_skip and self.dt_est.deadtime_cool_reliable and self._t_cool_episode_start is not None and self.dt_est.deadtime_cool_s is not None:
+                 deadtime_end_ts = self._t_cool_episode_start + self.dt_est.deadtime_cool_s
+                 if proposed_start_ts < deadtime_end_ts:
+                    self.est.learn_skip_count += 1
+                    self.est.learn_last_reason = "skip: window would start in deadtime (cool)"
                     return
             
             # OK to start window
@@ -3473,6 +3496,7 @@ class SmartPI(CycleManager):
             "in_deadtime_window": self.in_deadtime_window,
             "kp_source": self._kp_source,
             "deadtime_skip_count_a": self._deadtime_skip_count_a,
+            "deadtime_skip_count_b": self._deadtime_skip_count_b,
             "deadtime_state": self.dt_est.state,
             "deadtime_last_power": self.dt_est.last_power,
             "deadtime_heat_start_time": self.dt_est.heat_start_time,
