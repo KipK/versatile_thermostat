@@ -188,7 +188,6 @@ CONF_AUTO_TPI_EMA_DECAY_RATE = "auto_tpi_ema_decay_rate"
 
 # SmartPI specific parameters
 CONF_SMART_PI_DEADBAND = "smart_pi_deadband"
-CONF_SMART_PI_AGGRESSIVENESS = "smart_pi_aggressiveness"
 CONF_SMART_PI_USE_SETPOINT_FILTER = "smart_pi_use_setpoint_filter"
 
 CONF_USE_SMART_PI_CENTRAL_CONFIG = "use_smart_pi_central_config"

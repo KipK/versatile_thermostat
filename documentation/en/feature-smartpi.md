@@ -88,10 +88,9 @@ Default parameters are suitable for most cases.
 | Parameter | Description | Recommended Value |
 |-----------|-------------|-------------------|
 | **Deadband** | Tolerance zone around the setpoint (±X°C). | 0.05°C |
-| **Aggressiveness** | Multiplier factor for PI gains. | 0.5 (default) to 1.0 (reactive) |
-| **Setpoint Filter** | Enables "Soft Landing". | Enabled |
+| **Setpoint Filter** | Enables "Soft Landing". | Disabled |
 
-> **Tip**: If temperature oscillates too much, lower aggressiveness to 0.3. If it is too slow to reach the setpoint, raise to 0.8 or 1.0.
+> **Tip**: If temperature oscillates too much, try to increase the deadband.
 
 ## Diagnostic Metrics
 

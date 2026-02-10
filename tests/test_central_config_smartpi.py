@@ -42,7 +42,6 @@ async def test_smartpi_over_switch_with_central_config(
             # TPI params (not used if SmartPI selected but needed for schema?)
             # SmartPI params in Central Config
             CONF_SMART_PI_DEADBAND: 0.2,
-            CONF_SMART_PI_AGGRESSIVENESS: 1.5,
             CONF_SMART_PI_USE_SETPOINT_FILTER: False,
         },
     )
@@ -55,7 +54,6 @@ async def test_smartpi_over_switch_with_central_config(
     new_data = central.data.copy()
     new_data[CONF_CYCLE_MIN] = 10
     new_data[CONF_SMART_PI_DEADBAND] = 0.2
-    new_data[CONF_SMART_PI_AGGRESSIVENESS] = 1.5
     new_data[CONF_SMART_PI_USE_SETPOINT_FILTER] = False
     hass.config_entries.async_update_entry(central, data=new_data)
 
@@ -79,7 +77,6 @@ async def test_smartpi_over_switch_with_central_config(
             # Start with LOCAL values that differ from Central
             CONF_CYCLE_MIN: 5,
             CONF_SMART_PI_DEADBAND: 0.05,
-            CONF_SMART_PI_AGGRESSIVENESS: 1.0,
             CONF_TEMP_MIN: 8,
             CONF_TEMP_MAX: 18,
             CONF_STEP_TEMPERATURE: 0.3,  # Should be overridden by central (0.1)
@@ -121,10 +118,9 @@ async def test_smartpi_over_switch_with_central_config(
         # Note: entity._cycle_min should reflect the config
         assert entity._cycle_min == 5, f"Cycle min should be 5 (Local), got {entity._cycle_min}"
 
-        # 2. Check SmartPI Params (Should be 0.2/1.5 from Central, not 0.05/1.0 from Local)
+        # 2. Check SmartPI Params (Should be 0.2 from Central, not 0.05 from Local)
         algo = entity.proportional_algorithm
         assert algo.deadband_c == 0.2, f"Deadband should be 0.2 (Central), got {algo.deadband_c}"
-        assert algo.aggressiveness == 1.5, f"Aggressiveness should be 1.5 (Central), got {algo.aggressiveness}"
         assert algo._use_setpoint_filter is False, "Setpoint filter should be False (Central)"
 
         # 3. Check Main Params (overridden)

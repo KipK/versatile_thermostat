@@ -679,7 +679,6 @@ def test_near_band_gain_scheduling():
         near_band_deg=0.5,      # Enable near-band
         kp_near_factor=0.70,    # Reduce Kp to 60%
         ki_near_factor=0.50,    # Reduce Ki to 85%
-        aggressiveness=1.0,     # No aggressiveness scaling
     )
     force_stable_mode(smartpi)
 
@@ -764,15 +763,13 @@ def test_near_band_gains_clamped_at_minimum():
         minimal_deactivation_delay=0,
         name="TestSmartPI_NearBandClamp",
         near_band_deg=0.5,
-        kp_near_factor=0.60,
-        ki_near_factor=0.85,
-        aggressiveness=0.2,  # Very low aggressiveness pushes gains toward minimum
+        kp_near_factor=0.10, # Very low factor to force clamping
+        ki_near_factor=0.10,
     )
     force_stable_mode(smartpi)
 
     # With unreliable tau, safe gains are used: KP_SAFE=0.55, KI_SAFE=0.01
-    # With aggressiveness=0.2: Kp = 0.55 * 0.2 = 0.11
-    # After near-band: Kp = 0.11 * 0.60 = 0.066 < KP_MIN=0.10
+    # After near-band: Kp = 0.55 * 0.10 = 0.055 < KP_MIN=0.10
     # Should be clamped to KP_MIN
 
     smartpi.calculate(

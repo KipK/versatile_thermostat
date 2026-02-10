@@ -341,7 +341,6 @@
         "data": {
           "use_smart_pi_central_config": "Utiliser la configuration SmartPI centrale",
           "smart_pi_deadband": "Bande morte (°C)",
-          "smart_pi_aggressiveness": "Agressivité",
           "smart_pi_use_setpoint_filter": "Utiliser le filtre de consigne",
           "minimal_activation_delay": "Délai minimal d'activation",
           "minimal_deactivation_delay": "Délai de désactivation minimal"
@@ -349,7 +348,6 @@
         "data_description": {
           "use_smart_pi_central_config": "Cochez pour utiliser la configuration SmartPI centrale. Décochez pour utiliser une configuration SmartPI spécifique pour ce VTherm",
           "smart_pi_deadband": "Bande morte autour de la consigne. Aucune action de régulation dans cette plage. Évite les oscillations près de la cible.",
-          "smart_pi_aggressiveness": "Vitesse de réponse du contrôleur (0.1=très rapide, 0.5=équilibré, 1.0=lent, 2.0=très lent)",
           "smart_pi_use_setpoint_filter": "Activez le filtre de consigne asymétrique pour réduire le dépassement lors de l'augmentation de la consigne. Décochez si vous voulez que le thermostat réagisse immédiatement aux changements de consigne.",
           "minimal_activation_delay": "Délai en secondes en-dessous duquel l'équipement ne sera pas activé",
           "minimal_deactivation_delay": "Délai en secondes en-dessous duquel l'équipement sera laissé actif"
@@ -749,7 +747,6 @@
         "data": {
           "use_smart_pi_central_config": "Utiliser la configuration SmartPI centrale",
           "smart_pi_deadband": "Bande morte (°C)",
-          "smart_pi_aggressiveness": "Agressivité",
           "smart_pi_use_setpoint_filter": "Utiliser le filtre de consigne",
           "minimal_activation_delay": "Délai minimal d'activation",
           "minimal_deactivation_delay": "Délai de désactivation minimal"
@@ -757,7 +754,6 @@
         "data_description": {
           "use_smart_pi_central_config": "Cochez pour utiliser la configuration SmartPI centrale. Décochez pour utiliser une configuration SmartPI spécifique pour ce VTherm",
           "smart_pi_deadband": "Bande morte autour de la consigne. Aucune action de régulation dans cette plage. Évite les oscillations près de la cible.",
-          "smart_pi_aggressiveness": "Vitesse de réponse du contrôleur (0.1=très rapide, 0.5=équilibré, 1.0=lent, 2.0=très lent)",
           "smart_pi_use_setpoint_filter": "Activez le filtre de consigne asymétrique pour réduire le dépassement lors de l'augmentation de la consigne. Décochez si vous voulez que le thermostat réagisse immédiatement aux changements de consigne.",
           "minimal_activation_delay": "Délai en secondes en-dessous duquel l'équipement ne sera pas activé",
           "minimal_deactivation_delay": "Délai en secondes en-dessous duquel l'équipement sera laissé actif"

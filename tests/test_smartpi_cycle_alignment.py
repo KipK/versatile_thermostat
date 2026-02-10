@@ -61,7 +61,6 @@ async def test_smartpi_60s_timer_interference():
         name="TestAlgo",
         max_on_percent=1.0,
         deadband_c=0.1,
-        aggressiveness=1.0
     )
     t.prop_algorithm = algo
     t.underlyings = []

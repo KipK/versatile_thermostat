@@ -15,7 +15,6 @@ class TestSmartPINearBandModel:
             0, # min_deactivation
             "test_pi", # name
             max_on_percent=1.0,
-            aggressiveness=1.0,
             deadband_c=0.0,
             near_band_deg=0.5,
         )

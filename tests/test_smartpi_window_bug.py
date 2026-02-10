@@ -34,7 +34,6 @@ def test_smartpi_window_negative_integral_bug():
         minimal_activation_delay=0, 
         minimal_deactivation_delay=0,
         name="TestVTherm",
-        aggressiveness=1.0,
         deadband_c=0.5
     )
 
