@@ -88,10 +88,9 @@ Les paramètres par défaut conviennent à la majorité des cas.
 | Paramètre | Description | Valeur conseillée |
 |-----------|-------------|-------------------|
 | **Bande morte** | Zone de tolérance autour de la consigne (±X°C). | 0.05°C |
-| **Agressivité** | Facteur multiplicateur des gains PI. | 0.5 (défaut) à 1.0 (réactif) |
-| **Filtre de consigne** | Active le "Soft Landing". | Activé |
+| **Filtre de consigne** | Active le "Soft Landing". | Désactivé |
 
-> **Astuce** : Si la température oscille trop, baissez l'agressivité à 0.3. Si elle est trop lente à rejoindre la consigne, montez à 0.8 ou 1.0.
+> **Astuce** : Si la température oscille trop, essayez d'augmenter la bande morte.
 
 ## Métriques de diagnostic
 

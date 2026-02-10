@@ -298,8 +298,7 @@
           "heater_cooling_time": "Heater cool-down time (min)",
           "auto_tpi_max_coef_int": "Max Internal Coefficient",
           "auto_tpi_heating_rate": "Heating rate ({unit}/h)",
-          "smart_pi_deadband": "Deadband (°C)",
-          "smart_pi_aggressiveness": "Aggressiveness"
+          "smart_pi_deadband": "Deadband (°C)"
         },
         "data_description": {
           "auto_tpi_enable_update_config": "Automatically update the configuration with learned coefficients",
@@ -338,13 +337,11 @@
         "description": "Configure the SmartPI adaptive controller parameters.",
         "data": {
           "use_smart_pi_central_config": "Use central SmartPI configuration",
-          "smart_pi_deadband": "Deadband (°C)",
-          "smart_pi_aggressiveness": "Aggressiveness"
+          "smart_pi_deadband": "Deadband (°C)"
         },
         "data_description": {
           "use_smart_pi_central_config": "Check to use the central SmartPI configuration. Uncheck to use a specific SmartPI configuration for this VTherm",
-          "smart_pi_deadband": "Deadband around setpoint. No regulation action within this range. Prevents oscillations near target.",
-          "smart_pi_aggressiveness": "Controller response speed (0.1=very fast, 0.5=balanced, 1.0=slow, 2.0=very slow)"
+          "smart_pi_deadband": "Deadband around setpoint. No regulation action within this range. Prevents oscillations near target."
         }
       },
       "sync_device_internal_temp": {
@@ -712,8 +709,7 @@
           "auto_tpi_max_coef_int": "Max Internal Coefficient",
           "auto_tpi_heating_rate": "Heating rate (°C/h)",
           "auto_tpi_cooling_rate": "Cooling rate (°C/h)",
-          "smart_pi_deadband": "Deadband (°C)",
-          "smart_pi_aggressiveness": "Aggressiveness"
+          "smart_pi_deadband": "Deadband (°C)"
         },
         "data_description": {
           "auto_tpi_enable_update_config": "Automatically update the configuration with learned coefficients",
@@ -723,8 +719,7 @@
           "heater_heating_time": "Time to reach full power (minutes)",
           "heater_cooling_time": "Time to cool down after stop (minutes)",
           "auto_tpi_max_coef_int": "Maximum allowed value for the internal coefficient (Coeff Int)",
-          "smart_pi_deadband": "Deadband around setpoint (°C). No regulation within this range",
-          "smart_pi_aggressiveness": "Controller aggressiveness (0.1=very aggressive, 1.0=slow, 2.0=very slow)"
+          "smart_pi_deadband": "Deadband around setpoint (°C). No regulation within this range"
         }
       },
       "auto_tpi_avg_settings": {

@@ -334,13 +334,11 @@
         "data": {
           "use_smart_pi_central_config": "Use central SmartPI configuration",
           "smart_pi_deadband": "Deadband (°C)",
-          "smart_pi_aggressiveness": "Aggressiveness",
           "smart_pi_use_setpoint_filter": "Use Setpoint Filter"
         },
         "data_description": {
           "use_smart_pi_central_config": "Check to use the central SmartPI configuration. Uncheck to use a specific SmartPI configuration for this VTherm",
           "smart_pi_deadband": "Deadband around setpoint. No regulation action within this range. Prevents oscillations near target.",
-          "smart_pi_aggressiveness": "Controller response speed (0.1=very fast, 0.5=balanced, 1.0=slow, 2.0=very slow)",
           "smart_pi_use_setpoint_filter": "Enable the asymmetric setpoint filter to reduce overshoot on setpoint increase. Uncheck if you want the thermostat to react immediately to setpoint changes."
         }
       },
@@ -765,7 +763,6 @@
         "data": {
           "use_smart_pi_central_config": "Use central SmartPI configuration",
           "smart_pi_deadband": "Deadband (°C)",
-          "smart_pi_aggressiveness": "Aggressiveness",
           "smart_pi_use_setpoint_filter": "Use Setpoint Filter",
           "minimal_activation_delay": "Minimum activation delay",
           "minimal_deactivation_delay": "Minimum deactivation delay"
@@ -773,7 +770,6 @@
         "data_description": {
           "use_smart_pi_central_config": "Check to use the central SmartPI configuration. Uncheck to use a specific SmartPI configuration for this VTherm",
           "smart_pi_deadband": "Deadband around setpoint. No regulation action within this range. Prevents oscillations near target.",
-          "smart_pi_aggressiveness": "Controller response speed (0.1=very fast, 0.5=balanced, 1.0=slow, 2.0=very slow)",
           "smart_pi_use_setpoint_filter": "Enable the asymmetric setpoint filter to reduce overshoot on setpoint increase. Uncheck if you want the thermostat to react immediately to setpoint changes.",
           "minimal_activation_delay": "Delay in seconds under which the equipment will not be activated",
           "minimal_deactivation_delay": "Delay in seconds under which the equipment will be kept active"

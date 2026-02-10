@@ -25,8 +25,6 @@ def test_smartpi_setpoint_change_aborts_learning():
         minimal_activation_delay=0,
         minimal_deactivation_delay=0,
         name="TestTherm",
-
-        aggressiveness=1.0,  # default
     )
     force_smartpi_stable_mode(smart_pi)
     

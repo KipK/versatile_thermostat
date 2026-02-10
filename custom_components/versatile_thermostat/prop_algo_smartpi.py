@@ -883,7 +883,6 @@ class SmartPI(CycleManager):
         max_on_percent: Optional[float] = None,
         # Tuning knobs (keyword)
         deadband_c: float = DEFAULT_DEADBAND_C,
-        aggressiveness: float = 1.0,  # Note: logic changed, 1.0 is now default
         saved_state: Optional[Dict[str, Any]] = None,
         # --- Feed-forward (FF) progressive enablement ("smart warm-up") ---
         ff_warmup_ok_count: int = 30,
@@ -904,7 +903,6 @@ class SmartPI(CycleManager):
         self._name = name
         # self._cycle_min is managed by CycleManager
         self.deadband_c = float(deadband_c)
-        self.aggressiveness = float(aggressiveness)
 
         self._minimal_activation_delay = int(minimal_activation_delay)
         self._minimal_deactivation_delay = int(minimal_deactivation_delay)
@@ -2739,10 +2737,6 @@ class SmartPI(CycleManager):
         else:
             kp = KP_SAFE
             ki = KI_SAFE
-
-        # Apply global aggressiveness
-        kp *= max(self.aggressiveness, 0.0)
-        ki *= max(self.aggressiveness, 0.0)
 
         self._kp = kp
         self._ki = ki

@@ -568,12 +568,7 @@ STEP_SMART_PI_PARAMS_SCHEMA = vol.Schema(
                 min=0.0, max=1.0, step=0.01, mode=selector.NumberSelectorMode.BOX
             )
         ),
-        vol.Optional(CONF_SMART_PI_AGGRESSIVENESS, default=1.0): selector.NumberSelector(
-            selector.NumberSelectorConfig(
-                min=0.1, max=2.0, step=0.1, mode=selector.NumberSelectorMode.BOX
-            )
-        ),
-        vol.Optional(CONF_SMART_PI_USE_SETPOINT_FILTER, default=True): cv.boolean,
+        vol.Optional(CONF_SMART_PI_USE_SETPOINT_FILTER, default=False): cv.boolean,
         vol.Optional(CONF_MINIMAL_ACTIVATION_DELAY, default=0): cv.positive_int,
         vol.Optional(CONF_MINIMAL_DEACTIVATION_DELAY, default=0): cv.positive_int,
     }
@@ -587,12 +582,7 @@ STEP_SMART_PI_CENTRAL_SCHEMA = vol.Schema(
                 min=0.0, max=1.0, step=0.01, mode=selector.NumberSelectorMode.BOX
             )
         ),
-        vol.Optional(CONF_SMART_PI_AGGRESSIVENESS, default=1.0): selector.NumberSelector(
-            selector.NumberSelectorConfig(
-                min=0.1, max=2.0, step=0.1, mode=selector.NumberSelectorMode.BOX
-            )
-        ),
-        vol.Optional(CONF_SMART_PI_USE_SETPOINT_FILTER, default=True): cv.boolean,
+        vol.Optional(CONF_SMART_PI_USE_SETPOINT_FILTER, default=False): cv.boolean,
         vol.Optional(CONF_MINIMAL_ACTIVATION_DELAY, default=0): cv.positive_int,
         vol.Optional(CONF_MINIMAL_DEACTIVATION_DELAY, default=0): cv.positive_int,
     }

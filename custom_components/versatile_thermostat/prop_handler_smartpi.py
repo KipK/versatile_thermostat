@@ -18,7 +18,6 @@ from .const import (
     CONF_MINIMAL_DEACTIVATION_DELAY,
     CONF_MAX_ON_PERCENT,
     CONF_SMART_PI_DEADBAND,
-    CONF_SMART_PI_AGGRESSIVENESS,
     CONF_SMART_PI_USE_SETPOINT_FILTER,
     EventType,
 )
@@ -69,7 +68,6 @@ class SmartPIHandler:
 
         # SmartPI specific
         deadband = entry.get(CONF_SMART_PI_DEADBAND, 0.05)
-        aggressiveness = entry.get(CONF_SMART_PI_AGGRESSIVENESS, 1.0)
         use_setpoint_filter = entry.get(CONF_SMART_PI_USE_SETPOINT_FILTER, True)
 
         # Create SmartPI instance
@@ -82,7 +80,6 @@ class SmartPIHandler:
             name=t.name,
             max_on_percent=max_on_percent,
             deadband_c=deadband,
-            aggressiveness=aggressiveness,
             use_setpoint_filter=use_setpoint_filter,
         )
 
