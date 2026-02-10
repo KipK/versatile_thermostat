@@ -361,6 +361,13 @@ class SmartPIHandler:
                     if algo._last_calibration_time else None
                 ),
                 "calibration_retry_count": algo._calibration_retry_count,
+                # Safety-First Governance
+                "governance_regime": algo._current_governance_regime.value,
+                "governance_cycle_regimes": [r.value for r in algo._cycle_regimes],
+                "freeze_reason_thermal": algo._last_freeze_reason_thermal.value,
+                "freeze_reason_gains": algo._last_freeze_reason_gains.value,
+                "governance_decision_thermal": algo._last_governance_decision_thermal.value,
+                "governance_decision_gains": algo._last_governance_decision_gains.value,
             }
 
             # Add to configuration dict for consistency with TPI
