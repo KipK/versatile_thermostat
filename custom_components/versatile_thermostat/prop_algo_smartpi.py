@@ -82,6 +82,89 @@ class SmartPIPhase(str, Enum):
     STABLE = "Stable"          # PI control with reliable model
     CALIBRATION = "Calibration" # Forced calibration cycle in progress
 
+
+########################################################################
+#                      SAFETY-FIRST GOVERNANCE ENUMS                   #
+########################################################################
+
+class GovernanceRegime(str, Enum):
+    """Physical regime detected during a calculation step."""
+    WARMUP = "warmup"                  # Hysteresis / bootstrap phase
+    EXCITED_STABLE = "excited_stable"  # Normal PI regulation, significant error
+    NEAR_BAND = "near_band"            # Close to setpoint, weak signal
+    DEAD_BAND = "dead_band"            # In dead band, no action
+    HOLD = "hold"                      # Integrator hold active
+    PERTURBED = "perturbed"            # External disturbance (window, shedding)
+    DEGRADED = "degraded"              # Sensor absent, deadtime unknown
+    SATURATED = "saturated"            # Command at 0% or 100%
+
+
+class FreezeReason(str, Enum):
+    """Diagnostic reason why adaptation was frozen."""
+    NONE = "none"
+    # Structural
+    REGIME_TRANSITION = "regime_transition"  # Cycle not homogeneous
+    CYCLE_INVALID = "cycle_invalid"
+    # Physical / external
+    EVENT_POLLUTED = "event_polluted"
+    SENSOR_INVALID = "sensor_invalid"
+    DEADTIME_UNRELIABLE = "deadtime_unreliable"
+    BOOT_GUARD = "boot_guard"
+    # Regime-specific
+    DEAD_BAND = "dead_band"
+    NEAR_BAND = "near_band"
+    WARMUP = "warmup"
+    HOLD = "hold"
+    PERTURBED = "perturbed"
+    SATURATION = "saturation"
+    SYSTEM_INEFFICIENT = "system_inefficient"
+
+
+class GovernanceDecision(str, Enum):
+    """Decision level for parameter adaptation."""
+    ADAPT_ON = "adapt_on"                # Calculation and update allowed
+    FREEZE = "freeze"                    # Keep previous values
+    HARD_FREEZE = "hard_freeze"          # Absolute prohibition of update
+    SOFT_FREEZE_DOWN = "soft_freeze_down" # Only decrease allowed
+
+
+# Governance matrix: regime -> {domain: (decision, freeze_reason)}
+# Domains: 'thermal' (a/b learning), 'gains' (Kp/Ki adaptation)
+_GOVERNANCE_MATRIX = {
+    GovernanceRegime.WARMUP: {
+        "thermal": (GovernanceDecision.ADAPT_ON, FreezeReason.NONE),
+        "gains": (GovernanceDecision.FREEZE, FreezeReason.WARMUP),
+    },
+    GovernanceRegime.EXCITED_STABLE: {
+        "thermal": (GovernanceDecision.ADAPT_ON, FreezeReason.NONE),
+        "gains": (GovernanceDecision.ADAPT_ON, FreezeReason.NONE),
+    },
+    GovernanceRegime.NEAR_BAND: {
+        "thermal": (GovernanceDecision.HARD_FREEZE, FreezeReason.NEAR_BAND),
+        "gains": (GovernanceDecision.SOFT_FREEZE_DOWN, FreezeReason.NEAR_BAND),
+    },
+    GovernanceRegime.DEAD_BAND: {
+        "thermal": (GovernanceDecision.HARD_FREEZE, FreezeReason.DEAD_BAND),
+        "gains": (GovernanceDecision.HARD_FREEZE, FreezeReason.DEAD_BAND),
+    },
+    GovernanceRegime.SATURATED: {
+        "thermal": (GovernanceDecision.HARD_FREEZE, FreezeReason.SATURATION),
+        "gains": (GovernanceDecision.FREEZE, FreezeReason.SATURATION),
+    },
+    GovernanceRegime.HOLD: {
+        "thermal": (GovernanceDecision.HARD_FREEZE, FreezeReason.HOLD),
+        "gains": (GovernanceDecision.SOFT_FREEZE_DOWN, FreezeReason.HOLD),
+    },
+    GovernanceRegime.PERTURBED: {
+        "thermal": (GovernanceDecision.HARD_FREEZE, FreezeReason.PERTURBED),
+        "gains": (GovernanceDecision.HARD_FREEZE, FreezeReason.PERTURBED),
+    },
+    GovernanceRegime.DEGRADED: {
+        "thermal": (GovernanceDecision.HARD_FREEZE, FreezeReason.SENSOR_INVALID),
+        "gains": (GovernanceDecision.HARD_FREEZE, FreezeReason.SENSOR_INVALID),
+    },
+}
+
 # ------------------------------
 # Default controller parameters
 # ------------------------------
@@ -963,6 +1046,18 @@ class SmartPI(CycleManager):
         self._force_calibration_requested: bool = False
         self._calibration_retry_count: int = 0
 
+        # --- Safety-First Governance ---
+        self._cycle_regimes: set = set()
+        self._current_governance_regime: GovernanceRegime = GovernanceRegime.WARMUP
+        self._last_freeze_reason_thermal: FreezeReason = FreezeReason.NONE
+        self._last_freeze_reason_gains: FreezeReason = FreezeReason.NONE
+        self._last_governance_decision_thermal: GovernanceDecision = GovernanceDecision.ADAPT_ON
+        self._last_governance_decision_gains: GovernanceDecision = GovernanceDecision.ADAPT_ON
+        # Store previous valid gains for freeze logic
+        self._prev_kp: float = KP_SAFE
+        self._prev_ki: float = KI_SAFE
+        self._output_initialized: bool = False  # True after first calculate output
+
 
         if saved_state:
             self.load_state(saved_state)
@@ -1038,6 +1133,17 @@ class SmartPI(CycleManager):
         self._calibration_state = SmartPICalibrationPhase.IDLE
         self._force_calibration_requested = False
         self._calibration_retry_count = 0
+
+        # Reset Governance
+        self._cycle_regimes.clear()
+        self._current_governance_regime = GovernanceRegime.WARMUP
+        self._last_freeze_reason_thermal = FreezeReason.NONE
+        self._last_freeze_reason_gains = FreezeReason.NONE
+        self._last_governance_decision_thermal = GovernanceDecision.ADAPT_ON
+        self._last_governance_decision_gains = GovernanceDecision.ADAPT_ON
+        self._prev_kp = KP_SAFE
+        self._prev_ki = KI_SAFE
+        self._output_initialized = False
 
         _LOGGER.info("%s - SmartPI learning and history reset", self._name)
 
@@ -1360,6 +1466,75 @@ class SmartPI(CycleManager):
         self.learn_t_int_s = 0.0
         self.learn_u_first = None
 
+    ########################################################################
+    #                      SAFETY-FIRST GOVERNANCE                         #
+    ########################################################################
+
+    def _determine_current_regime(
+        self,
+        ext_temp: float | None = None,
+        integrator_hold: bool = False,
+        power_shedding: bool = False,
+    ) -> GovernanceRegime:
+        """Determine the current governance regime based on system state."""
+        # Phase-based
+        if self.phase == SmartPIPhase.HYSTERESIS:
+            return GovernanceRegime.WARMUP
+
+        # Degraded: sensor issues
+        if ext_temp is None:
+            return GovernanceRegime.DEGRADED
+
+        # Perturbed: active perturbation
+        if power_shedding:
+            return GovernanceRegime.PERTURBED
+
+        # Hold
+        if integrator_hold:
+            return GovernanceRegime.HOLD
+
+        # Saturation (command at limits) - only meaningful after first output computed
+        if self._output_initialized and (self._on_percent <= 0.001 or self._on_percent >= 0.999):
+            return GovernanceRegime.SATURATED
+
+        # Dead band (checked before near-band because it's a stricter zone)
+        if self._in_deadband:
+            return GovernanceRegime.DEAD_BAND
+
+        # Near band
+        if self._in_near_band:
+            return GovernanceRegime.NEAR_BAND
+
+        # Default: normal regulation
+        return GovernanceRegime.EXCITED_STABLE
+
+    def decide_update(self, domain: str) -> tuple:
+        """Central governance decision for a given domain.
+
+        Args:
+            domain: 'thermal' (a/b learning) or 'gains' (Kp/Ki adaptation)
+
+        Returns:
+            (GovernanceDecision, FreezeReason)
+        """
+        # Priority 1: Critical errors
+        if self._learning_resume_ts is not None:
+            now = time.monotonic()
+            if now < self._learning_resume_ts:
+                return GovernanceDecision.HARD_FREEZE, FreezeReason.PERTURBED
+
+        # Priority 2: Regime transition (cycle homogeneity)
+        if len(self._cycle_regimes) > 1:
+            return GovernanceDecision.HARD_FREEZE, FreezeReason.REGIME_TRANSITION
+
+        # Priority 3: Regime-specific matrix
+        regime = self._current_governance_regime
+        if regime in _GOVERNANCE_MATRIX:
+            return _GOVERNANCE_MATRIX[regime][domain]
+
+        # Fallback: safety
+        return GovernanceDecision.HARD_FREEZE, FreezeReason.SYSTEM_INEFFICIENT
+
     def update_learning(
         self,
         dt_min: float,
@@ -1379,6 +1554,17 @@ class SmartPI(CycleManager):
             setpoint_changed: True if setpoint changed during this interval
         """
         if dt_min <= 0.001:
+            return
+
+        # --- Governance gate (thermal domain: a/b learning) ---
+        gov_decision, gov_reason = self.decide_update('thermal')
+        self._last_governance_decision_thermal = gov_decision
+        self._last_freeze_reason_thermal = gov_reason
+        if gov_decision in (GovernanceDecision.HARD_FREEZE, GovernanceDecision.FREEZE):
+            self.est.learn_skip_count += 1
+            self.est.learn_last_reason = f"skip: governance ({gov_reason.value})"
+            if self.learn_win_active:
+                self._reset_learning_window()
             return
 
         now = time.monotonic()
@@ -1572,6 +1758,8 @@ class SmartPI(CycleManager):
         self._setpoint_changed_in_cycle = False
         # Update internal on_percent to match applied value
         self._on_percent = on_percent
+        # Reset governance regime tracking for new cycle
+        self._cycle_regimes.clear()
 
     async def on_cycle_completed(self, new_params: dict, prev_params: dict | None) -> bool:
         """Handle end of cycle (learning). Return False to extend window."""
@@ -2703,9 +2891,38 @@ class SmartPI(CycleManager):
                 kp, ki
             )
 
-        # Store current gains (for diagnostics)
+        # --- Governance: Regime tracking ---
+        self._current_governance_regime = self._determine_current_regime(
+            ext_temp=ext_current_temp,
+            integrator_hold=integrator_hold,
+            power_shedding=power_shedding,
+        )
+        self._cycle_regimes.add(self._current_governance_regime)
+
+        # --- Governance gate (gains domain: Kp/Ki) ---
+        gov_decision_g, gov_reason_g = self.decide_update('gains')
+        self._last_governance_decision_gains = gov_decision_g
+        self._last_freeze_reason_gains = gov_reason_g
+
+        if gov_decision_g == GovernanceDecision.HARD_FREEZE:
+            # Absolute prohibition: keep previous valid gains
+            kp = self._prev_kp
+            ki = self._prev_ki
+        elif gov_decision_g == GovernanceDecision.FREEZE:
+            # Keep previous gains
+            kp = self._prev_kp
+            ki = self._prev_ki
+        elif gov_decision_g == GovernanceDecision.SOFT_FREEZE_DOWN:
+            # Only allow decrease from previous values
+            kp = min(kp, self._prev_kp)
+            ki = min(ki, self._prev_ki)
+        # ADAPT_ON: use computed kp/ki as-is
+
+        # Store current gains (for diagnostics and governance freeze reference)
         self.Kp = kp
         self.Ki = ki
+        self._prev_kp = kp
+        self._prev_ki = ki
 
         ########################################################################
         #                                                                      #
@@ -3069,6 +3286,7 @@ class SmartPI(CycleManager):
 
         # Update on_percent with final applied command
         self._on_percent = u_applied
+        self._output_initialized = True
 
         # --- Dead Time Detection Update (Smart-PI v2) ---
         # 1. Detect Episode Start/Stop for gating
@@ -3270,4 +3488,12 @@ class SmartPI(CycleManager):
             "near_band_below_deg": self._near_band_below_deg,
             "near_band_above_deg": self._near_band_above_deg,
             "near_band_source": self._near_band_source,
+
+            # Safety-First Governance
+            "governance_regime": self._current_governance_regime.value,
+            "governance_cycle_regimes": [r.value for r in self._cycle_regimes],
+            "freeze_reason_thermal": self._last_freeze_reason_thermal.value,
+            "freeze_reason_gains": self._last_freeze_reason_gains.value,
+            "governance_decision_thermal": self._last_governance_decision_thermal.value,
+            "governance_decision_gains": self._last_governance_decision_gains.value,
         }

@@ -81,7 +81,7 @@ def test_start_pause_logic():
     )
     
     assert pi.est.learn_skip_count == 1
-    assert "resume cool-down" in pi.est.learn_last_reason
+    assert "skip" in pi.est.learn_last_reason and ("resume" in pi.est.learn_last_reason or "governance" in pi.est.learn_last_reason)
     
     # 4. Simulate cycle completion AFTER 20 mins
     # We cheat by rewinding _learning_resume_ts instead of sleeping 20 mins

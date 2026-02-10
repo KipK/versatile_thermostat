@@ -116,6 +116,10 @@ def test_smartpi_gain_adaptation():
 
     # Reset the rate-limiting timestamp to allow immediate recalculation
     smartpi._last_calculate_time = None
+    # Clear cycle regimes to simulate a clean cycle (avoid REGIME_TRANSITION freeze)
+    smartpi._cycle_regimes.clear()
+    # Prevent false resume detection from _last_calculate_time reset
+    smartpi._startup_grace_period = True
 
     smartpi.calculate(
         target_temp=20,
