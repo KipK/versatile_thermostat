@@ -1,9 +1,9 @@
-# The SmartPI Algorithm (v2)
+# The SmartPI Algorithm
 
-- [The SmartPI Algorithm (v2)](#the-smartpi-algorithm-v2)
+- [The SmartPI Algorithm](#the-smartpi-algorithm)
   - [How it works](#how-it-works)
   - [Operating Phases](#operating-phases)
-  - [Advanced Features (Smart-PI v2)](#advanced-features-smart-pi-v2)
+  - [Advanced Features](#advanced-features)
   - [Configuration](#configuration)
   - [Diagnostic Metrics](#diagnostic-metrics)
   - [Services](#services)
@@ -52,9 +52,9 @@ If the algorithm detects that its **Dead Time** data is no longer reliable or if
 *   This allows for precise recalibration of the system's reaction delays.
 *   This phase can also be triggered manually via a service.
 
-## Advanced Features (Smart-PI v2)
+## Advanced Features
 
-Version v2 of SmartPI introduces several refinements to improve stability and comfort:
+SmartPI introduces several refinements to improve stability and comfort:
 
 ### 1. Dead Time Estimation
 SmartPI automatically detects the delay (**L**) between the command to turn on and the actual temperature reaction.
@@ -99,11 +99,15 @@ For advanced users, the climate entity exposes detailed attributes:
 | Attribute | Description |
 |-----------|-------------|
 | `regulation_mode` | Current mode: `hysteresis` (learning) or `smartpi` (regulated) |
+| `phase` | Current algorithm phase: `Hysteresis`, `Stable`, or `Calibration` |
 | `hysteresis_state`| Hysteresis state: `on`, `off` or `band` |
 | `tau_min` | Room thermal inertia (minutes). E.g., 600 = 10h |
 | `deadtime_heat_s` | Estimated dead time in seconds (heating lag) |
 | `deadtime_cool_s` | Estimated dead time in seconds (cooling lag) |
 | `deadtime_reliable`| `true` if dead time has been correctly identified |
+| `deadtime_skip_count_a` | Counter of ignored learning (parameter a) due to dead time |
+| `deadtime_skip_count_b` | Counter of ignored learning (parameter b) due to dead time |
+| `in_deadtime_window` | `true` if the system is currently in a dead time window |
 | `a` | Heating efficiency (°C/min at 100%) |
 | `b` | Loss coefficient (1/min) |
 | `learn_ok_count` | Number of validated learning episodes |
@@ -111,7 +115,19 @@ For advanced users, the climate entity exposes detailed attributes:
 | `error` | Setpoint - Temperature deviation |
 | `u_ff` | "Feed-Forward" power share (weather anticipation) |
 | `u_pi` | "PI" power share (error correction) |
-| `on_percent` | Total power applied (0.0 to 1.0) |
+| `Kp`, `Ki` | Calculated regulator gains |
+| `Kp_reel`, `Ki_reel` | Actually applied gains (including reductions like Near-Band) |
+| `kp_source` | Gain Kp source: `IMC`, `Heuristic` or `Safe` |
+| `on_percent` | Target total power (0.0 to 1.0) |
+| `u_applied` | Real applied power after all limitations |
+| `in_deadband` | `true` if temperature is within the comfort zone (Deadband) |
+| `in_near_band` | `true` if system is in the slowdown zone (Near-Band) |
+| `setpoint_boost_active` | `true` if Boost mode is enabled |
+| `calibration_state` | Forced calibration state: `Idle`, `CoolDown`, `HeatUp`, etc. |
+| `last_calibration_time` | Date and time of the last successful calibration |
+| `governance_regime` | Detected physical regime (Governance) |
+| `freeze_reason_thermal` | Reason for freezing thermal parameters learning (a, b) |
+| `freeze_reason_gains` | Reason for freezing gains adaptation (Kp, Ki) |
 
 
 ## Services

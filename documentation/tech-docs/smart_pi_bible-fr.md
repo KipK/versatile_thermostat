@@ -256,4 +256,42 @@ Les paramètres clés accessibles pour le debugging ou les réglages fins (dans 
 
 | `LEARN_QUALITY_THRESHOLD` | 0.25 | Qualité minimale (R²) pour accepter une régression |
 
+
+## 8. Gouvernance Safety-First
+
+Pour garantir la stabilité du modèle thermique face aux aléas du monde réel, Smart-PI intègre une couche de supervision appelée **Safety-First Governance**. Son rôle est de détecter les régimes physiques inappropriés pour l'apprentissage et de geler l'adaptation des paramètres.
+
+### 8.1 Régimes de Gouvernance (`GovernanceRegime`)
+
+À chaque cycle, l'algorithme identifie le régime dans lequel se trouve le système :
+
+- **WARMUP** : Phase de démarrage (quelques cycles) où les dynamiques transitoires sont trop fortes.
+- **EXCITED_STABLE** : Régime idéal pour l'apprentissage (en dehors de la bande morte, avec une excitation suffisante).
+- **NEAR_BAND** : Proximité immédiate de la consigne ; les gains sont réduits, l'apprentissage est gelé.
+- **DEAD_BAND** : Système à l'équilibre ; aucune information utile pour l'apprentissage.
+- **HOLD** : La consigne est stable et l'erreur est nulle ; maintien des paramètres.
+- **PERTURBED** : Détection d'une perturbation externe forte (ex: ouverture fenêtre, apport solaire massif).
+- **DEGRADED** : Capteur invalide ou données manquantes.
+- **SATURATED** : L'actionneur est saturé à 0% ou 100% depuis trop longtemps.
+
+### 8.2 Décisions de Gouvernance (`GovernanceDecision`)
+
+Selon le régime détecté, le superviseur prend une décision pour l'adaptation du modèle thermique et des gains PI :
+
+- **ADAPT_ON** : Autorise la mise à jour des paramètres $a$ and $b$.
+- **FREEZE** : Gèle temporairement l'apprentissage mais conserve l'état courant.
+- **HARD_FREEZE** : Gèle l'apprentissage et réinitialise certaines sécurités (ex: anti-windup).
+- **SOFT_FREEZE_DOWN** : Autorise uniquement la diminution des gains ou de l'intégrale pour des raisons de sécurité.
+
+### 8.3 Codes de Diagnostic (`FreezeReason`)
+
+En cas de gel, l'attribut `freeze_reason` permet de comprendre la cause :
+- `REGIME_TRANSITION` : Transition de régime en cours.
+- `SENSOR_INVALID` : Température ou consigne non fiable.
+- `BOOT_GUARD` : Protection durant les premières minutes du démarrage.
+- `SATURATION` : Actionneur saturé.
+- `SYSTEM_INEFFICIENT` : Le système ne réagit pas comme attendu par le modèle.
+
+---
+
 Ce document sert de référence pour la maintenance et l'évolution de l'algorithme Smart-PI.

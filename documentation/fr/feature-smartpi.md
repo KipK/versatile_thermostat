@@ -1,9 +1,9 @@
-# L'algorithme SmartPI (v2)
+# L'algorithme SmartPI
 
-- [L'algorithme SmartPI](#lalgorithme-smartpi-v2)
+- [L'algorithme SmartPI](#lalgorithme-smartpi)
   - [Principe de fonctionnement](#principe-de-fonctionnement)
   - [Phases de fonctionnement](#phases-de-fonctionnement)
-  - [Fonctionnalités Avancées (Smart-PI v2)](#fonctionnalités-avancées-smart-pi-v2)
+  - [Fonctionnalités Avancées](#fonctionnalités-avancées)
   - [Configuration](#configuration)
   - [Métriques de diagnostic](#métriques-de-diagnostic)
   - [Services](#services)
@@ -52,9 +52,9 @@ Si l'algorithme détecte que ses données de **Temps Mort** ne sont plus fiables
 *   Cela permet de recalibrer précisément les délais de réaction du système.
 *   Cette phase peut aussi être déclenchée manuellement via un service.
 
-## Fonctionnalités Avancées (Smart-PI v2)
+## Fonctionnalités Avancées
 
-La version v2 de SmartPI introduit plusieurs raffinements pour améliorer la stabilité et le confort :
+SmartPI introduit plusieurs raffinements pour améliorer la stabilité et le confort :
 
 ### 1. Estimation du Temps Mort (Dead Time)
 SmartPI détecte automatiquement le délai (**L**) entre l'ordre d'allumage et la réaction effective de la température.
@@ -99,11 +99,15 @@ Pour les utilisateurs avancés, l'entité climate expose des attributs détaill�
 | Attribut | Description |
 |----------|-------------|
 | `regulation_mode` | Mode actuel : `hysteresis` (apprentissage) ou `smartpi` (régulé) |
+| `phase` | Phase actuelle de l'algorithme : `Hysteresis`, `Stable` ou `Calibration` |
 | `hysteresis_state`| État en phase hystérésis : `on`, `off` ou `band` |
 | `tau_min` | Inertie thermique de la pièce (minutes). Ex: 600 = 10h |
 | `deadtime_heat_s` | Temps mort estimé en secondes (délai de réaction chauffage) |
 | `deadtime_cool_s` | Temps mort estimé en secondes (délai de réaction refroidissement) |
 | `deadtime_reliable`| `true` si le temps mort a été correctement identifié |
+| `deadtime_skip_count_a` | Compteur d'apprentissages ignorés (paramètre a) dus au temps mort |
+| `deadtime_skip_count_b` | Compteur d'apprentissages ignorés (paramètre b) dus au temps mort |
+| `in_deadtime_window` | `true` si le système est actuellement dans une fenêtre de temps mort |
 | `a` | Efficacité de chauffage (°C/min à 100%) |
 | `b` | Coefficient de perte (1/min) |
 | `learn_ok_count` | Nombre d'apprentissages validés |
@@ -111,7 +115,19 @@ Pour les utilisateurs avancés, l'entité climate expose des attributs détaill�
 | `error` | Écart Consigne - Température |
 | `u_ff` | Part de puissance "Feed-Forward" (anticipation météo) |
 | `u_pi` | Part de puissance "PI" (correction d'erreur) |
-| `on_percent` | Puissance totale appliquée (0.0 à 1.0) |
+| `Kp`, `Ki` | Gains calculés du régulateur |
+| `Kp_reel`, `Ki_reel` | Gains réellement appliqués (incluant les réductions type Near-Band) |
+| `kp_source` | Origine du gain Kp : `IMC`, `Heuristic` ou `Safe` |
+| `on_percent` | Puissance totale de consigne (0.0 à 1.0) |
+| `u_applied` | Puissance réellement appliquée après toutes limitations |
+| `in_deadband` | `true` si la température est dans la zone de confort (Deadband) |
+| `in_near_band` | `true` si le système est dans la zone de ralentissement (Near-Band) |
+| `setpoint_boost_active` | `true` si le mode Boost est activé |
+| `calibration_state` | État de la calibration forcée : `Idle`, `CoolDown`, `HeatUp`, etc. |
+| `last_calibration_time` | Date et heure de la dernière calibration réussie |
+| `governance_regime` | Régime physique détecté (Gouvernance) |
+| `freeze_reason_thermal` | Raison du gel de l'apprentissage des paramètres thermiques (a, b) |
+| `freeze_reason_gains` | Raison du gel de l'adaptation des gains (Kp, Ki) |
 
 
 ## Services
