@@ -347,6 +347,7 @@ class SmartPIHandler:
                 "in_deadtime_window": algo.in_deadtime_window,
                 "kp_source": algo._kp_source,
                 "deadtime_skip_count_a": algo._deadtime_skip_count_a,
+                "deadtime_skip_count_b": algo._deadtime_skip_count_b,
                 # Phase 2: Near-Band
                 "near_band_below_deg": algo._near_band_below_deg,
                 "near_band_above_deg": algo._near_band_above_deg,
