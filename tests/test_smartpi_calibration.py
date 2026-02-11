@@ -136,21 +136,13 @@ def test_calibration_cycle_flow():
     # Transition cycle (COOL_DOWN logic runs, detects threshold, switches state)
     algo.calculate(target, current_temp=low_thresh, ext_current_temp=10.0, slope=0, hvac_mode=VThermHvacMode_HEAT)
     assert algo.calibration_state == SmartPICalibrationPhase.HEAT_UP
-    assert algo.on_percent == 0.0 # Remains 0.0 for this cycle as logic fell through
-    
-    # Next cycle (HEAT_UP logic runs)
-    algo.calculate(target, current_temp=low_thresh, ext_current_temp=10.0, slope=0, hvac_mode=VThermHvacMode_HEAT)
-    assert algo.on_percent == 1.0
+    assert algo.on_percent == 1.0 # Updated immediately for responsiveness
     
     # 3. Reach High Threshold -> COOL_DOWN_FINAL
     # Transition cycle
     algo.calculate(target, current_temp=high_thresh, ext_current_temp=10.0, slope=0, hvac_mode=VThermHvacMode_HEAT)
     assert algo.calibration_state == SmartPICalibrationPhase.COOL_DOWN_FINAL
-    assert algo.on_percent == 1.0 # Remains 1.0 (from HEAT_UP logic? No, HEAT_UP logic set 1.0 then switched state)
-    
-    # Next cycle
-    algo.calculate(target, current_temp=high_thresh, ext_current_temp=10.0, slope=0, hvac_mode=VThermHvacMode_HEAT)
-    assert algo.on_percent == 0.0
+    assert algo.on_percent == 0.0 # Updated immediately
     
     # 4. Reach Low Threshold again -> IDLE
     # Transition cycle
