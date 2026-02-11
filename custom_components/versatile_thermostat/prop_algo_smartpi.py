@@ -318,9 +318,9 @@ DEFAULT_KI_NEAR_FACTOR = 0.6
 
 
 # --- Forcé Calibration Constants ---
-FORCE_CALIBRATION_INTERVAL_HOURS = 48
+FORCE_CALIBRATION_INTERVAL_HOURS = 72
 CALIBRATION_RETRY_MAX = 1
-CALIBRATION_TIMEOUT_MIN = 240  # 4 hours timeout
+CALIBRATION_TIMEOUT_MIN = 600  # 10 hours timeout
 
 class SmartPICalibrationPhase(str, Enum):
     """Phases of the Smart-PI forced calibration."""
