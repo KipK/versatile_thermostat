@@ -361,7 +361,7 @@ class DeadTimeEstimator:
         self.min_power_heat_threshold = 0.80
         self.min_power_cool_threshold = 0.80
         self.detection_threshold = 0.05
-        self.timeout_seconds = 7200.0
+        self.timeout_seconds = 14400.0 # 4 hours timeout for slow systems like ground heating
         
         # State
         self.state = "OFF"  # OFF, HEATING, COOLING, WAITING_HEAT_RESPONSE, WAITING_COOL_RESPONSE
