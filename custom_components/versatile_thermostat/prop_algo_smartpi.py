@@ -320,6 +320,7 @@ DEFAULT_KI_NEAR_FACTOR = 0.6
 # --- Forcé Calibration Constants ---
 FORCE_CALIBRATION_INTERVAL_HOURS = 48
 CALIBRATION_RETRY_MAX = 1
+CALIBRATION_TIMEOUT_MIN = 240  # 4 hours timeout
 
 class SmartPICalibrationPhase(str, Enum):
     """Phases of the Smart-PI forced calibration."""
@@ -1042,6 +1043,7 @@ class SmartPI(CycleManager):
         # --- Forced Calibration State ---
         self._last_calibration_time: float | None = None
         self._calibration_state: SmartPICalibrationPhase = SmartPICalibrationPhase.IDLE
+        self._calibration_start_time: float | None = None
         self._force_calibration_requested: bool = False
         self._calibration_retry_count: int = 0
 
@@ -1131,6 +1133,7 @@ class SmartPI(CycleManager):
         # Reset Calibration
         self._last_calibration_time = None
         self._calibration_state = SmartPICalibrationPhase.IDLE
+        self._calibration_start_time = None
         self._force_calibration_requested = False
         self._calibration_retry_count = 0
 
@@ -2366,31 +2369,39 @@ class SmartPI(CycleManager):
             self._on_percent = 0.0
             return
 
+        is_cool = (hvac_mode == VThermHvacMode_COOL)
+        on_low = 1.0 if is_cool else 0.0
+        on_high = 0.0 if is_cool else 1.0
+
         # thresholds
         # Low: target - 0.3
         # High: target + 0.5
         
         # 1. COOL_DOWN: Drive to Low
         if self._calibration_state == SmartPICalibrationPhase.COOL_DOWN:
-            self._on_percent = 0.0
+            self._on_percent = on_low
             if current_temp <= target_temp - HYST_LOWER_C:
                 _LOGGER.info("%s - Calibration: Reached Low Threshold -> HEAT_UP", self._name)
                 self._calibration_state = SmartPICalibrationPhase.HEAT_UP
+                # Immediate transition to next state output for better responsiveness
+                self._on_percent = on_high
         
         # 2. HEAT_UP: Drive to High (triggers Heat Deadtime)
         elif self._calibration_state == SmartPICalibrationPhase.HEAT_UP:
-            self._on_percent = 1.0
+            self._on_percent = on_high
             if current_temp >= target_temp + HYST_UPPER_C:
                 _LOGGER.info("%s - Calibration: Reached High Threshold -> COOL_DOWN_FINAL", self._name)
                 self._calibration_state = SmartPICalibrationPhase.COOL_DOWN_FINAL
+                self._on_percent = on_low
         
         # 3. COOL_DOWN_FINAL: Drive back to Low (triggers Cool Deadtime)
         elif self._calibration_state == SmartPICalibrationPhase.COOL_DOWN_FINAL:
-            self._on_percent = 0.0
+            self._on_percent = on_low
             if current_temp <= target_temp - HYST_LOWER_C:
                  _LOGGER.info("%s - Calibration: Cycle Completed -> IDLE", self._name)
                  self._calibration_state = SmartPICalibrationPhase.IDLE
                  self._last_calibration_time = time.time()
+                 self._calibration_start_time = None
                  # We don't reset _calibration_retry_count here. It will be managed in calculate()
                  # Actually, we should check if deadtime is found. 
                  # But if we cycle 0->1->0, the detector SHOULD have triggered.
@@ -2546,47 +2557,62 @@ class SmartPI(CycleManager):
                 _LOGGER.debug("%s - Resume detected: Learning paused for %d min", self._name, LEARNING_PAUSE_RESUME_MIN)
         
         # --- FORCED CALIBRATION LOGIC ---
-        # Trigger conditions
-        if self.phase == SmartPIPhase.STABLE:
-            # 1. Manual Trigger
-            if self._force_calibration_requested and self._calibration_state == SmartPICalibrationPhase.IDLE:
-                 _LOGGER.info("%s - Starting forced calibration (Manual)", self._name)
-                 self._calibration_state = SmartPICalibrationPhase.COOL_DOWN
-                 self._force_calibration_requested = False
-                 self._calibration_retry_count = 0 # New budget for manual
-            
-            # 2. Auto Trigger (48h or missing data)
-            elif self._calibration_state == SmartPICalibrationPhase.IDLE:
-                 # Check last calibration time
-                 time_since_last = 999999
-                 if self._last_calibration_time:
-                     time_since_last = (time.time() - self._last_calibration_time) / 3600.0
-                 
-                 need_calib = False
-                 reason = ""
-                 
-                 # Check deadtime reliability (both heat and cool)
-                 dt_ok = self.dt_est.deadtime_heat_reliable and self.dt_est.deadtime_cool_reliable
-                 
-                 if not dt_ok:
-                     if self._calibration_retry_count < CALIBRATION_RETRY_MAX:
-                         need_calib = True
-                         reason = "Unreliable DeadTime"
-                 
-                 elif time_since_last >= FORCE_CALIBRATION_INTERVAL_HOURS:
+        # 1. Manual Trigger (Available in any phase)
+        if self._force_calibration_requested and self._calibration_state == SmartPICalibrationPhase.IDLE:
+             _LOGGER.info("%s - Starting forced calibration (Manual)", self._name)
+             self._calibration_state = SmartPICalibrationPhase.COOL_DOWN
+             self._calibration_start_time = now
+             self._force_calibration_requested = False
+             self._calibration_retry_count = 0 # New budget for manual
+        
+        # 2. Auto Trigger (48h or missing data) - Only if STABLE
+        elif self.phase == SmartPIPhase.STABLE and self._calibration_state == SmartPICalibrationPhase.IDLE:
+             # Check last calibration time
+             actual_now_ts = time.time()
+             time_since_last = 999999
+             if self._last_calibration_time:
+                 time_since_last = (actual_now_ts - self._last_calibration_time) / 3600.0
+             
+             need_calib = False
+             reason = ""
+             
+             # Check deadtime reliability (both heat and cool)
+             dt_ok = self.dt_est.deadtime_heat_reliable and self.dt_est.deadtime_cool_reliable
+             
+             if not dt_ok:
+                 if self._calibration_retry_count < CALIBRATION_RETRY_MAX:
                      need_calib = True
-                     reason = "Periodic 48h"
-                     self._calibration_retry_count = 0 # New budget for periodic
-                 
-                 if need_calib:
-                     _LOGGER.info("%s - Starting forced calibration (%s)", self._name, reason)
-                     self._calibration_state = SmartPICalibrationPhase.COOL_DOWN
-                     self._calibration_retry_count += 1
+                     reason = "Unreliable DeadTime"
+             
+             elif time_since_last >= FORCE_CALIBRATION_INTERVAL_HOURS:
+                 need_calib = True
+                 reason = "Periodic 48h"
+                 self._calibration_retry_count = 0 # New budget for periodic
+             
+             if need_calib:
+                 _LOGGER.info("%s - Starting forced calibration (%s)", self._name, reason)
+                 self._calibration_state = SmartPICalibrationPhase.COOL_DOWN
+                 self._calibration_start_time = now
+                 self._calibration_retry_count += 1
+        
+        # 3. Timeout Check
+        if self._calibration_state != SmartPICalibrationPhase.IDLE and self._calibration_start_time:
+            if (now - self._calibration_start_time) > (CALIBRATION_TIMEOUT_MIN * 60.0):
+                _LOGGER.warning("%s - Forced calibration timeout reached (%d min). Aborting to IDLE.", 
+                               self._name, CALIBRATION_TIMEOUT_MIN)
+                self._calibration_state = SmartPICalibrationPhase.IDLE
+                self._calibration_start_time = None
+                # Don't update last_calibration_time so it can retry later
         
         # State Machine Execution
         if self._calibration_state != SmartPICalibrationPhase.IDLE:
              self._last_calculate_time = now
              self._calculate_forced_calibration(target_temp, current_temp, hvac_mode)
+             # Update diagnostics even during calibration to avoid stale data
+             self._last_error = target_temp - current_temp
+             self._last_u_cmd = self._on_percent
+             self._last_u_limited = self._on_percent
+             self._last_u_applied = self._on_percent
              return
 
         # --- HYSTERESIS PHASE: Simple ON/OFF control during learning ---
