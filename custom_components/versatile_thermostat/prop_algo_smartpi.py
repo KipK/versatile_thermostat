@@ -2948,7 +2948,6 @@ class SmartPI(CycleManager):
         self._last_freeze_reason_gains = gov_reason_g
         # --- Safety-first: when governance forbids gains adaptation, also hold the integrator ---
         # This avoids accumulating integral memory during non-homogeneous / forbidden regimes.
-        integrator_hold_in = integrator_hold
         if gov_decision_g in (GovernanceDecision.HARD_FREEZE, GovernanceDecision.FREEZE):
             integrator_hold = True
             
@@ -3303,7 +3302,8 @@ class SmartPI(CycleManager):
             if self._max_on_percent is not None and u_cmd > self._max_on_percent + 1e-9:
                 u_aw_ref = u_cmd
 
-            du = u_applied - u_aw_ref
+            #du = u_applied - u_aw_ref
+            du = u_aw_ref - u_model
             self._last_aw_du = du
 
             # Discrete tracking gain beta = dt / Tt (bounded 0..1)
