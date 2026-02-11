@@ -2946,7 +2946,12 @@ class SmartPI(CycleManager):
         gov_decision_g, gov_reason_g = self.decide_update('gains')
         self._last_governance_decision_gains = gov_decision_g
         self._last_freeze_reason_gains = gov_reason_g
-
+        # --- Safety-first: when governance forbids gains adaptation, also hold the integrator ---
+        # This avoids accumulating integral memory during non-homogeneous / forbidden regimes.
+        integrator_hold_in = integrator_hold
+        if gov_decision_g in (GovernanceDecision.HARD_FREEZE, GovernanceDecision.FREEZE):
+            integrator_hold = True
+            
         if gov_decision_g == GovernanceDecision.HARD_FREEZE:
             # Absolute prohibition: keep previous valid gains
             kp = self._prev_kp
