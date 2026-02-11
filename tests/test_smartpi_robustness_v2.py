@@ -69,13 +69,13 @@ async def test_integration_robustness_end_outlier():
     val_outlier = 22.5
     pi.dt_est._tin_history.append((t_end, val_outlier))
     
-    # Setup state for update_learning
-    pi.learn_win_active = True
-    pi.learn_win_start_ts = start_ts
-    pi.learn_T_int_start = 20.0
-    pi.learn_T_ext_start = 0.0 # Delta = 20
-    pi.learn_u_int = 0.0
-    pi.learn_t_int_s = 0.0
+    # Setup state for update_learning (set on learn_win component)
+    pi.learn_win._active = True
+    pi.learn_win._start_ts = start_ts
+    pi.learn_win._T_int_start = 20.0
+    pi.learn_win._T_ext_start = 0.0 # Delta = 20
+    pi.learn_win._u_int = 0.0
+    pi.learn_win._t_int_s = 0.0
     
     # Call update_learning
     # Simulate a single 10-minute update that completes the window

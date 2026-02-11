@@ -18,11 +18,14 @@ class TestSmartPiHysteresisDeadtimeWindow:
         pi.dt_est.deadtime_heat_reliable = True
         pi.dt_est.deadtime_heat_s = 600.0
         pi.dt_est.deadtime_cool_reliable = True # Ensure we don't switch phase due to this
+        pi.dt_est.deadtime_cool_s = 600.0  # Required for _update_near_band_auto
         
         # Force HYSTERESIS phase by clearing history
         pi.est = MagicMock()
         pi.est.a_meas_hist = []  # Empty history
         pi.est.b_meas_hist = []
+        pi.est.learn_ok_count_a = 0  # Required for _update_near_band_auto
+        pi.est.a = 0.0  # Required for _update_near_band_auto
         
         # Ensure Phase is Hysteresis
         # We need to rely on the property logic. 

@@ -370,10 +370,10 @@ class SmartPIHandler:
                 # Safety-First Governance
                 "governance_regime": algo._current_governance_regime.value,
                 "governance_cycle_regimes": [r.value for r in algo._cycle_regimes],
-                "freeze_reason_thermal": algo._last_freeze_reason_thermal.value,
-                "freeze_reason_gains": algo._last_freeze_reason_gains.value,
-                "governance_decision_thermal": algo._last_governance_decision_thermal.value,
-                "governance_decision_gains": algo._last_governance_decision_gains.value,
+                "freeze_reason_thermal": algo._governance_reason_thermal.value,
+                "freeze_reason_gains": algo._governance_reason_gains.value,
+                "governance_decision_thermal": algo._governance_decision_thermal.value,
+                "governance_decision_gains": algo._governance_decision_gains.value,
             }
 
             # Add to configuration dict for consistency with TPI
