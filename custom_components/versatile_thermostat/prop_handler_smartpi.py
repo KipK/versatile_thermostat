@@ -236,7 +236,9 @@ class SmartPIHandler:
                     off_time_sec,
                     on_percent,
 
-                    force or (t.prop_algorithm.phase == SmartPIPhase.HYSTERESIS and on_percent_changed),
+                    force 
+                    or (t.prop_algorithm.phase == SmartPIPhase.CALIBRATION)
+                    or (t.prop_algorithm.phase == SmartPIPhase.HYSTERESIS and on_percent_changed),
                 )
 
         # Save state after cycle to persist learning data
