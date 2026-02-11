@@ -119,8 +119,10 @@ def test_calibration_timeout():
     algo.calculate(25.0, 25.0, 10.0, 0, VThermHvacMode_HEAT)
     assert algo.calibration_state == SmartPICalibrationPhase.COOL_DOWN
     
-    # Manually backdate the start time by 4h + 1min
-    algo._calibration_start_time = time.monotonic() - (CALIBRATION_TIMEOUT_MIN * 60 + 60)
+    # Manually backdate the start time by 4h + 1min (set on both algo and manager)
+    backdated_time = time.monotonic() - (CALIBRATION_TIMEOUT_MIN * 60 + 60)
+    algo._calibration_start_time = backdated_time
+    algo.calibration_mgr._calibration_start_time = backdated_time
     
     # Next calculate should abort
     algo.calculate(25.0, 25.0, 10.0, 0, VThermHvacMode_HEAT)

@@ -92,10 +92,12 @@ def test_smartpi_gain_adaptation():
     smartpi.est.learn_ok_count = 20
     smartpi.est.learn_ok_count_b = 20
     # Mock reliability check to isolate Kp logic testing
-    smartpi.est.tau_reliability = MagicMock(return_value=MagicMock(reliable=True, tau_min=1000.0))
+    # Create a proper mock object with attributes set
+    tau_info_slow = MagicMock()
+    tau_info_slow.reliable = True
+    tau_info_slow.tau_min = 1000.0
+    smartpi.est.tau_reliability = MagicMock(return_value=tau_info_slow)
     # Note: We still populated history above (now irrelevant but harmless)
-    
-    #     smartpi.est._b_hat_hist.append(0.001 + (i % 2) * 0.00001)
 
     smartpi.calculate(
         target_temp=20,
@@ -109,7 +111,11 @@ def test_smartpi_gain_adaptation():
 
     # Set a high b (short time constant)
     smartpi.est.b = 0.01  # tau = 100 min
-    smartpi.est.tau_reliability = MagicMock(return_value=MagicMock(reliable=True, tau_min=100.0))
+    # Create a proper mock object with attributes set
+    tau_info_fast = MagicMock()
+    tau_info_fast.reliable = True
+    tau_info_fast.tau_min = 100.0
+    smartpi.est.tau_reliability = MagicMock(return_value=tau_info_fast)
     smartpi.est._b_hat_hist.clear()
     for _ in range(10):
         smartpi.est._b_hat_hist.append(0.01)
@@ -120,6 +126,10 @@ def test_smartpi_gain_adaptation():
     smartpi._cycle_regimes.clear()
     # Prevent false resume detection from _last_calculate_time reset
     smartpi._startup_grace_period = True
+    # Reset output_initialized to avoid SATURATED regime detection
+    # (which would freeze gains and prevent Kp adaptation)
+    smartpi._output_initialized = False
+    smartpi._on_percent = 0.5  # Set to non-saturated value
 
     smartpi.calculate(
         target_temp=20,

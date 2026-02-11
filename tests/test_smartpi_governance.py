@@ -9,14 +9,18 @@ from unittest.mock import MagicMock, patch, AsyncMock
 from custom_components.versatile_thermostat.prop_algo_smartpi import (
     SmartPI,
     ABEstimator,
+    SmartPI,
+    ABEstimator,
+    AB_HISTORY_SIZE,
+    SmartPIPhase,
+)
+from custom_components.versatile_thermostat.smartpi.const import (
     GovernanceRegime,
     GovernanceDecision,
     FreezeReason,
-    _GOVERNANCE_MATRIX,
+    GOVERNANCE_MATRIX,
     KP_SAFE,
     KI_SAFE,
-    AB_HISTORY_SIZE,
-    SmartPIPhase,
 )
 from custom_components.versatile_thermostat.vtherm_hvac_mode import VThermHvacMode_HEAT
 
@@ -57,33 +61,47 @@ def force_stable_mode(smartpi):
 class TestDetermineCurrentRegime:
     """Tests for the regime detection helper."""
 
+    def call_determine(self, spi, ext_temp=10.0, **kwargs):
+        defaults = dict(
+            phase=spi.phase,
+            ext_temp=ext_temp,
+            integrator_hold=False,
+            power_shedding=False,
+            output_initialized=spi._output_initialized,
+            on_percent=spi._on_percent,
+            in_deadband=spi.in_deadband if hasattr(spi, "in_deadband") else getattr(spi, "_in_deadband", False),
+            in_near_band=spi.in_near_band if hasattr(spi, "in_near_band") else getattr(spi, "_in_near_band", False)
+        )
+        defaults.update(kwargs)
+        return spi.gov.determine_regime(**defaults)
+
     def test_warmup_in_hysteresis(self):
         """Hysteresis phase → WARMUP regime."""
         spi = make_smartpi()
         # Default is HYSTERESIS (no measurements yet)
         assert spi.phase == SmartPIPhase.HYSTERESIS
-        regime = spi._determine_current_regime(ext_temp=10.0)
+        regime = self.call_determine(spi, ext_temp=10.0)
         assert regime == GovernanceRegime.WARMUP
 
     def test_degraded_when_ext_temp_none(self):
         """No external temperature sensor → DEGRADED."""
         spi = make_smartpi()
         force_stable_mode(spi)
-        regime = spi._determine_current_regime(ext_temp=None)
+        regime = self.call_determine(spi, ext_temp=None)
         assert regime == GovernanceRegime.DEGRADED
 
     def test_perturbed_power_shedding(self):
         """Power shedding active → PERTURBED."""
         spi = make_smartpi()
         force_stable_mode(spi)
-        regime = spi._determine_current_regime(ext_temp=10.0, power_shedding=True)
+        regime = self.call_determine(spi, ext_temp=10.0, power_shedding=True)
         assert regime == GovernanceRegime.PERTURBED
 
     def test_hold(self):
         """Integrator hold → HOLD."""
         spi = make_smartpi()
         force_stable_mode(spi)
-        regime = spi._determine_current_regime(ext_temp=10.0, integrator_hold=True)
+        regime = self.call_determine(spi, ext_temp=10.0, integrator_hold=True)
         assert regime == GovernanceRegime.HOLD
 
     def test_saturated_high(self):
@@ -92,7 +110,7 @@ class TestDetermineCurrentRegime:
         force_stable_mode(spi)
         spi._on_percent = 1.0
         spi._output_initialized = True  # Mark output as valid
-        regime = spi._determine_current_regime(ext_temp=10.0)
+        regime = self.call_determine(spi, ext_temp=10.0)
         assert regime == GovernanceRegime.SATURATED
 
     def test_saturated_low(self):
@@ -101,7 +119,7 @@ class TestDetermineCurrentRegime:
         force_stable_mode(spi)
         spi._on_percent = 0.0
         spi._output_initialized = True  # Mark output as valid
-        regime = spi._determine_current_regime(ext_temp=10.0)
+        regime = self.call_determine(spi, ext_temp=10.0)
         assert regime == GovernanceRegime.SATURATED
 
     def test_dead_band(self):
@@ -110,7 +128,7 @@ class TestDetermineCurrentRegime:
         force_stable_mode(spi)
         spi._on_percent = 0.5
         spi._in_deadband = True
-        regime = spi._determine_current_regime(ext_temp=10.0)
+        regime = self.call_determine(spi, ext_temp=10.0)
         assert regime == GovernanceRegime.DEAD_BAND
 
     def test_near_band(self):
@@ -120,7 +138,7 @@ class TestDetermineCurrentRegime:
         spi._on_percent = 0.5
         spi._in_deadband = False
         spi._in_near_band = True
-        regime = spi._determine_current_regime(ext_temp=10.0)
+        regime = self.call_determine(spi, ext_temp=10.0)
         assert regime == GovernanceRegime.NEAR_BAND
 
     def test_excited_stable_default(self):
@@ -130,7 +148,7 @@ class TestDetermineCurrentRegime:
         spi._on_percent = 0.5
         spi._in_deadband = False
         spi._in_near_band = False
-        regime = spi._determine_current_regime(ext_temp=10.0)
+        regime = self.call_determine(spi, ext_temp=10.0)
         assert regime == GovernanceRegime.EXCITED_STABLE
 
 
@@ -141,6 +159,10 @@ class TestDetermineCurrentRegime:
 class TestDecideUpdate:
     """Tests for the central governance decision method."""
 
+    def call_decide(self, spi, domain):
+        lrt = getattr(spi, "_learning_resume_ts", None)
+        return spi.gov.decide_update(domain, learning_resume_ts=lrt, now=time.monotonic())
+
     def test_regime_transition_freezes_both(self):
         """Multiple regimes in cycle → HARD_FREEZE for both domains."""
         spi = make_smartpi()
@@ -148,12 +170,12 @@ class TestDecideUpdate:
         spi._on_percent = 0.5
         spi._in_deadband = False
         spi._in_near_band = False
-        spi._current_governance_regime = GovernanceRegime.EXCITED_STABLE
+        spi.gov._current_regime = GovernanceRegime.EXCITED_STABLE
         # Simulate regime transition (two different regimes seen in cycle)
-        spi._cycle_regimes = {GovernanceRegime.EXCITED_STABLE, GovernanceRegime.NEAR_BAND}
+        spi.gov._cycle_regimes = {GovernanceRegime.EXCITED_STABLE, GovernanceRegime.NEAR_BAND}
 
-        dec_t, reason_t = spi.decide_update('thermal')
-        dec_g, reason_g = spi.decide_update('gains')
+        dec_t, reason_t = self.call_decide(spi, 'thermal')
+        dec_g, reason_g = self.call_decide(spi, 'gains')
 
         assert dec_t == GovernanceDecision.HARD_FREEZE
         assert reason_t == FreezeReason.REGIME_TRANSITION
@@ -165,12 +187,12 @@ class TestDecideUpdate:
         spi = make_smartpi()
         force_stable_mode(spi)
         spi._on_percent = 0.5
-        spi._current_governance_regime = GovernanceRegime.EXCITED_STABLE
-        spi._cycle_regimes = {GovernanceRegime.EXCITED_STABLE}
+        spi.gov._current_regime = GovernanceRegime.EXCITED_STABLE
+        spi.gov._cycle_regimes = {GovernanceRegime.EXCITED_STABLE}
         # Set resume timestamp in the future
         spi._learning_resume_ts = time.monotonic() + 3600
 
-        dec, reason = spi.decide_update('thermal')
+        dec, reason = self.call_decide(spi, 'thermal')
         assert dec == GovernanceDecision.HARD_FREEZE
         assert reason == FreezeReason.PERTURBED
 
@@ -181,11 +203,11 @@ class TestDecideUpdate:
         spi._on_percent = 0.5
         spi._in_deadband = False
         spi._in_near_band = False
-        spi._current_governance_regime = GovernanceRegime.EXCITED_STABLE
-        spi._cycle_regimes = {GovernanceRegime.EXCITED_STABLE}
+        spi.gov._current_regime = GovernanceRegime.EXCITED_STABLE
+        spi.gov._cycle_regimes = {GovernanceRegime.EXCITED_STABLE}
 
-        dec_t, reason_t = spi.decide_update('thermal')
-        dec_g, reason_g = spi.decide_update('gains')
+        dec_t, reason_t = self.call_decide(spi, 'thermal')
+        dec_g, reason_g = self.call_decide(spi, 'gains')
 
         assert dec_t == GovernanceDecision.ADAPT_ON
         assert reason_t == FreezeReason.NONE
@@ -199,11 +221,11 @@ class TestDecideUpdate:
         spi._on_percent = 0.5
         spi._in_near_band = True
         spi._in_deadband = False
-        spi._current_governance_regime = GovernanceRegime.NEAR_BAND
-        spi._cycle_regimes = {GovernanceRegime.NEAR_BAND}
+        spi.gov._current_regime = GovernanceRegime.NEAR_BAND
+        spi.gov._cycle_regimes = {GovernanceRegime.NEAR_BAND}
 
-        dec_t, reason_t = spi.decide_update('thermal')
-        dec_g, reason_g = spi.decide_update('gains')
+        dec_t, reason_t = self.call_decide(spi, 'thermal')
+        dec_g, reason_g = self.call_decide(spi, 'gains')
 
         assert dec_t == GovernanceDecision.HARD_FREEZE
         assert reason_t == FreezeReason.NEAR_BAND
@@ -216,11 +238,11 @@ class TestDecideUpdate:
         force_stable_mode(spi)
         spi._on_percent = 0.5
         spi._in_deadband = True
-        spi._current_governance_regime = GovernanceRegime.DEAD_BAND
-        spi._cycle_regimes = {GovernanceRegime.DEAD_BAND}
+        spi.gov._current_regime = GovernanceRegime.DEAD_BAND
+        spi.gov._cycle_regimes = {GovernanceRegime.DEAD_BAND}
 
-        dec_t, _ = spi.decide_update('thermal')
-        dec_g, _ = spi.decide_update('gains')
+        dec_t, _ = self.call_decide(spi, 'thermal')
+        dec_g, _ = self.call_decide(spi, 'gains')
 
         assert dec_t == GovernanceDecision.HARD_FREEZE
         assert dec_g == GovernanceDecision.HARD_FREEZE
@@ -229,11 +251,11 @@ class TestDecideUpdate:
         """WARMUP regime → thermal ADAPT_ON, gains FREEZE."""
         spi = make_smartpi()
         # Default = HYSTERESIS = WARMUP
-        spi._current_governance_regime = GovernanceRegime.WARMUP
-        spi._cycle_regimes = {GovernanceRegime.WARMUP}
+        spi.gov._current_regime = GovernanceRegime.WARMUP
+        spi.gov._cycle_regimes = {GovernanceRegime.WARMUP}
 
-        dec_t, reason_t = spi.decide_update('thermal')
-        dec_g, reason_g = spi.decide_update('gains')
+        dec_t, reason_t = self.call_decide(spi, 'thermal')
+        dec_g, reason_g = self.call_decide(spi, 'gains')
 
         assert dec_t == GovernanceDecision.ADAPT_ON
         assert reason_t == FreezeReason.NONE
@@ -251,9 +273,9 @@ class TestGovernanceMatrix:
     def test_all_regimes_covered(self):
         """Every GovernanceRegime must have an entry in the matrix."""
         for regime in GovernanceRegime:
-            assert regime in _GOVERNANCE_MATRIX, f"Missing matrix entry for {regime}"
-            assert "thermal" in _GOVERNANCE_MATRIX[regime]
-            assert "gains" in _GOVERNANCE_MATRIX[regime]
+            assert regime in GOVERNANCE_MATRIX, f"Missing matrix entry for {regime}"
+            assert "thermal" in GOVERNANCE_MATRIX[regime]
+            assert "gains" in GOVERNANCE_MATRIX[regime]
 
 
 # =====================================================================
@@ -267,14 +289,14 @@ class TestCycleRegimeTracking:
     async def test_cycle_regimes_reset_on_cycle_start(self):
         """on_cycle_started should clear the regime set."""
         spi = make_smartpi()
-        spi._cycle_regimes = {GovernanceRegime.EXCITED_STABLE, GovernanceRegime.NEAR_BAND}
+        spi.gov._cycle_regimes = {GovernanceRegime.EXCITED_STABLE, GovernanceRegime.NEAR_BAND}
         
         await spi.on_cycle_started(
             on_time_sec=300, off_time_sec=300,
             on_percent=0.5, hvac_mode="Heat"
         )
         
-        assert len(spi._cycle_regimes) == 0
+        assert len(spi.gov._cycle_regimes) == 0
 
     def test_regime_added_during_calculate(self):
         """calculate() should add current regime to cycle set."""
@@ -286,7 +308,7 @@ class TestCycleRegimeTracking:
         for _ in range(10):
             spi.est._b_hat_hist.append(0.002)
 
-        spi._cycle_regimes.clear()
+        spi.gov._cycle_regimes.clear()
 
         # Calculate with normal conditions (should add EXCITED_STABLE or similar)
         spi.calculate(
@@ -295,7 +317,7 @@ class TestCycleRegimeTracking:
             hvac_mode=VThermHvacMode_HEAT,
         )
 
-        assert len(spi._cycle_regimes) > 0, "Regime should be added during calculate"
+        assert len(spi.gov._cycle_regimes) > 0, "Regime should be added during calculate"
 
 
 # =====================================================================
@@ -327,7 +349,7 @@ class TestGainsGovernance:
         # Now move into near-band (should trigger SOFT_FREEZE_DOWN for gains)
         spi._last_calculate_time = None
         spi._e_filt = None
-        spi._cycle_regimes.clear()  # Reset to avoid REGIME_TRANSITION
+        spi.gov._cycle_regimes.clear()  # Reset to avoid REGIME_TRANSITION
 
         spi.calculate(
             target_temp=20.0, current_temp=19.8,  # error=0.2 < near_band_deg=0.5
@@ -397,18 +419,18 @@ class TestGovernanceReset:
     def test_reset_clears_governance(self):
         """reset_learning should clear all governance attributes."""
         spi = make_smartpi()
-        spi._cycle_regimes = {GovernanceRegime.NEAR_BAND, GovernanceRegime.DEAD_BAND}
-        spi._last_freeze_reason_thermal = FreezeReason.NEAR_BAND
-        spi._last_freeze_reason_gains = FreezeReason.DEAD_BAND
-        spi._last_governance_decision_thermal = GovernanceDecision.HARD_FREEZE
-        spi._last_governance_decision_gains = GovernanceDecision.HARD_FREEZE
+        spi.gov._cycle_regimes = {GovernanceRegime.NEAR_BAND, GovernanceRegime.DEAD_BAND}
+        spi.gov.last_reason_thermal = FreezeReason.NEAR_BAND
+        spi.gov.last_reason_gains = FreezeReason.DEAD_BAND
+        spi.gov.last_decision_thermal = GovernanceDecision.HARD_FREEZE
+        spi.gov.last_decision_gains = GovernanceDecision.HARD_FREEZE
 
         spi.reset_learning()
 
-        assert len(spi._cycle_regimes) == 0
-        assert spi._last_freeze_reason_thermal == FreezeReason.NONE
-        assert spi._last_freeze_reason_gains == FreezeReason.NONE
-        assert spi._last_governance_decision_thermal == GovernanceDecision.ADAPT_ON
-        assert spi._last_governance_decision_gains == GovernanceDecision.ADAPT_ON
+        assert len(spi.gov._cycle_regimes) == 0
+        assert spi.gov.last_reason_thermal == FreezeReason.NONE
+        assert spi.gov.last_reason_gains == FreezeReason.NONE
+        assert spi.gov.last_decision_thermal == GovernanceDecision.ADAPT_ON
+        assert spi.gov.last_decision_gains == GovernanceDecision.ADAPT_ON
         assert spi._prev_kp == KP_SAFE
         assert spi._prev_ki == KI_SAFE

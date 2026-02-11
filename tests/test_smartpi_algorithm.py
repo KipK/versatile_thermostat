@@ -1477,7 +1477,6 @@ def test_deadband_hysteresis_entry_and_exit():
     assert smartpi._in_deadband is True, "Should stay in deadband (hysteresis zone)"
 
     # Exit deadband (error = 0.09 > 0.08 exit threshold)
-    smartpi._last_calculate_time = None
     smartpi.calculate(
         target_temp=20.0,
         current_temp=19.91,  # error = 0.09 > 0.08 (exit threshold)
