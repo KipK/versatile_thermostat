@@ -99,10 +99,10 @@ def build_diagnostics(algo: SmartPI) -> Dict[str, Any]:
         "deadtime_heat_start_time": algo.dt_est.heat_start_time,
         "deadtime_cool_start_time": algo.dt_est.cool_start_time,
         
-        # Near-Band Auto (Phase 2)
-        "near_band_below_deg": algo._near_band_below_deg,
-        "near_band_above_deg": algo._near_band_above_deg,
-        "near_band_source": algo._near_band_source,
+        # Near-Band Auto (Phase 2) - delegated to DeadbandManager
+        "near_band_below_deg": algo.deadband_mgr.near_band_below_deg,
+        "near_band_above_deg": algo.deadband_mgr.near_band_above_deg,
+        "near_band_source": algo.deadband_mgr.near_band_source,
 
         # Safety-First Governance
         "governance_regime": algo.gov._current_regime.value,

@@ -357,23 +357,23 @@ class SmartPIHandler:
                 "deadtime_skip_count_a": algo._deadtime_skip_count_a,
                 "deadtime_skip_count_b": algo._deadtime_skip_count_b,
                 # Phase 2: Near-Band
-                "near_band_below_deg": algo._near_band_below_deg,
-                "near_band_above_deg": algo._near_band_above_deg,
-                "near_band_source": algo._near_band_source,
+                "near_band_below_deg": algo.deadband_mgr.near_band_below_deg,
+                "near_band_above_deg": algo.deadband_mgr.near_band_above_deg,
+                "near_band_source": algo.deadband_mgr.near_band_source,
                 # Forced Calibration
                 "calibration_state": algo.calibration_state,
                 "last_calibration_time": (
-                    datetime.fromtimestamp(algo._last_calibration_time).isoformat()
-                    if algo._last_calibration_time else None
+                    datetime.fromtimestamp(algo.calibration_mgr.last_calibration_time).isoformat()
+                    if algo.calibration_mgr.last_calibration_time else None
                 ),
-                "calibration_retry_count": algo._calibration_retry_count,
+                "calibration_retry_count": algo.calibration_mgr.retry_count,
                 # Safety-First Governance
-                "governance_regime": algo._current_governance_regime.value,
-                "governance_cycle_regimes": [r.value for r in algo._cycle_regimes],
-                "freeze_reason_thermal": algo._governance_reason_thermal.value,
-                "freeze_reason_gains": algo._governance_reason_gains.value,
-                "governance_decision_thermal": algo._governance_decision_thermal.value,
-                "governance_decision_gains": algo._governance_decision_gains.value,
+                "governance_regime": algo.gov._current_regime.value,
+                "governance_cycle_regimes": [r.value for r in algo.gov._cycle_regimes],
+                "freeze_reason_thermal": algo.gov.last_freeze_reason_thermal.value,
+                "freeze_reason_gains": algo.gov.last_freeze_reason_gains.value,
+                "governance_decision_thermal": algo.gov.last_decision_thermal.value,
+                "governance_decision_gains": algo.gov.last_decision_gains.value,
             }
 
             # Add to configuration dict for consistency with TPI
