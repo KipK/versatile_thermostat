@@ -218,8 +218,8 @@ class DeadbandManager:
         cycle_s = max(cycle_min * 60.0, 60.0)  # Safety
         
         # Horizon H = L + delta (delta = half cycle delay approx)
-        H_below = L_heat + (cycle_s / 2.0)
-        H_above = L_cool + (cycle_s / 2.0)
+        H_below = L_cool + (cycle_s / 2.0)
+        H_above = L_heat + (cycle_s / 2.0)
         
         # 2. Model-based Slope Estimation
         # Check basic model reliability
