@@ -447,8 +447,8 @@ class LearningWindowManager:
 
             slope_val, method, _ = ABEstimator.robust_dTdt_per_min(
                 relevant_samples,
-                trim_start_frac=0.20,
-                trim_end_frac=0.20,
+                trim_start_frac=0.10,
+                trim_end_frac=0.10,
             )
 
             if slope_val is not None:
