@@ -523,6 +523,8 @@ async def test_user_config_flow_over_climate(
         CONF_USE_ADVANCED_CENTRAL_CONFIG: False,
         CONF_USE_LOCK_CENTRAL_CONFIG: False,
         CONF_USED_BY_CENTRAL_BOILER: False,
+        CONF_USE_SMART_PI_CENTRAL_CONFIG: False,
+        CONF_USE_HEATING_FAILURE_DETECTION_CENTRAL_CONFIG: False,
         CONF_USE_CENTRAL_MODE: False,
         CONF_AUTO_REGULATION_MODE: CONF_AUTO_REGULATION_STRONG,
         CONF_AUTO_START_STOP_LEVEL: AUTO_START_STOP_LEVEL_NONE,
@@ -778,6 +780,8 @@ async def test_user_config_flow_over_climate_auto_start_stop(
         CONF_AUTO_START_STOP_LEVEL: AUTO_START_STOP_LEVEL_MEDIUM,
         CONF_AUTO_REGULATION_MODE: CONF_AUTO_REGULATION_STRONG,
         CONF_SYNC_DEVICE_INTERNAL_TEMP: False,
+        CONF_USE_SMART_PI_CENTRAL_CONFIG: False,
+        CONF_USE_HEATING_FAILURE_DETECTION_CENTRAL_CONFIG: False,
     }
     assert result["result"]
     assert result["result"].domain == DOMAIN
@@ -1039,6 +1043,8 @@ async def test_user_config_flow_over_switch_bug_552_tpi(
             CONF_USE_PRESENCE_FEATURE: False,
             CONF_USE_CENTRAL_BOILER_FEATURE: False,
             CONF_AUTO_START_STOP_LEVEL: AUTO_START_STOP_LEVEL_NONE,
+            CONF_USE_SMART_PI_CENTRAL_CONFIG: False,
+            CONF_USE_HEATING_FAILURE_DETECTION_CENTRAL_CONFIG: False,
         }
     )
     assert result["result"]
@@ -1525,6 +1531,8 @@ async def test_user_config_flow_over_climate_valve(
         CONF_MAX_OPENING_DEGREES: "90",
         CONF_OPENING_THRESHOLD_DEGREE: 5,
         CONF_AUTO_START_STOP_LEVEL: AUTO_START_STOP_LEVEL_NONE,
+        CONF_USE_SMART_PI_CENTRAL_CONFIG: False,
+        CONF_USE_HEATING_FAILURE_DETECTION_CENTRAL_CONFIG: False,
     }
     assert result["result"]
     assert result["result"].domain == DOMAIN
