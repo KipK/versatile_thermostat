@@ -470,190 +470,6 @@ class SmartPI(CycleManager):
 
         _LOGGER.info("%s - SmartPI notified of resume after interruption, skipping learning until (approx) %s", self._name, resume_dt_iso)
 
-    def load_state(self, state: Dict[str, Any]) -> None:
-        """Load persistent state with validation."""
-        if not state:
-            return
-
-        try:
-            # 1. Load Estimator (Keep manual load as ABEstimator has no load_state)
-            a_val = float(state.get("a", 0.0) or 0.0)
-            b_val = float(state.get("b", 0.0) or 0.0)
-            
-            if math.isnan(a_val) or not (self.est.A_MIN <= a_val <= self.est.A_MAX):
-                a_val = self.est.A_INIT
-                _LOGGER.warning("%s - Invalid 'a' in saved state, using default", self._name)
-            if math.isnan(b_val) or not (self.est.B_MIN <= b_val <= self.est.B_MAX):
-                b_val = self.est.B_INIT
-                _LOGGER.warning("%s - Invalid 'b' in saved state, using default", self._name)
-
-            self.est.a = a_val
-            self.est.b = b_val
-            self.est.learn_ok_count = int(state.get("learn_ok_count", 0) or 0)
-            self.est.learn_ok_count_a = int(state.get("learn_ok_count_a", 0) or 0)
-            self.est.learn_ok_count_b = int(state.get("learn_ok_count_b", 0) or 0)
-            self.est.learn_skip_count = int(state.get("learn_skip_count", 0) or 0)
-            
-            # History
-            self.est._b_hat_hist = deque(state.get("b_hat_hist", []), maxlen=self.est._b_hat_hist.maxlen)
-            self.est.a_meas_hist = deque(state.get("a_meas_hist", []), maxlen=self.est.a_meas_hist.maxlen)
-            self.est.b_meas_hist = deque(state.get("b_meas_hist", []), maxlen=self.est.b_meas_hist.maxlen)
-
-            # 2. Components
-            if self.sp_mgr: self.sp_mgr.load_state(state)
-            if self.gov: self.gov.load_state(state)
-            if self.ctl: self.ctl.load_state(state)
-
-            # 3. Global SmartPI State
-            self._cycles_since_reset = int(state.get("cycles_since_reset", 0) or 0)
-            self._accumulated_dt = float(state.get("accumulated_dt", 0.0) or 0.0)
-            
-            learning_start = state.get("learning_start_date")
-            if learning_start:
-                try:
-                    self._learning_start_date = datetime.fromisoformat(learning_start)
-                except (ValueError, TypeError):
-                    self._learning_start_date = None
-
-            # Learning Window - Reset on load (delegated to learn_win component)
-            if self.learn_win:
-                self.learn_win.reset()
-
-            # Last target temp
-            last_target_temp = state.get("last_target_temp")
-            if last_target_temp is not None:
-                try:
-                    self._last_target_temp = float(last_target_temp)
-                except (ValueError, TypeError):
-                    self._last_target_temp = None
-
-            # Resume TS
-            resume_ts = state.get("learning_resume_ts")
-            if resume_ts is not None:
-                try:
-                    stored_wall_ts = float(resume_ts)
-                    now_wall = time.time()
-                    remaining = stored_wall_ts - now_wall
-                    if remaining > 0:
-                        self._learning_resume_ts = time.monotonic() + remaining
-                    else:
-                        self._learning_resume_ts = None
-                except (ValueError, TypeError):
-                    self._learning_resume_ts = None
-            else:
-                 # Legacy key
-                legacy_skip = int(state.get("skip_learning_cycles_left", 0) or 0)
-                if legacy_skip > 0:
-                    duration_min = float(legacy_skip) * max(self._cycle_min, 15.0)
-                    self._learning_resume_ts = time.monotonic() + (duration_min * 60.0)
-
-            # Dead Time State
-            dt_s = state.get("deadtime_heat_s")
-            self.dt_est.deadtime_heat_s = float(dt_s) if dt_s is not None else None
-            self.dt_est.deadtime_heat_reliable = bool(state.get("deadtime_heat_reliable", state.get("deadtime_reliable", False)))
-            self.dt_est._history_heat = deque(state.get("deadtime_samples", []), maxlen=self.dt_est._history_heat.maxlen)
-            
-            dt_cool_s = state.get("deadtime_cool_s")
-            self.dt_est.deadtime_cool_s = float(dt_cool_s) if dt_cool_s is not None else None
-            self.dt_est.deadtime_cool_reliable = bool(state.get("deadtime_cool_reliable", False))
-            self.dt_est._history_cool = deque(state.get("deadtime_samples_cool", []), maxlen=self.dt_est._history_cool.maxlen)
-            
-            self._deadtime_skip_count_a = int(state.get("deadtime_skip_count_a", 0))
-            self._deadtime_skip_count_b = int(state.get("deadtime_skip_count_b", 0))
-
-            # Phase 2: Near Band
-            nb_below = state.get("near_band_below_deg_auto")
-            if nb_below is not None: self._near_band_below_deg = float(nb_below)
-            nb_above = state.get("near_band_above_deg_auto")
-            if nb_above is not None: self._near_band_above_deg = float(nb_above)
-            
-            # Calibration state - delegate to CalibrationManager
-            calib_state = state.get("calibration_state")
-            self.calibration_mgr.load_state({
-                "last_calibration_time": state.get("last_calibration_time"),
-                "calibration_state": calib_state,
-                "calibration_start_time": state.get("calibration_start_time"),
-                "force_calibration_requested": state.get("force_calibration_requested", False),
-                "calibration_retry_count": state.get("calibration_retry_count", 0),
-            })
-            # Sync local cache for diagnostics
-            self._last_calibration_time = self.calibration_mgr.last_calibration_time
-            self._calibration_state = self.calibration_mgr.state
-            self._calibration_start_time = self.calibration_mgr.calibration_start_time
-            self._calibration_retry_count = self.calibration_mgr.retry_count
-            
-            self._in_deadband = bool(state.get("in_deadband", False))
-            self._in_near_band = bool(state.get("in_near_band", False))
-            
-            self.est.learn_last_reason = "loaded"
-            
-            _LOGGER.debug(
-                "%s - SmartPI state loaded: a=%.6f, b=%.6f, learns=%d",
-                self._name, self.est.a, self.est.b, self.est.learn_ok_count
-            )
-
-        except (TypeError, ValueError) as e:
-            _LOGGER.warning("%s - Error loading SmartPI state, using defaults: %s", self._name, e)
-            self.est.reset()
-
-    def save_state(self) -> Dict[str, Any]:
-        """Return state for persistence."""
-        resume_wall_ts = None
-        if self._learning_resume_ts is not None:
-            remaining = self._learning_resume_ts - time.monotonic()
-            if remaining > 0:
-                resume_wall_ts = time.time() + remaining
-
-        # Base state (Estimator + Globals)
-        state = {
-            "a": self.est.a,
-            "b": self.est.b,
-            "learn_ok_count": self.est.learn_ok_count,
-            "learn_ok_count_a": self.est.learn_ok_count_a,
-            "learn_ok_count_b": self.est.learn_ok_count_b,
-            "learn_skip_count": self.est.learn_skip_count,
-            "b_hat_hist": list(self.est._b_hat_hist),
-            "a_meas_hist": list(self.est.a_meas_hist),
-            "b_meas_hist": list(self.est.b_meas_hist),
-            
-            "cycles_since_reset": self._cycles_since_reset,
-            "accumulated_dt": self._accumulated_dt,
-            "learning_start_date": self._learning_start_date.isoformat() if self._learning_start_date else None,
-            
-            "learn_win_active": self.learn_win_active,
-            "last_target_temp": self._last_target_temp,
-            "learning_resume_ts": resume_wall_ts,
-            
-            # DeadTime
-            "deadtime_heat_s": self.dt_est.deadtime_heat_s,
-            "deadtime_heat_reliable": self.dt_est.deadtime_heat_reliable,
-            "deadtime_samples": list(self.dt_est._history_heat),
-            "deadtime_cool_s": self.dt_est.deadtime_cool_s,
-            "deadtime_cool_reliable": self.dt_est.deadtime_cool_reliable,
-            "deadtime_samples_cool": list(self.dt_est._history_cool),
-            "deadtime_skip_count_a": self._deadtime_skip_count_a,
-            "deadtime_skip_count_b": self._deadtime_skip_count_b,
-            
-            # NearBand
-            "near_band_below_deg_auto": self._near_band_below_deg,
-            "near_band_above_deg_auto": self._near_band_above_deg,
-            "in_deadband": self._in_deadband,
-            "in_near_band": self._in_near_band,
-            
-            # Calibration
-            "last_calibration_time": self._last_calibration_time,
-            "calibration_state": self._calibration_state,
-            "force_calibration_requested": self._force_calibration_requested,
-            "calibration_retry_count": self._calibration_retry_count,
-        }
-        
-        # Merge Component States
-        if self.sp_mgr: state.update(self.sp_mgr.save_state())
-        if self.gov: state.update(self.gov.save_state())
-        if self.ctl: state.update(self.ctl.save_state())
-        
-        return state
-
     # ------------------------------
     # Property Mappings (Legacy Support)
     # ------------------------------
@@ -1353,57 +1169,207 @@ class SmartPI(CycleManager):
         }
         return state
 
+    @staticmethod
+    def _migrate_old_state_format(state: dict) -> dict:
+        """
+        Migrate old flat-key state format to new nested format.
+        
+        This function converts the legacy flat-key format (where all state
+        was stored at the top level) to the new nested format (where each
+        component's state is stored in a separate sub-dict).
+        
+        Args:
+            state: State dict in either old or new format
+            
+        Returns:
+            State dict in new nested format
+        """
+        # Already in new format
+        if "est_state" in state:
+            # Still need to handle top-level in_deadband/in_near_band for
+            # backward compatibility with states saved before component migration
+            result = dict(state)
+            if "in_deadband" in state or "in_near_band" in state:
+                db_state = dict(state.get("db_state", {}))
+                if "in_deadband" in state:
+                    db_state["in_deadband"] = state["in_deadband"]
+                if "in_near_band" in state:
+                    db_state["in_near_band"] = state["in_near_band"]
+                result["db_state"] = db_state
+            return result
+        
+        # Migrate old flat-key format to new nested format
+        return {
+            "version": 2,
+            "on_percent": state.get("on_percent", 0.0),
+            "last_target_temp": state.get("last_target_temp"),
+            "cycles_since_reset": state.get("cycles_since_reset", 0),
+            "learning_start_date": state.get("learning_start_date"),
+            "learning_resume_ts": state.get("learning_resume_ts"),
+            "accumulated_dt": state.get("accumulated_dt", 0.0),
+            "in_deadband": state.get("in_deadband", False),
+            "in_near_band": state.get("in_near_band", False),
+            "setpoint_boost_active": state.get("setpoint_boost_active", False),
+            "prev_setpoint_for_boost": state.get("prev_setpoint_for_boost"),
+            # Component states
+            "est_state": {
+                "a": state.get("a"),
+                "b": state.get("b"),
+                "learn_ok_count": state.get("learn_ok_count", 0),
+                "learn_ok_count_a": state.get("learn_ok_count_a", 0),
+                "learn_ok_count_b": state.get("learn_ok_count_b", 0),
+                "learn_skip_count": state.get("learn_skip_count", 0),
+                "a_meas_hist": state.get("a_meas_hist", []),
+                "b_meas_hist": state.get("b_meas_hist", []),
+                "b_hat_hist": state.get("b_hat_hist", []),
+            },
+            "dt_est_state": {
+                "deadtime_heat_s": state.get("deadtime_heat_s"),
+                "deadtime_cool_s": state.get("deadtime_cool_s"),
+                "deadtime_heat_reliable": state.get("deadtime_heat_reliable", state.get("deadtime_reliable", False)),
+                "deadtime_cool_reliable": state.get("deadtime_cool_reliable", False),
+                "history_heat": state.get("deadtime_samples", []),
+                "history_cool": state.get("deadtime_samples_cool", []),
+            },
+            "gov_state": {
+                "governance_regime": state.get("governance_regime"),
+                "freeze_reason_thermal": state.get("freeze_reason_thermal"),
+                "freeze_reason_gains": state.get("freeze_reason_gains"),
+                "governance_decision_thermal": state.get("governance_decision_thermal"),
+                "governance_decision_gains": state.get("governance_decision_gains"),
+            },
+            "ctl_state": {
+                "integral": state.get("integral"),
+                "u_prev": state.get("u_prev"),
+                "hysteresis_thermal_guard": state.get("hysteresis_thermal_guard"),
+            },
+            "sp_mgr_state": {
+                "filtered_setpoint": state.get("filtered_setpoint"),
+                "last_raw_setpoint": state.get("last_raw_setpoint"),
+                "initial_temp_for_filter": state.get("initial_temp_for_filter"),
+                "setpoint_boost_active": state.get("setpoint_boost_active", False),
+                "prev_setpoint_for_boost": state.get("prev_setpoint_for_boost"),
+            },
+            # Learning window state is intentionally DISCARDED on reboot
+            # to ensure a fresh start after interruption
+            "lw_state": {
+                "learn_win_active": False,
+                "learn_win_start_ts": None,
+                "learn_T_int_start": None,
+                "learn_T_ext_start": None,
+                "learn_u_int": 0.0,
+                "learn_t_int_s": None,
+                "learn_u_first": None,
+                "learning_start_date": state.get("learning_start_date"),
+                "learning_resume_ts": state.get("learning_resume_ts"),
+            },
+            "db_state": {
+                "in_deadband": state.get("in_deadband", False),
+                "in_near_band": state.get("in_near_band", False),
+                "near_band_below_deg_auto": state.get("near_band_below_deg_auto"),
+                "near_band_above_deg_auto": state.get("near_band_above_deg_auto"),
+            },
+            "cal_state": {
+                "last_calibration_time": state.get("last_calibration_time"),
+                "calibration_state": state.get("calibration_state"),
+                "calibration_start_time": state.get("calibration_start_time"),
+                "force_calibration_requested": state.get("force_calibration_requested", False),
+                "calibration_retry_count": state.get("calibration_retry_count", 0),
+            },
+            "gs_state": {
+                "kp": state.get("kp"),
+                "ki": state.get("ki"),
+                "kp_source": state.get("kp_source"),
+                "ki_source": state.get("ki_source"),
+            },
+            # Legacy key for learning resume conversion
+            "skip_learning_cycles_left": state.get("skip_learning_cycles_left", 0),
+        }
+
     def load_state(self, state: dict) -> None:
-        """Restore algorithm state."""
+        """Restore algorithm state with backward compatibility for old flat-key format."""
         if not state:
             return
         
-        self._on_percent = float(state.get("on_percent", 0.0))
-        self._last_target_temp = state.get("last_target_temp")
-        self._last_calibration_time = state.get("last_calibration_time")
-        self._cycles_since_reset = int(state.get("cycles_since_reset", 0))
+        # Migrate old format to new format (handles both old and new formats)
+        migrated = self._migrate_old_state_format(state)
         
-        lsd = state.get("learning_start_date")
-        if lsd:
-            try: self._learning_start_date = datetime.fromisoformat(lsd)
-            except ValueError: pass
-            
-        self._in_deadband = bool(state.get("in_deadband", False))
-        self._in_near_band = bool(state.get("in_near_band", False))
+        # Log if migration occurred
+        if "est_state" not in state:
+            _LOGGER.info("%s - Migrated old flat-key state format to new nested format", self._name)
         
-        # Convert wall clock timestamp back to monotonic for learning_resume_ts
-        self._learning_resume_ts = self._convert_wall_to_monotonic_ts(state.get("learning_resume_ts"))
+        # Extract component states
+        est_state = migrated.get("est_state", {})
+        dt_est_state = migrated.get("dt_est_state", {})
+        gov_state = migrated.get("gov_state", {})
+        ctl_state = migrated.get("ctl_state", {})
+        sp_state = migrated.get("sp_mgr_state", {})
+        lw_state = migrated.get("lw_state", {})
+        db_state = migrated.get("db_state", {})
+        cal_state = migrated.get("cal_state", {})
+        gs_state = migrated.get("gs_state", {})
         
-        # Load boost state - check both top-level and nested sp_mgr_state for backward compatibility
-        # Top-level keys take precedence for backward compatibility with old saved states
-        if "setpoint_boost_active" in state:
-            self._setpoint_boost_active = bool(state.get("setpoint_boost_active", False))
-            prev_sp = state.get("prev_setpoint_for_boost")
-            if prev_sp is not None:
-                self._prev_setpoint_for_boost = float(prev_sp)
+        # Top-level state
+        on_percent = migrated.get("on_percent", 0.0)
+        last_target_temp = migrated.get("last_target_temp")
+        cycles_since_reset = migrated.get("cycles_since_reset", 0)
+        learning_start_date = migrated.get("learning_start_date")
+        learning_resume_ts = migrated.get("learning_resume_ts")
+        accumulated_dt = migrated.get("accumulated_dt", 0.0)
+        legacy_skip = migrated.get("skip_learning_cycles_left", 0)
         
-        est_state = state.get("est_state", {})
-        # Support legacy flat state from tests
-        if "a" in state and "a" not in est_state:
-            est_state["a"] = state["a"]
-        if "b" in state and "b" not in est_state:
-            est_state["b"] = state["b"]
+        # Load top-level state
+        self._on_percent = float(on_percent or 0.0)
+        self._last_target_temp = last_target_temp
+        self._cycles_since_reset = int(cycles_since_reset or 0)
+        if accumulated_dt is not None:
+            self._accumulated_dt = float(accumulated_dt)
+        
+        # Learning start date
+        if learning_start_date:
+            try:
+                self._learning_start_date = datetime.fromisoformat(learning_start_date)
+            except (ValueError, TypeError):
+                self._learning_start_date = None
+        
+        # Learning resume timestamp - handle both wall clock and legacy skip
+        if learning_resume_ts is not None:
+            self._learning_resume_ts = self._convert_wall_to_monotonic_ts(learning_resume_ts)
+        elif legacy_skip and int(legacy_skip) > 0:
+            # Legacy key conversion
+            duration_min = float(legacy_skip) * max(self._cycle_min, 15.0)
+            self._learning_resume_ts = time.monotonic() + (duration_min * 60.0)
+        
+        # Load component states
         self.est.load_state(est_state)
-        self.dt_est.load_state(state.get("dt_est_state", {}))
-        self.gov.load_state(state.get("gov_state", {}))
-        self.ctl.load_state(state.get("ctl_state", {}))
-        if hasattr(self.sp_mgr, "load_state"):
-            self.sp_mgr.load_state(state.get("sp_mgr_state", {}))
+        self.dt_est.load_state(dt_est_state)
+        self.gov.load_state(gov_state)
+        self.ctl.load_state(ctl_state)
         
-        # Load new component states with backward compatibility
-        if hasattr(self.learn_win, "load_state") and "lw_state" in state:
-            self.learn_win.load_state(state["lw_state"])
-        if hasattr(self.deadband_mgr, "load_state") and "db_state" in state:
-            self.deadband_mgr.load_state(state["db_state"])
-        if hasattr(self.calibration_mgr, "load_state") and "cal_state" in state:
-            self.calibration_mgr.load_state(state["cal_state"])
-        if hasattr(self.gain_scheduler, "load_state") and "gs_state" in state:
-            self.gain_scheduler.load_state(state["gs_state"])
+        if hasattr(self.sp_mgr, "load_state"):
+            self.sp_mgr.load_state(sp_state)
+        
+        if hasattr(self.learn_win, "load_state"):
+            self.learn_win.load_state(lw_state)
+        
+        if hasattr(self.deadband_mgr, "load_state"):
+            self.deadband_mgr.load_state(db_state)
+        
+        if hasattr(self.calibration_mgr, "load_state"):
+            self.calibration_mgr.load_state(cal_state)
+        
+        if hasattr(self.gain_scheduler, "load_state"):
+            self.gain_scheduler.load_state(gs_state)
+        
+        # Sync local caches from components for diagnostics
+        self._in_deadband = bool(db_state.get("in_deadband", False))
+        self._in_near_band = bool(db_state.get("in_near_band", False))
+        self._last_calibration_time = cal_state.get("last_calibration_time")
+        
+        _LOGGER.debug(
+            "%s - SmartPI state loaded: a=%.6f, b=%.6f, learns=%d",
+            self._name, self.est.a, self.est.b, self.est.learn_ok_count
+        )
 
     def calculate(
         self,

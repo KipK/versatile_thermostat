@@ -299,11 +299,11 @@ class DeadbandManager:
         self._in_deadband = bool(state.get("in_deadband", False))
         self._in_near_band = bool(state.get("in_near_band", False))
         
-        if "near_band_below_deg_auto" in state:
+        if "near_band_below_deg_auto" in state and state["near_band_below_deg_auto"] is not None:
             self._near_band_below_deg = float(state["near_band_below_deg_auto"])
-        if "near_band_above_deg_auto" in state:
+        if "near_band_above_deg_auto" in state and state["near_band_above_deg_auto"] is not None:
             self._near_band_above_deg = float(state["near_band_above_deg_auto"])
-        if "near_band_source" in state:
+        if "near_band_source" in state and state["near_band_source"] is not None:
             self._near_band_source = str(state["near_band_source"])
 
     def save_state(self) -> dict:

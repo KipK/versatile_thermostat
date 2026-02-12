@@ -174,18 +174,18 @@ class GainScheduler:
         if not state:
             return
         
-        if "kp" in state:
+        if "kp" in state and state["kp"] is not None:
             self._kp = float(state["kp"])
             self._prev_kp = self._kp
             
-        if "ki" in state:
+        if "ki" in state and state["ki"] is not None:
             self._ki = float(state["ki"])
             self._prev_ki = self._ki
             
-        if "kp_source" in state:
+        if "kp_source" in state and state["kp_source"] is not None:
             self._kp_source = state["kp_source"]
             
-        if "ki_source" in state:
+        if "ki_source" in state and state["ki_source"] is not None:
             self._ki_source = state["ki_source"]
             
         _LOGGER.debug(
