@@ -1673,6 +1673,15 @@ class SmartPI(CycleManager):
         reliable_cap = 1.0 if self._tau_reliable else self.ff_scale_unreliable_max
         u_ff *= clamp(reliable_cap * learn_scale * time_scale, 0.0, 1.0)
         
+        # ------------------------------------------------------------------
+        # FF gating above setpoint (overshoot protection)
+        # If temperature is above setpoint + near_band_above,
+        # disable positive feedforward to avoid heating in overshoot.
+        # ------------------------------------------------------------------
+        if error < -self._near_band_above_deg:
+            u_ff = 0.0
+            _LOGGER.debug("%s - FF disabled (above setpoint + near band)", self._name)
+        
         # --- 7. Bumpless Transfer Application ---
         # Now that we have Kp, Ki, u_ff, we can do the bumpless adjustment if needed
         if self._in_deadband and not in_deadband_now and not setpoint_changed:
