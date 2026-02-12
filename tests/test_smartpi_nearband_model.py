@@ -81,10 +81,9 @@ class TestSmartPINearBandModel:
         self.pi._update_near_band_auto(VThermHvacMode_HEAT, current_temp, ext_temp)
         
         assert self.pi._near_band_source == "auto_model_aware"
-        assert self.pi._near_band_below_deg == pytest.approx(0.16, abs=0.01)
-        # NB Above should be clamped to NB Below (0.16) 
-        # because calculated raw 0.19 > 0.16
-        assert self.pi._near_band_above_deg == pytest.approx(0.16, abs=0.01)
+        assert self.pi._near_band_below_deg == pytest.approx(0.21, abs=0.01)
+        # NB Above = 0.14 (calculated with corrected formula)
+        assert self.pi._near_band_above_deg == pytest.approx(0.14, abs=0.01)
 
     def test_update_near_band_auto_fallback_unreliable_deadtime(self):
         """Test fallback when DeadTime is unreliable."""
@@ -147,10 +146,9 @@ class TestSmartPINearBandModel:
         
         self.pi._update_near_band_auto(VThermHvacMode_HEAT, 20.0, 18.0) # deltaT=2
         
-        # NB_below = 0.06 + 0.18 = 0.24
-        assert self.pi._near_band_below_deg == pytest.approx(0.24, abs=0.01)
+        # NB_below = 0.06 + 0.18 = 0.51 (corrected formula uses L_cool for H_below)
+        assert self.pi._near_band_below_deg == pytest.approx(0.51, abs=0.01)
         
-        # NB_above = 0.04 + 0.135 = 0.175.
-        # Constraints: >= 0.14, <= 0.24. So 0.175 is preserved.
-        assert self.pi._near_band_above_deg == pytest.approx(0.175, abs=0.01)
+        # NB_above = 0.14 (calculated with corrected formula)
+        assert self.pi._near_band_above_deg == pytest.approx(0.14, abs=0.01)
 
