@@ -327,16 +327,10 @@ class SmartPI(CycleManager):
         self._kp_source: str = "heuristic" # "heuristic" or "imc_deadtime"
 
         # --- Near-Band Auto-Tuning (Phase 2) ---
-        self._near_band_below_deg: float = self.near_band_deg
-        self._near_band_above_deg: float = self.near_band_deg * NEAR_BAND_ABOVE_FACTOR
-        self._near_band_source: str = "manual" # "manual", "auto", "fallback"
+        # Near-band state is now managed by DeadbandManager component
 
         # --- Forced Calibration State ---
-        self._last_calibration_time: float | None = None
-        self._calibration_state: SmartPICalibrationPhase = SmartPICalibrationPhase.IDLE
-        self._calibration_start_time: float | None = None
-        # _force_calibration_requested is now a property delegating to calibration_mgr
-        self._calibration_retry_count: int = 0
+        # Calibration state is now managed by CalibrationManager component
 
         # --- Safety-First Governance (Delegated to self.gov) ---
 
@@ -396,17 +390,9 @@ class SmartPI(CycleManager):
         self._deadtime_skip_count_b = 0
         self._kp_source = "heuristic"
         
-        # Reset Phase 2
-        self._near_band_below_deg = self.near_band_deg 
-        self._near_band_above_deg = self.near_band_deg * NEAR_BAND_ABOVE_FACTOR
-        self._near_band_source = "manual"
+        # Reset Phase 2 - near-band state is managed by DeadbandManager component
 
-        # Reset Calibration
-        self._last_calibration_time = None
-        self._calibration_state = SmartPICalibrationPhase.IDLE
-        self._calibration_start_time = None
-        # _force_calibration_requested is now a property, no need to reset
-        self._calibration_retry_count = 0
+        # Reset Calibration - calibration state is managed by CalibrationManager component
 
         # Governance is reset above (self.gov.reset())
 
@@ -418,17 +404,50 @@ class SmartPI(CycleManager):
 
         _LOGGER.info("%s - SmartPI learning and history reset", self._name)
 
-        _LOGGER.info("%s - SmartPI learning and history reset", self._name)
-
     @property
     def calibration_state(self) -> SmartPICalibrationPhase:
         """Return current calibration state, delegating to CalibrationManager."""
-        return self.calibration_mgr.state if self.calibration_mgr else self._calibration_state
+        return self.calibration_mgr.state
+
+    @property
+    def _last_calibration_time(self) -> float | None:
+        """Delegate to CalibrationManager for backward compatibility."""
+        return self.calibration_mgr.last_calibration_time
+
+    @_last_calibration_time.setter
+    def _last_calibration_time(self, value: float | None) -> None:
+        """Set last calibration time in CalibrationManager."""
+        self.calibration_mgr._last_calibration_time = value
 
     @property
     def _force_calibration_requested(self) -> bool:
         """Delegate to CalibrationManager for sync access."""
-        return self.calibration_mgr.calibration_requested if self.calibration_mgr else False
+        return self.calibration_mgr.calibration_requested
+
+    @property
+    def _calibration_retry_count(self) -> int:
+        """Delegate to CalibrationManager for backward compatibility."""
+        return self.calibration_mgr.retry_count
+
+    @_calibration_retry_count.setter
+    def _calibration_retry_count(self, value: int) -> None:
+        """Set calibration retry count in CalibrationManager."""
+        self.calibration_mgr._calibration_retry_count = value
+
+    @property
+    def _near_band_below_deg(self) -> float:
+        """Delegate to DeadbandManager for backward compatibility."""
+        return self.deadband_mgr.near_band_below_deg
+
+    @property
+    def _near_band_above_deg(self) -> float:
+        """Delegate to DeadbandManager for backward compatibility."""
+        return self.deadband_mgr.near_band_above_deg
+
+    @property
+    def _near_band_source(self) -> str:
+        """Delegate to DeadbandManager for backward compatibility."""
+        return self.deadband_mgr.near_band_source
 
     def force_calibration(self) -> None:
         """Force a calibration cycle to refresh Dead Time estimation."""
@@ -553,7 +572,7 @@ class SmartPI(CycleManager):
     @property
     def phase(self) -> str:
         """Current phase of the algorithm."""
-        if self._calibration_state != SmartPICalibrationPhase.IDLE:
+        if self.calibration_mgr.state != SmartPICalibrationPhase.IDLE:
             return SmartPIPhase.CALIBRATION
         # Hysteresis until we have AB_HISTORY_SIZE (31) measurements for both A and B
         if len(self.est.a_meas_hist) < AB_HISTORY_SIZE or len(self.est.b_meas_hist) < AB_HISTORY_SIZE:
@@ -778,10 +797,6 @@ class SmartPI(CycleManager):
         return self.gov.last_freeze_reason_thermal.value
 
     @property
-    def freeze_reason_thermal(self) -> str:
-        return self.gov.last_freeze_reason_thermal.value
-
-    @property
     def last_governance_decision_gains(self) -> str:
         return self.gov.last_decision_gains.value
 
@@ -795,10 +810,6 @@ class SmartPI(CycleManager):
 
     @property
     def last_freeze_reason_gains(self) -> str:
-        return self.gov.last_freeze_reason_gains.value
-
-    @property
-    def freeze_reason_gains(self) -> str:
         return self.gov.last_freeze_reason_gains.value
 
     @property
@@ -996,10 +1007,7 @@ class SmartPI(CycleManager):
             estimator=self.est,
             cycle_min=self.cycle_min,
         )
-        # Sync state from component
-        self._near_band_below_deg = self.deadband_mgr.near_band_below_deg
-        self._near_band_above_deg = self.deadband_mgr.near_band_above_deg
-        self._near_band_source = self.deadband_mgr.near_band_source
+        # Near-band state is now managed by DeadbandManager component
 
     # ------------------------------
     # Main control law
@@ -1030,11 +1038,7 @@ class SmartPI(CycleManager):
             max_on_percent=self._max_on_percent,
         )
         
-        # Sync state from component
-        self._calibration_state = result.phase
-        if result.phase == SmartPICalibrationPhase.IDLE and result.message == "completed":
-            self._last_calibration_time = self.calibration_mgr.last_calibration_time
-            self._calibration_start_time = None
+        # Calibration state is now fully managed by CalibrationManager
         
         # Apply result
         if result.on_percent is not None:
@@ -1146,7 +1150,7 @@ class SmartPI(CycleManager):
             "version": 2,
             "on_percent": self._on_percent,
             "last_target_temp": self._last_target_temp,
-            "last_calibration_time": self._last_calibration_time,
+            "last_calibration_time": self.calibration_mgr.last_calibration_time,
             "cycles_since_reset": self._cycles_since_reset,
             "learning_start_date": self._learning_start_date.isoformat() if self._learning_start_date else None,
             "in_deadband": self._in_deadband,
@@ -1161,7 +1165,7 @@ class SmartPI(CycleManager):
             "gov_state": self.gov.save_state(),
             "ctl_state": self.ctl.save_state(),
             "sp_mgr_state": self.sp_mgr.save_state() if hasattr(self.sp_mgr, "save_state") else {},
-            # New component states
+            # Component states
             "lw_state": self.learn_win.save_state() if hasattr(self.learn_win, "save_state") else {},
             "db_state": self.deadband_mgr.save_state() if hasattr(self.deadband_mgr, "save_state") else {},
             "cal_state": self.calibration_mgr.save_state() if hasattr(self.calibration_mgr, "save_state") else {},
@@ -1364,7 +1368,7 @@ class SmartPI(CycleManager):
         # Sync local caches from components for diagnostics
         self._in_deadband = bool(db_state.get("in_deadband", False))
         self._in_near_band = bool(db_state.get("in_near_band", False))
-        self._last_calibration_time = cal_state.get("last_calibration_time")
+        # Calibration state is now fully managed by CalibrationManager
         
         _LOGGER.debug(
             "%s - SmartPI state loaded: a=%.6f, b=%.6f, learns=%d",
@@ -1473,72 +1477,28 @@ class SmartPI(CycleManager):
 
         self._setpoint_boost_active = self.sp_mgr.update_boost_state(target_temp, error, hvac_mode)
 
-        # FIX 3: Calibration state machine trigger
-        # Sync state from CalibrationManager component
-        self._calibration_state = self.calibration_mgr.state
-        # _force_calibration_requested is now a property delegating to calibration_mgr
-        self._calibration_retry_count = self.calibration_mgr.retry_count
-        self._last_calibration_time = self.calibration_mgr.last_calibration_time
-        self._calibration_start_time = self.calibration_mgr.calibration_start_time
-        
-        # We enter calibration if:
-        # 1. Manual request (force_calibration_requested)
-        # 2. OR: Periodic calibration (72h) AND we are in STABLE mode
-        # 3. OR: Missing deadtime (unreliable deadtime_heat_reliable or deadtime_cool_reliable)
-        # 4. AND: We are not already calibrating
-        now_wall = time.time()
-        periodic_due = (self._last_calibration_time is not None and
-                        (now_wall - self._last_calibration_time) > (FORCE_CALIBRATION_INTERVAL_HOURS * 3600))
-        
-        # Backward compatibility: accept both governance regime EXCITED_STABLE (new)
-        # and phase STABLE (legacy) for periodic calibration trigger.
-        # The governance regime may not be updated yet when this check runs,
-        # so we fall back to checking the phase property.
-        can_start_periodic = (periodic_due and
-            (self.gov.regime == GovernanceRegime.EXCITED_STABLE or
-             self.phase == SmartPIPhase.STABLE))
-        
-        # Check for missing deadtime (triggers calibration if either heat or cool is unreliable)
-        deadtime_ok = self.dt_est.deadtime_heat_reliable and self.dt_est.deadtime_cool_reliable
-        can_start_missing_deadtime = (not deadtime_ok and
-            self._calibration_retry_count < CALIBRATION_RETRY_MAX and
-            (self.gov.regime == GovernanceRegime.EXCITED_STABLE or
-             self.phase == SmartPIPhase.STABLE))
-        
-        if (self._force_calibration_requested or can_start_periodic or can_start_missing_deadtime) and self._calibration_state == SmartPICalibrationPhase.IDLE:
-             is_manual = self._force_calibration_requested
-             reason = "manual" if is_manual else ("periodic" if periodic_due else "missing_deadtime")
-             _LOGGER.info("%s - Starting forced calibration (reason=%s)",
-                          self._name, reason)
-             self._calibration_state = SmartPICalibrationPhase.COOL_DOWN
-             self._calibration_start_time = now
-             # Sync to CalibrationManager component
-             self.calibration_mgr._calibration_state = SmartPICalibrationPhase.COOL_DOWN
-             self.calibration_mgr._calibration_start_time = now
-             self.calibration_mgr._force_calibration_requested = False
-             # Increment retry count for auto-triggered calibrations (not manual)
-             if is_manual:
-                 self._calibration_retry_count = 0  # Reset for manual requests
-                 self.calibration_mgr._calibration_retry_count = 0
-             else:
-                 self._calibration_retry_count += 1
-                 self.calibration_mgr._calibration_retry_count += 1
-
+        # --- 3. Calibration State Machine ---
         # Check for calibration timeout
-        if (self._calibration_state != SmartPICalibrationPhase.IDLE
-            and self._calibration_start_time is not None):
-            elapsed = (now - self._calibration_start_time) / 60.0  # in minutes
+        if self.calibration_mgr.is_calibrating and self.calibration_mgr.calibration_start_time is not None:
+            elapsed = (now - self.calibration_mgr.calibration_start_time) / 60.0
             if elapsed > CALIBRATION_TIMEOUT_MIN:
-                _LOGGER.warning("%s - Calibration timeout after %.1f minutes",
-                               self._name, elapsed)
-                self._calibration_state = SmartPICalibrationPhase.IDLE
-                self._calibration_start_time = None
-                # Sync to CalibrationManager component
-                self.calibration_mgr._calibration_state = SmartPICalibrationPhase.IDLE
-                self.calibration_mgr._calibration_start_time = None
+                _LOGGER.warning("%s - Calibration timeout after %.1f minutes", self._name, elapsed)
+                self.calibration_mgr.handle_timeout()
+
+        # Check if calibration should start (delegated to CalibrationManager)
+        deadtime_ok = self.dt_est.deadtime_heat_reliable and self.dt_est.deadtime_cool_reliable
+        self.calibration_mgr.check_and_start(
+            now=now,
+            now_wall=time.time(),
+            governance_regime=self.gov.regime,
+            phase=self.phase,
+            deadtime_reliable=deadtime_ok,
+            force_calibration_interval_hours=FORCE_CALIBRATION_INTERVAL_HOURS,
+            calibration_retry_max=CALIBRATION_RETRY_MAX,
+        )
 
         # If calibrating, execute state machine and EXIT calculate early
-        if self._calibration_state != SmartPICalibrationPhase.IDLE:
+        if self.calibration_mgr.is_calibrating:
              self._calculate_forced_calibration(target_temp, current_temp, hvac_mode)
              self._output_initialized = True
              self._last_i_mode = "calibration"
@@ -1579,9 +1539,7 @@ class SmartPI(CycleManager):
         was_in_deadband = self._in_deadband
         self._in_deadband = in_deadband_now
         self._in_near_band = in_near_band_now
-        self._near_band_below_deg = self.deadband_mgr.near_band_below_deg
-        self._near_band_above_deg = self.deadband_mgr.near_band_above_deg
-        self._near_band_source = self.deadband_mgr.near_band_source
+        # Near-band thresholds are now accessed via self.deadband_mgr.near_band_*_deg
 
         # Bumpless transfer on deadband exit
         # We manually call controller's bumpless (since we manage deadband state here)
@@ -1678,7 +1636,7 @@ class SmartPI(CycleManager):
         # If temperature is above setpoint + near_band_above,
         # disable positive feedforward to avoid heating in overshoot.
         # ------------------------------------------------------------------
-        if error < -self._near_band_above_deg:
+        if error < -self.deadband_mgr.near_band_above_deg:
             u_ff = 0.0
             _LOGGER.debug("%s - FF disabled (above setpoint + near band)", self._name)
         
