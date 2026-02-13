@@ -1495,9 +1495,9 @@ class SmartPI(CycleManager):
         u_ff *= clamp(reliable_cap * learn_scale * time_scale, 0.0, 1.0)
 
         # FF gating above setpoint (overshoot protection)
-        if error < -self.deadband_mgr.near_band_above_deg:
+        if error < 0:
             u_ff = 0.0
-            _LOGGER.debug("%s - FF disabled (above setpoint + near band)", self._name)
+            _LOGGER.debug("%s - FF disabled (above setpoint)", self._name)
 
         integrator_hold = gov_decision_g in (GovernanceDecision.HARD_FREEZE, GovernanceDecision.FREEZE)
 
