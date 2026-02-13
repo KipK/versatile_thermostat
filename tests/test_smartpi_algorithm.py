@@ -1340,8 +1340,9 @@ def test_in_deadband_persisted():
 
     # Save state
     saved = smartpi1.save_state()
-    assert "in_deadband" in saved
-    assert saved["in_deadband"] is True
+    assert "db_state" in saved
+    assert "in_deadband" in saved["db_state"]
+    assert saved["db_state"]["in_deadband"] is True
 
     # Load in new instance
     smartpi2 = SmartPI(hass=MagicMock(), 
@@ -1741,10 +1742,11 @@ def test_setpoint_boost_persisted():
 
     # Save state
     saved = smartpi1.save_state()
-    assert "setpoint_boost_active" in saved
-    assert "prev_setpoint_for_boost" in saved
-    assert saved["setpoint_boost_active"] is True
-    assert saved["prev_setpoint_for_boost"] == 21.0
+    assert "sp_mgr_state" in saved
+    assert "setpoint_boost_active" in saved["sp_mgr_state"]
+    assert "prev_setpoint_for_boost" in saved["sp_mgr_state"]
+    assert saved["sp_mgr_state"]["setpoint_boost_active"] is True
+    assert saved["sp_mgr_state"]["prev_setpoint_for_boost"] == 21.0
 
     # Load in new instance
     smartpi2 = SmartPI(hass=MagicMock(), 
