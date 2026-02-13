@@ -34,10 +34,6 @@ class SmartPIGovernance:
         self.last_decision_gains: GovernanceDecision = GovernanceDecision.ADAPT_ON
         self.last_freeze_reason_gains: FreezeReason = FreezeReason.NONE
 
-        # Aliases for test compatibility
-        self.last_reason_thermal = self.last_freeze_reason_thermal
-        self.last_reason_gains = self.last_freeze_reason_gains
-        
     @property
     def regime(self) -> GovernanceRegime:
         """Expose current regime."""
@@ -51,10 +47,6 @@ class SmartPIGovernance:
         self.last_freeze_reason_thermal = FreezeReason.NONE
         self.last_decision_gains = GovernanceDecision.ADAPT_ON
         self.last_freeze_reason_gains = FreezeReason.NONE
-
-        # Update aliases
-        self.last_reason_thermal = self.last_freeze_reason_thermal
-        self.last_reason_gains = self.last_freeze_reason_gains
 
     def load_state(self, state: dict):
         """Load state from persistence."""
@@ -99,10 +91,6 @@ class SmartPIGovernance:
                 self.last_decision_gains = GovernanceDecision(ddg)
             except ValueError:
                 pass
-
-        # Update aliases after load
-        self.last_reason_thermal = self.last_freeze_reason_thermal
-        self.last_reason_gains = self.last_freeze_reason_gains
 
     def save_state(self) -> dict:
         """Save state for persistence."""
@@ -199,11 +187,7 @@ class SmartPIGovernance:
             elif domain == 'gains':
                 self.last_decision_gains = decision
                 self.last_freeze_reason_gains = reason
-                
-            # Always update aliases to keep them in sync
-            self.last_reason_thermal = self.last_freeze_reason_thermal
-            self.last_reason_gains = self.last_freeze_reason_gains
-                
+
             return decision, reason
 
         return GovernanceDecision.HARD_FREEZE, FreezeReason.SYSTEM_INEFFICIENT

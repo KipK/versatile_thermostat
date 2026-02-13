@@ -39,6 +39,17 @@ class VThermHvacMode:
     def __str__(self):
         return self._hvac_mode
 
+    @property
+    def name(self) -> str:
+        """Return uppercase mode name for consistency with Python Enum pattern.
+
+        Example:
+            >>> mode = VThermHvacMode_HEAT
+            >>> mode.name
+            'HEAT'
+        """
+        return self._hvac_mode.upper()
+
     def __eq__(self, other: object) -> bool:
         if isinstance(other, str):
             return self._hvac_mode == other

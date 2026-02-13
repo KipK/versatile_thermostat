@@ -379,10 +379,10 @@ class TestGovernanceDiagnostics:
         expected_keys = [
             "governance_regime",
             "governance_cycle_regimes",
-            "freeze_reason_thermal",
-            "freeze_reason_gains",
-            "governance_decision_thermal",
-            "governance_decision_gains",
+            "last_freeze_reason_thermal",
+            "last_freeze_reason_gains",
+            "last_decision_thermal",
+            "last_decision_gains",
         ]
         for key in expected_keys:
             assert key in diag, f"Missing diagnostic key: {key}"
@@ -420,16 +420,16 @@ class TestGovernanceReset:
         """reset_learning should clear all governance attributes."""
         spi = make_smartpi()
         spi.gov._cycle_regimes = {GovernanceRegime.NEAR_BAND, GovernanceRegime.DEAD_BAND}
-        spi.gov.last_reason_thermal = FreezeReason.NEAR_BAND
-        spi.gov.last_reason_gains = FreezeReason.DEAD_BAND
+        spi.gov.last_freeze_reason_thermal = FreezeReason.NEAR_BAND
+        spi.gov.last_freeze_reason_gains = FreezeReason.DEAD_BAND
         spi.gov.last_decision_thermal = GovernanceDecision.HARD_FREEZE
         spi.gov.last_decision_gains = GovernanceDecision.HARD_FREEZE
 
         spi.reset_learning()
 
         assert len(spi.gov._cycle_regimes) == 0
-        assert spi.gov.last_reason_thermal == FreezeReason.NONE
-        assert spi.gov.last_reason_gains == FreezeReason.NONE
+        assert spi.gov.last_freeze_reason_thermal == FreezeReason.NONE
+        assert spi.gov.last_freeze_reason_gains == FreezeReason.NONE
         assert spi.gov.last_decision_thermal == GovernanceDecision.ADAPT_ON
         assert spi.gov.last_decision_gains == GovernanceDecision.ADAPT_ON
         assert spi._prev_kp == KP_SAFE

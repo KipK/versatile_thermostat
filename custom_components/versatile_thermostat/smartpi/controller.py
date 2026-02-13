@@ -55,14 +55,6 @@ class SmartPIController:
         self.hysteresis_state: str = "off"
         self.hysteresis_thermal_guard: bool = False
 
-    @property
-    def config(self):
-        """Mock config for Energy Awareness tests."""
-        from .const import KI_MIN
-        class Config:
-            i_max = 2.0 / KI_MIN
-        return Config()
-        
     def reset(self):
         self.integral = 0.0
         self.u_prev = 0.0

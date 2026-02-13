@@ -101,6 +101,7 @@ from .smartpi.learning_window import LearningWindowManager
 from .smartpi.deadband import DeadbandManager
 from .smartpi.calibration import CalibrationManager
 from .smartpi.gains import GainScheduler
+from .smartpi.timestamp_utils import convert_monotonic_to_wall_ts, convert_wall_to_monotonic_ts
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -1094,45 +1095,13 @@ class SmartPI(CycleManager):
 
         # Energy Awareness: Adjust integral if applied power differed from reference
         if abs(du) > 0.001:
-            i_max = self.ctl.config.i_max
+            i_max = 2.0 / KI_MIN
             old_i = self.integral
             self.integral = clamp(self.integral + du, -i_max, i_max)
             _LOGGER.debug(
                 "%s - Realized adjustment: du=%.3f -> integral %.2f -> %.2f",
                 self._name, du, old_i, self.integral
             )
-
-    def _convert_monotonic_to_wall_ts(self, monotonic_ts: float | None) -> float | None:
-        """Convert a monotonic timestamp to wall clock time for persistence.
-
-        Args:
-            monotonic_ts: Monotonic timestamp or None
-
-        Returns:
-            Wall clock timestamp (time.time()) or None if already None or expired
-        """
-        if monotonic_ts is None:
-            return None
-        remaining = monotonic_ts - time.monotonic()
-        if remaining > 0:
-            return time.time() + remaining
-        return None
-
-    def _convert_wall_to_monotonic_ts(self, wall_ts: float | None) -> float | None:
-        """Convert a wall clock timestamp to monotonic timestamp.
-
-        Args:
-            wall_ts: Wall clock timestamp (time.time()) or None
-
-        Returns:
-            Monotonic timestamp or None if already None or expired
-        """
-        if wall_ts is None:
-            return None
-        delay = wall_ts - time.time()
-        if delay > 0:
-            return time.monotonic() + delay
-        return None
 
     def save_state(self) -> dict:
         """Save algorithm state for persistence."""
@@ -1144,7 +1113,7 @@ class SmartPI(CycleManager):
             "cycles_since_reset": self._cycles_since_reset,
             "learning_start_date": self._learning_start_date.isoformat() if self._learning_start_date else None,
             # Convert monotonic timestamp to wall clock time for persistence
-            "learning_resume_ts": self._convert_monotonic_to_wall_ts(self._learning_resume_ts),
+            "learning_resume_ts": convert_monotonic_to_wall_ts(self._learning_resume_ts),
             "est_state": self.est.save_state(),
             "dt_est_state": self.dt_est.save_state(),
             "gov_state": self.gov.save_state(),

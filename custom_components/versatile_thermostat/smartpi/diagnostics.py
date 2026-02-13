@@ -112,14 +112,10 @@ def build_diagnostics(algo: SmartPI) -> Dict[str, Any]:
         # Safety-First Governance
         "governance_regime": algo.gov._current_regime.value,
         "governance_cycle_regimes": [r.value for r in algo.gov._cycle_regimes],
-        # Exposure for tests: both 'freeze_reason' and 'last_freeze_reason'
-        "freeze_reason_thermal": algo.gov.last_reason_thermal.value,
-        "last_freeze_reason_thermal": algo.gov.last_reason_thermal.value,
-        "freeze_reason_gains": algo.gov.last_reason_gains.value,
-        "last_freeze_reason_gains": algo.gov.last_reason_gains.value,
-        "governance_decision_thermal": algo.gov.last_decision_thermal.value,
+        # Governance diagnostics
+        "last_freeze_reason_thermal": algo.gov.last_freeze_reason_thermal.value,
+        "last_freeze_reason_gains": algo.gov.last_freeze_reason_gains.value,
         "last_decision_thermal": algo.gov.last_decision_thermal.value,
-        "governance_decision_gains": algo.gov.last_decision_gains.value,
         "last_decision_gains": algo.gov.last_decision_gains.value,
         # Setpoint boost aliases
         "boost_active": algo.sp_mgr.boost_active,

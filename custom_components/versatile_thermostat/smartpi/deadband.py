@@ -18,6 +18,7 @@ from .const import (
     NEAR_BAND_HYSTERESIS_C,
     clamp,
 )
+from ..vtherm_hvac_mode import VThermHvacMode_COOL
 
 if TYPE_CHECKING:
     from .learning import ABEstimator, DeadTimeEstimator
@@ -108,8 +109,8 @@ class DeadbandManager:
         if not tau_reliable:
             in_deadband_now = False
         else:
-            # VThermHvacMode uses string comparison (no .name attribute)
-            if hvac_mode is not None and str(hvac_mode).upper() != 'COOL':
+            # HEAT mode uses asymmetric deadband, COOL uses symmetric
+            if hvac_mode is not None and hvac_mode != VThermHvacMode_COOL:
                 # HEAT mode: asymmetric deadband
                 db_below = max(DEADBAND_BELOW_C, 0.0)
                 db_above = max(DEADBAND_ABOVE_C, 0.0)
@@ -142,8 +143,8 @@ class DeadbandManager:
         if not tau_reliable:
             in_near_band_now = False
         else:
-            # VThermHvacMode uses string comparison (no .name attribute)
-            if hvac_mode is not None and str(hvac_mode).upper() != 'COOL':
+            # HEAT mode uses auto near-band calculation, COOL uses static value
+            if hvac_mode is not None and hvac_mode != VThermHvacMode_COOL:
                 # HEAT mode: update auto near-band if deadtime is reliable
                 if dt_est.deadtime_heat_reliable:
                     self._update_near_band_auto(
