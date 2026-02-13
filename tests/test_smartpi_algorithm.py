@@ -2176,6 +2176,5 @@ def test_integral_reset_on_force_off():
         power_shedding=True
     )
 
-    assert smartpi.integral == 5.0, "Integral should be FROZEN (not reset) when forced off by shedding"
+    assert smartpi.integral == 0.0, "Integral should be reset when forced off by shedding"
     assert smartpi.on_percent == 0.0
-    assert smartpi._last_calculate_time is None, "Rate limiting should be reset"

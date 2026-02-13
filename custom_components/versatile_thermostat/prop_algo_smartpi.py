@@ -219,6 +219,9 @@ class SmartPI(CycleManager):
         # Track last target temp for learning invalidation
         self._last_target_temp = None
 
+        # Track last HVAC mode for integral reset on HEAT/COOL transitions
+        self._last_hvac_mode: VThermHvacMode | None = None
+
         # Learning start timestamp
         self._learning_start_date: Optional[datetime] = datetime.now()
 
@@ -301,6 +304,7 @@ class SmartPI(CycleManager):
         self._last_calculate_time = None
         self._learn_last_ts = None
         self._last_target_temp = None
+        self._last_hvac_mode = None
         self._learning_start_date = datetime.now()
 
         # Learning window state is managed by learn_win component
@@ -1284,6 +1288,7 @@ class SmartPI(CycleManager):
         """
         if target_temp is None or current_temp is None:
             _LOGGER.warning("%s - Missing target or current temp, force 0", self._name)
+            self.ctl.integral = 0.0
             self._on_percent = 0.0
             return True
 
@@ -1302,12 +1307,12 @@ class SmartPI(CycleManager):
             self._on_percent = 0.0
             self._last_u_applied = 0.0
             self.u_prev = 0.0
+            self.ctl.integral = 0.0
             # We update regime to PERTURBED but SKIP PID calculation
             self.gov.on_cycle_start()
             self.gov.update_regime(GovernanceRegime.PERTURBED)
             decision, reason = self.gov.decide_update("thermal")
-            # Integral is frozen by skip
-            self._last_i_mode = f"I:FREEZE({reason.value})"
+            self._last_i_mode = f"I:RESET({reason.value})"
             self._output_initialized = True
             return True
 
@@ -1527,6 +1532,16 @@ class SmartPI(CycleManager):
         # --- 1. Validation & Handle OFF ---
         if self._validate_and_handle_off(target_temp, current_temp, hvac_mode, power_shedding):
             return
+
+        # --- 1b. HVAC mode transition (HEAT↔COOL) → reset integral ---
+        if (self._last_hvac_mode is not None
+                and hvac_mode != self._last_hvac_mode):
+            self.ctl.reset()
+            _LOGGER.info(
+                "%s - HVAC mode changed (%s → %s): PI state reset",
+                self._name, self._last_hvac_mode, hvac_mode
+            )
+        self._last_hvac_mode = hvac_mode
 
         # --- 2. Update Time Tracking ---
         dt_min, is_first_run = self._update_time_tracking(now)
