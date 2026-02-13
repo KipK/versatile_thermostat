@@ -1614,6 +1614,10 @@ class SmartPI(CycleManager):
             target_temp, current_temp, hvac_mode, dt_min
         )
 
+        # Clear cycle regimes on setpoint change to prevent REGIME_TRANSITION freeze
+        if setpoint_changed:
+            self.gov.on_cycle_start()
+
         # --- 4. Learning & Calibration ---
         # Heartbeat learning update
         if dt_min > 0:
