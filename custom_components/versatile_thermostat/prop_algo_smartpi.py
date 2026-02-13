@@ -1382,11 +1382,11 @@ class SmartPI(CycleManager):
         current_temp: float,
         hvac_mode: VThermHvacMode,
         dt_min: float
-    ) -> tuple[float, bool, float]:
+    ) -> tuple[float, bool, float, float | None]:
         """Setpoint filtering and boost logic.
 
         Returns:
-            Tuple of (target_temp_filt, setpoint_changed, error).
+            Tuple of (target_temp_filt, setpoint_changed, error, old_target_temp).
         """
         # Filter setpoint
         self._last_raw_setpoint = target_temp
@@ -1394,6 +1394,7 @@ class SmartPI(CycleManager):
         self._filtered_setpoint = target_temp_filt
 
         setpoint_changed = False
+        old_target_temp = self._last_target_temp  # Save before update
         if self._last_target_temp is not None:
             if abs(target_temp - self._last_target_temp) > 0.01:
                 setpoint_changed = True
@@ -1409,7 +1410,7 @@ class SmartPI(CycleManager):
 
         self._setpoint_boost_active = self.sp_mgr.update_boost_state(target_temp, error, hvac_mode)
 
-        return target_temp_filt, setpoint_changed, error
+        return target_temp_filt, setpoint_changed, error, old_target_temp
 
     def _update_control_context(
         self,
@@ -1562,7 +1563,7 @@ class SmartPI(CycleManager):
         dt_min, is_first_run = self._update_time_tracking(now)
 
         # --- 3. Setpoint Management ---
-        target_temp_filt, setpoint_changed, error = self._manage_setpoint(
+        target_temp_filt, setpoint_changed, error, old_target_temp = self._manage_setpoint(
             target_temp, current_temp, hvac_mode, dt_min
         )
 
@@ -1571,7 +1572,7 @@ class SmartPI(CycleManager):
             self.gov.on_cycle_start()
             # Handle integral reset and thermal guard on setpoint changes
             new_error, new_error_p = self.ctl.handle_setpoint_change(
-                target_temp, self._last_target_temp, current_temp, hvac_mode, self.Kp, self.Ki
+                target_temp, old_target_temp, current_temp, hvac_mode, self.Kp, self.Ki
             )
             if new_error != 0.0:
                 self._last_error = new_error
