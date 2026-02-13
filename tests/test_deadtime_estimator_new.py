@@ -112,8 +112,8 @@ class TestDeadTimeEstimatorNew:
         self.est.update(now, 20.0, 21.0, 1.0)
         assert self.est.state == "WAITING_HEAT_RESPONSE"
         
-        # Forward > 2h (7200s)
-        now += 7201
+        # Forward > 4h (14400s) - timeout_seconds is 14400.0
+        now += 14401
         self.est.update(now, 20.04, 21.0, 1.0) # Temp didn't rise enough (0.04 < 0.05)
         
         assert self.est.state == "HEATING"
