@@ -5,15 +5,7 @@
         "dockerfile": "Dockerfile"
     },
     "name": "Versatile Thermostat integration",
-    // make dev container works on vscode forks
-    "init": true,
-    "remoteUser": "vscode",
-    "containerUser": "vscode",
-    "overrideCommand": false,
-    //"workspaceFolder": "/workspaces/versatile_thermostat",
-    "appPort": [
-        "8123:8123"
-    ],
+    "appPort": ["8123:8123"],
     // "postCreateCommand": "container install",
     "postCreateCommand": "./container dev-setup",
     "mounts": [
@@ -66,10 +58,7 @@
                 "python.analysis.autoSearchPaths": true,
                 "pylint.lintOnChange": false,
                 "python.formatting.provider": "black",
-                "python.formatting.blackArgs": [
-                    "--line-length",
-                    "180"
-                ],
+                "python.formatting.blackArgs": ["--line-length", "180"],
                 "python.formatting.blackPath": "/usr/local/py-utils/bin/black",
                 "editor.formatOnPaste": false,
                 "editor.formatOnSave": true,
