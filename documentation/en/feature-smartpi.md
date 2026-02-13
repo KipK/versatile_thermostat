@@ -33,7 +33,7 @@ At the very first startup (or after a learning reset), the thermal model is empt
 
 This phase generates clear and distinct heating cycles, essential for identifying parameters `a` and `b`, but most importantly for learning the initial **Dead Time**.
 
-> **Transition**: The algorithm automatically switches to **STABLE** phase as soon as it has collected enough reliable measurements (minimum 11 reliable measurements).
+> **Transition**: The algorithm automatically switches to **STABLE** phase as soon as it has collected enough reliable measurements (minimum 31 measurements).
 > **Note**: In Hysteresis mode, shut-off is **immediate** as soon as the temperature exceeds the upper threshold, interrupting the current PWM cycle to prevent overheating.
 
 ### Phase 2: Stable (Adaptive PI Regulation)
@@ -41,12 +41,12 @@ This phase generates clear and distinct heating cycles, essential for identifyin
 Once the model is reliable, SmartPI activates its advanced PI controller:
 
 *   **Feed-Forward (Prediction)**: Calculates the base power needed to compensate for thermal losses (based on outdoor temperature).
-*   **PI (Correction)**): Adds or removes power to correct the precise deviation from the setpoint.
+*   **PI (Correction)**: Adds or removes power to correct the precise deviation from the setpoint.
 *   **Continuous refinement**: The algorithm continues to refine its model continuously to adapt to seasonal changes or insulation (via robust Median/MAD estimation).
 
 ### Phase 3: Forced Calibration (Model Maintenance)
 
-If the algorithm detects that its **Dead Time** data is no longer reliable or if no calibration has taken place for more than 48 hours, it can trigger a **Forced Calibration** phase.
+If the algorithm detects that its **Dead Time** data is no longer reliable or if no calibration has taken place for more than 72 hours, it can trigger a **Forced Calibration** phase.
 
 *   The thermostat temporarily switches back to hysteresis mode to perform a full cycle (Cooling -> Heating -> Cooling).
 *   This allows for precise recalibration of the system's reaction delays.
@@ -102,32 +102,37 @@ For advanced users, the climate entity exposes detailed attributes:
 | `phase` | Current algorithm phase: `Hysteresis`, `Stable`, or `Calibration` |
 | `hysteresis_state`| Hysteresis state: `on`, `off` or `band` |
 | `tau_min` | Room thermal inertia (minutes). E.g., 600 = 10h |
-| `deadtime_heat_s` | Estimated dead time in seconds (heating lag) |
-| `deadtime_cool_s` | Estimated dead time in seconds (cooling lag) |
-| `deadtime_reliable`| `true` if dead time has been correctly identified |
-| `deadtime_skip_count_a` | Counter of ignored learning (parameter a) due to dead time |
-| `deadtime_skip_count_b` | Counter of ignored learning (parameter b) due to dead time |
-| `in_deadtime_window` | `true` if the system is currently in a dead time window |
+| `tau_reliable` | `true` if the inertia estimate is reliable |
 | `a` | Heating efficiency (°C/min at 100%) |
 | `b` | Loss coefficient (1/min) |
-| `learn_ok_count` | Number of validated learning episodes |
+| `learn_ok_count` | Total number of validated learning episodes |
+| `learn_ok_count_a` | Number of validated learning episodes for parameter `a` |
+| `learn_ok_count_b` | Number of validated learning episodes for parameter `b` |
 | `learn_last_reason` | Reason for last learning attempt (success or rejection reason) |
 | `error` | Setpoint - Temperature deviation |
 | `u_ff` | "Feed-Forward" power share (weather anticipation) |
 | `u_pi` | "PI" power share (error correction) |
 | `Kp`, `Ki` | Calculated regulator gains |
-| `Kp_reel`, `Ki_reel` | Actually applied gains (including reductions like Near-Band) |
-| `kp_source` | Gain Kp source: `IMC`, `Heuristic` or `Safe` |
+| `kp_source` | Gain Kp source: `imc_deadtime`, `heuristic`, `safe`, `frozen`, etc. |
 | `on_percent` | Target total power (0.0 to 1.0) |
 | `u_applied` | Real applied power after all limitations |
 | `in_deadband` | `true` if temperature is within the comfort zone (Deadband) |
 | `in_near_band` | `true` if system is in the slowdown zone (Near-Band) |
+| `near_band_below_deg` | Near-Band width below setpoint (°C, auto-calculated) |
+| `near_band_above_deg` | Near-Band width above setpoint (°C, auto-calculated) |
+| `near_band_source` | Near-Band calculation source: `auto_model_aware`, `manual`, etc. |
 | `setpoint_boost_active` | `true` if Boost mode is enabled |
-| `calibration_state` | Forced calibration state: `Idle`, `CoolDown`, `HeatUp`, etc. |
-| `last_calibration_time` | Date and time of the last successful calibration |
+| `deadtime_heat_s` | Estimated dead time in seconds (heating lag) |
+| `deadtime_heat_reliable` | `true` if heating dead time has been correctly identified |
+| `deadtime_cool_s` | Estimated dead time in seconds (cooling lag) |
+| `deadtime_cool_reliable` | `true` if cooling dead time has been correctly identified |
+| `in_deadtime_window` | `true` if the system is currently in a dead time window |
 | `governance_regime` | Detected physical regime (Governance) |
+| `governance_cycle_regimes` | List of regimes traversed during the current cycle |
 | `freeze_reason_thermal` | Reason for freezing thermal parameters learning (a, b) |
 | `freeze_reason_gains` | Reason for freezing gains adaptation (Kp, Ki) |
+| `last_decision_thermal` | Governance decision for thermal learning |
+| `last_decision_gains` | Governance decision for gains adaptation |
 
 
 ## Services

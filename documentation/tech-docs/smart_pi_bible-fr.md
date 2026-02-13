@@ -136,7 +136,7 @@ $$ K_i = \frac{K_p}{\max(\tau, 10)} $$
 Des bornes de sécurité ($K_{p,min}, K_{p,max}$) sont toujours appliquées.
 
 #### Cas 3 : Phase de Calibration Forcée
-Si les données de modèle sont absentes ou jugées obsolètes (48h), Smart-PI force un cycle d'apprentissage en mode hystérésis. La FSM de calibration suit les étapes suivantes :
+Si les données de modèle sont absentes ou jugées obsolètes (72h), Smart-PI force un cycle d'apprentissage en mode hystérésis. La FSM de calibration suit les étapes suivantes :
 1.  **COOL_DOWN** : Puissance à 0% jusqu'à descendre sous `Consigne - 0.3°C`.
 2.  **HEAT_UP** : Puissance à 100% jusqu'à dépasser `Consigne + 0.5°C`. Cette phase permet de capturer $L_{heat}$.
 3.  **COOL_DOWN_FINAL** : Puissance à 0% jusqu'à redescendre sous le seuil bas. Cette phase permet de capturer $L_{cool}$.
@@ -197,42 +197,98 @@ Après une interruption (ex: fenêtre ouverte refermée), l'algorithme observe u
 
 ## 5. Architecture Logicielle
 
-Le code est structuré autour de 3 classes principales dans `custom_components/versatile_thermostat/` :
+### 5.1 Vue d'ensemble
 
-1. **`SmartPI`** (`prop_algo_smartpi.py`) :
-   - Cœur algorithmique.
-   - Contient les instances de `ABEstimator` et `DeadTimeEstimator`.
-   - Méthode `calculate(...)` : Exécutée à chaque mise à jour de capteur (Heartbeat).
-   - Méthode `update_learning(...)` : Alimente l'apprentissage en continu (Heartbeat).
-   - Méthode `process_cycle(...)` : Gère la synchronisation PWM et les statistiques de cycle.
+Le code adopte une architecture **modulaire par composition** (pattern Façade). La classe orchestratrice `SmartPI` agrège des composants spécialisés, chacun responsable d'un aspect de la régulation.
 
-2. **`SmartPIHandler`** (`prop_handler_smartpi.py`) :
-   - Fait le lien avec Home Assistant.
-   - Gère la persistance des données apprises (via `Store`).
-   - Expose les attributs pour le diagnostic.
+#### Fichiers orchestrateurs
 
-3. **`ABEstimator`** (interne à `prop_algo_smartpi.py`) :
-   - Encapsule la logique d'estimation robuste des paramètres $a$ et $b$.
+| Fichier | Classe | Rôle |
+|---------|--------|------|
+| `prop_algo_smartpi.py` | `SmartPI` | Façade / orchestrateur algorithmique |
+| `prop_handler_smartpi.py` | `SmartPIHandler` | Pont avec Home Assistant (persistance, services, attributs) |
 
-4. **`DeadTimeEstimator`** (interne à `prop_algo_smartpi.py`) :
-   - Responsable de la détection et de la validation du temps mort $L$.
-   - Gère la machine à états des épisodes d'apprentissage (Takeoff, SK, Fallback).
+#### Package `smartpi/`
 
-### Diagramme de Flux (Simplifié)
+| Module | Classe / Fonction | Responsabilité |
+|--------|-------------------|----------------|
+| `const.py` | — | Constantes, enums (`SmartPIPhase`, `GovernanceRegime`, etc.), matrice de gouvernance |
+| `controller.py` | `SmartPIController` | Calcul PI, gestion de l'intégrale, anti-windup, hystérésis |
+| `gains.py` | `GainScheduler` | Calcul adaptatif de Kp/Ki (heuristique + IMC), application du gel de gouvernance |
+| `learning.py` | `ABEstimator`, `DeadTimeEstimator` | Identification robuste des paramètres $a$, $b$ (Médiane+MAD) et du temps mort $L$ (FSM) |
+| `learning_window.py` | `LearningWindowManager` | Accumulation multi-cycle des données d'apprentissage, gating |
+| `deadband.py` | `DeadbandManager` | Machine à états deadband/near-band, dimensionnement auto de la near-band |
+| `calibration.py` | `CalibrationManager` | Machine à états de la calibration forcée (COOL_DOWN → HEAT_UP → COOL_DOWN_FINAL) |
+| `governance.py` | `SmartPIGovernance` | Détermination du régime et décisions de gel (matrice de gouvernance) |
+| `setpoint.py` | `SmartPISetpointManager` | Filtre EMA asymétrique de consigne, détection de boost |
+| `diagnostics.py` | `build_diagnostics()` | Construction du dictionnaire d'attributs pour l'UI |
+| `timestamp_utils.py` | — | Conversion monotonic ↔ wall-clock |
+
+### 5.2 Pattern Façade
+
+La classe `SmartPI` instancie tous les composants à la construction :
+
+```python
+self.gov = SmartPIGovernance(name)
+self.sp_mgr = SmartPISetpointManager(name, enabled=use_setpoint_filter)
+self.ctl = SmartPIController(name)
+self.est = ABEstimator()
+self.learn_win = LearningWindowManager(name)
+self.deadband_mgr = DeadbandManager(name, near_band_deg)
+self.calibration_mgr = CalibrationManager(name)
+self.gain_scheduler = GainScheduler(name)
+self.dt_est = DeadTimeEstimator()
+```
+
+Elle redirige 40+ propriétés vers les composants internes pour maintenir une API unifiée (ex: `SmartPI.Kp` → `GainScheduler.kp`).
+
+### 5.3 Persistance
+
+Chaque composant expose `save_state() → dict` et `load_state(dict)`. La classe `SmartPI` les agrège dans un dictionnaire imbriqué :
+
+```python
+{
+    "est_state": {...},      # ABEstimator
+    "dt_est_state": {...},   # DeadTimeEstimator
+    "gov_state": {...},      # Governance
+    "ctl_state": {...},      # Controller
+    "sp_mgr_state": {...},   # SetpointManager
+    "lw_state": {...},       # LearningWindowManager
+    "db_state": {...},       # DeadbandManager
+    "cal_state": {...},      # CalibrationManager
+    "gs_state": {...},       # GainScheduler
+}
+```
+
+Une couche de migration (`_migrate_old_state_format`) assure la compatibilité avec l'ancien format à clés plates.
+
+### 5.4 Diagramme de Flux
 
 ```mermaid
 graph TD
-    A[Heartbeat / Mesure T] --> B(Calcul Erreur & État)
-    B --> C{Mode Hystérésis ?}
-    C -- Oui --> D[Logique ON/OFF Instantanée]
-    C -- Non --> E[Calcul PI + FeedForward]
-    E --> F[Calcul PWM]
-    
-    A --> G[Update Learning Window]
-    G --> H{Fenêtre Valide ?}
-    H -- Oui --> I[ABEstimator: Learn]
-    I --> J[Mise à jour Modèle a, b]
-    J --> K[Recalcul Gains Kp, Ki]
+    A[Heartbeat / Mesure T] --> B[SmartPI.calculate]
+    B --> SP[SetpointManager: Filtre EMA + Boost]
+    SP --> C{Phase Hystérésis ?}
+    C -- Oui --> D[Controller: Logique ON/OFF]
+    C -- Non --> DB[DeadbandManager: État deadband/near-band]
+    DB --> GOV[Governance: Détermination régime]
+    GOV --> GS[GainScheduler: Calcul Kp/Ki]
+    GS --> FF[Calcul Feed-Forward]
+    FF --> PI[Controller: compute_pwm]
+    PI --> AW[Controller: Anti-windup]
+    AW --> OUT[Sortie u_final]
+
+    A --> LW[LearningWindowManager: Accumulation]
+    LW --> LV{Fenêtre Valide ?}
+    LV -- Oui --> EST[ABEstimator: Learn a, b]
+    EST --> TAU[Recalcul tau, fiabilité]
+
+    D --> DT[DeadTimeEstimator: update FSM]
+    OUT --> DT
+
+    B --> CAL{Calibration ?}
+    CAL -- Oui --> CM[CalibrationManager: calculate]
+    CM --> DT
 ```
 
 
@@ -246,15 +302,50 @@ graph TD
 
 ## 7. Paramètres et Configuration Avancée
 
-Les paramètres clés accessibles pour le debugging ou les réglages fins (dans le code) :
+Les paramètres clés sont définis dans `smartpi/const.py` :
 
-| Constante | Valeur Défaut | Description |
-|-----------|---------------|-------------|
+#### Gains et régulation
+
+| Constante | Valeur | Description |
+|-----------|--------|-------------|
+| `KP_SAFE`, `KI_SAFE` | 0.55, 0.010 | Gains de repli si le modèle n'est pas fiable |
+| `KP_MIN`, `KP_MAX` | 0.10, 5.0 | Bornes de sécurité pour Kp |
+| `KI_MIN`, `KI_MAX` | 0.001, 0.050 | Bornes de sécurité pour Ki |
+| `MAX_STEP_PER_MINUTE` | 0.25 | Limitation de vitesse de la commande (/min) |
+| `SETPOINT_BOOST_RATE` | 0.50 | Limitation de vitesse en mode Boost (/min) |
+| `AW_TRACK_TAU_S` | 120.0 | Constante de temps de l'anti-windup tracking (secondes) |
 | `SMARTPI_RECALC_INTERVAL_SEC` | 60 | Intervalle de recalcul forcé du PI (Heartbeat) |
-| `KP_SAFE`, `KI_SAFE` | 0.55, 0.01 | Gains de repli si le modèle n'est pas fiable |
-| `AB_MAD_SIGMA_MULT` | 3.0 | Seuil de rejet des outliers (Sigma) |
 
-| `LEARN_QUALITY_THRESHOLD` | 0.25 | Qualité minimale (R²) pour accepter une régression |
+#### Apprentissage et identification
+
+| Constante | Valeur | Description |
+|-----------|--------|-------------|
+| `AB_HISTORY_SIZE` | 31 | Taille de l'historique Médiane+MAD |
+| `AB_MIN_SAMPLES` | 11 | Minimum d'échantillons pour démarrer l'estimation |
+| `AB_MAD_SIGMA_MULT` | 3.0 | Seuil de rejet des outliers (nombre de sigma) |
+| `LEARN_QUALITY_THRESHOLD` | 0.25 | Qualité minimale (QI) pour accepter un apprentissage |
+| `EPISODE_MIN_DURATION_ON_S` | 600 | Durée min d'un épisode ON (10 min) |
+| `EPISODE_MIN_DURATION_OFF_S` | 900 | Durée min d'un épisode OFF (15 min) |
+| `LEARNING_PAUSE_RESUME_MIN` | 20 | Pause d'apprentissage après reprise (minutes) |
+
+#### Hystérésis et bandes
+
+| Constante | Valeur | Description |
+|-----------|--------|-------------|
+| `HYST_UPPER_C`, `HYST_LOWER_C` | 0.5, 0.3 | Seuils ON/OFF en phase Hystérésis (°C) |
+| `DEFAULT_DEADBAND_C` | 0.05 | Bande morte par défaut (°C) |
+| `DEADBAND_BELOW_C`, `DEADBAND_ABOVE_C` | 0.06, 0.04 | Bande morte asymétrique en chauffage (°C) |
+| `DEFAULT_NEAR_BAND_DEG` | 0.40 | Near-band manuelle par défaut (°C) |
+| `DEFAULT_KP_NEAR_FACTOR` | 0.80 | Facteur de réduction Kp en near-band |
+| `DEFAULT_KI_NEAR_FACTOR` | 0.60 | Facteur de réduction Ki en near-band |
+
+#### Calibration
+
+| Constante | Valeur | Description |
+|-----------|--------|-------------|
+| `FORCE_CALIBRATION_INTERVAL_HOURS` | 72 | Intervalle de calibration périodique (heures) |
+| `CALIBRATION_RETRY_MAX` | 1 | Nombre max de tentatives automatiques |
+| `CALIBRATION_TIMEOUT_MIN` | 600 | Timeout par phase de calibration (minutes) |
 
 
 ## 8. Gouvernance Safety-First
@@ -285,10 +376,19 @@ Selon le régime détecté, le superviseur prend une décision pour l'adaptation
 
 ### 8.3 Codes de Diagnostic (`FreezeReason`)
 
-En cas de gel, l'attribut `freeze_reason` permet de comprendre la cause :
-- `REGIME_TRANSITION` : Transition de régime en cours.
+En cas de gel, les attributs `freeze_reason_thermal` et `freeze_reason_gains` permettent de comprendre la cause :
+- `NONE` : Pas de gel, adaptation autorisée.
+- `REGIME_TRANSITION` : Transition de régime en cours (cycle non homogène).
+- `CYCLE_INVALID` : Cycle invalide.
+- `EVENT_POLLUTED` : Événement externe a pollué les données.
 - `SENSOR_INVALID` : Température ou consigne non fiable.
+- `DEADTIME_UNRELIABLE` : Temps mort non fiable.
 - `BOOT_GUARD` : Protection durant les premières minutes du démarrage.
+- `DEAD_BAND` : Système dans la bande morte.
+- `NEAR_BAND` : Système dans la near-band.
+- `WARMUP` : Phase de démarrage.
+- `HOLD` : Intégrateur en maintien.
+- `PERTURBED` : Perturbation externe détectée.
 - `SATURATION` : Actionneur saturé.
 - `SYSTEM_INEFFICIENT` : Le système ne réagit pas comme attendu par le modèle.
 

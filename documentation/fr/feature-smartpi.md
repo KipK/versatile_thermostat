@@ -33,7 +33,7 @@ Au tout premier démarrage (ou après un reset de l'apprentissage), le modèle t
 
 Cette phase génère des cycles de chauffe francs et nets, essentiels pour identifier les paramètres `a` et `b` mais aussi et surtout pour apprendre le **Temps Mort** (Dead Time) initial.
 
-> **Transition** : L'algorithme passe automatiquement en phase **STABLE** dès qu'il a collecté assez de mesures fiables (11 mesures fiables minimum).
+> **Transition** : L'algorithme passe automatiquement en phase **STABLE** dès qu'il a collecté assez de mesures fiables (31 mesures minimum).
 > **Note** : En mode Hystérésis, la coupure est **instantanée** dès que la température dépasse le seuil haut, interrompant le cycle PWM en cours pour éviter toute surchauffe.
 
 ### Phase 2 : Stable (Régulation PI adaptative)
@@ -46,7 +46,7 @@ Une fois le modèle fiable, SmartPI active son régulateur PI avancé :
 
 ### Phase 3 : Calibration Forcée (Maintenance du modèle)
 
-Si l'algorithme détecte que ses données de **Temps Mort** ne sont plus fiables ou si aucune calibration n'a eu lieu depuis plus de 48h, il peut déclencher une phase de **Calibration Forcée**.
+Si l'algorithme détecte que ses données de **Temps Mort** ne sont plus fiables ou si aucune calibration n'a eu lieu depuis plus de 72h, il peut déclencher une phase de **Calibration Forcée**.
 
 *   Le thermostat repasse temporairement en mode hystérésis pour effectuer un cycle complet (Refroidissement -> Chauffe -> Refroidissement).
 *   Cela permet de recalibrer précisément les délais de réaction du système.
@@ -102,32 +102,37 @@ Pour les utilisateurs avancés, l'entité climate expose des attributs détaill�
 | `phase` | Phase actuelle de l'algorithme : `Hysteresis`, `Stable` ou `Calibration` |
 | `hysteresis_state`| État en phase hystérésis : `on`, `off` ou `band` |
 | `tau_min` | Inertie thermique de la pièce (minutes). Ex: 600 = 10h |
-| `deadtime_heat_s` | Temps mort estimé en secondes (délai de réaction chauffage) |
-| `deadtime_cool_s` | Temps mort estimé en secondes (délai de réaction refroidissement) |
-| `deadtime_reliable`| `true` si le temps mort a été correctement identifié |
-| `deadtime_skip_count_a` | Compteur d'apprentissages ignorés (paramètre a) dus au temps mort |
-| `deadtime_skip_count_b` | Compteur d'apprentissages ignorés (paramètre b) dus au temps mort |
-| `in_deadtime_window` | `true` si le système est actuellement dans une fenêtre de temps mort |
+| `tau_reliable` | `true` si l'estimation de l'inertie est fiable |
 | `a` | Efficacité de chauffage (°C/min à 100%) |
 | `b` | Coefficient de perte (1/min) |
-| `learn_ok_count` | Nombre d'apprentissages validés |
+| `learn_ok_count` | Nombre total d'apprentissages validés |
+| `learn_ok_count_a` | Nombre d'apprentissages validés pour le paramètre `a` |
+| `learn_ok_count_b` | Nombre d'apprentissages validés pour le paramètre `b` |
 | `learn_last_reason` | Raison de la dernière tentative d'apprentissage (succès ou motif de rejet) |
 | `error` | Écart Consigne - Température |
 | `u_ff` | Part de puissance "Feed-Forward" (anticipation météo) |
 | `u_pi` | Part de puissance "PI" (correction d'erreur) |
 | `Kp`, `Ki` | Gains calculés du régulateur |
-| `Kp_reel`, `Ki_reel` | Gains réellement appliqués (incluant les réductions type Near-Band) |
-| `kp_source` | Origine du gain Kp : `IMC`, `Heuristic` ou `Safe` |
+| `kp_source` | Origine du gain Kp : `imc_deadtime`, `heuristic`, `safe`, `frozen`, etc. |
 | `on_percent` | Puissance totale de consigne (0.0 à 1.0) |
 | `u_applied` | Puissance réellement appliquée après toutes limitations |
 | `in_deadband` | `true` si la température est dans la zone de confort (Deadband) |
 | `in_near_band` | `true` si le système est dans la zone de ralentissement (Near-Band) |
+| `near_band_below_deg` | Largeur de la Near-Band sous la consigne (°C, auto-calculée) |
+| `near_band_above_deg` | Largeur de la Near-Band au-dessus de la consigne (°C, auto-calculée) |
+| `near_band_source` | Origine du calcul Near-Band : `auto_model_aware`, `manual`, etc. |
 | `setpoint_boost_active` | `true` si le mode Boost est activé |
-| `calibration_state` | État de la calibration forcée : `Idle`, `CoolDown`, `HeatUp`, etc. |
-| `last_calibration_time` | Date et heure de la dernière calibration réussie |
+| `deadtime_heat_s` | Temps mort estimé en secondes (délai de réaction chauffage) |
+| `deadtime_heat_reliable` | `true` si le temps mort de chauffage a été correctement identifié |
+| `deadtime_cool_s` | Temps mort estimé en secondes (délai de réaction refroidissement) |
+| `deadtime_cool_reliable` | `true` si le temps mort de refroidissement a été correctement identifié |
+| `in_deadtime_window` | `true` si le système est actuellement dans une fenêtre de temps mort |
 | `governance_regime` | Régime physique détecté (Gouvernance) |
+| `governance_cycle_regimes` | Liste des régimes traversés durant le cycle en cours |
 | `freeze_reason_thermal` | Raison du gel de l'apprentissage des paramètres thermiques (a, b) |
 | `freeze_reason_gains` | Raison du gel de l'adaptation des gains (Kp, Ki) |
+| `last_decision_thermal` | Décision de gouvernance pour l'apprentissage thermique |
+| `last_decision_gains` | Décision de gouvernance pour l'adaptation des gains |
 
 
 ## Services
