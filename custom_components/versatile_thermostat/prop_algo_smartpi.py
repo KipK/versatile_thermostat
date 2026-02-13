@@ -54,30 +54,43 @@ from .cycle_manager import CycleManager
 from homeassistant.core import HomeAssistant
 
 from .smartpi.const import (
-    SmartPIPhase,
-    GovernanceRegime,
-    GovernanceDecision,
-    SmartPICalibrationPhase,
-    KP_SAFE,
-    KI_SAFE,
-    KI_MIN,
-    MAX_STEP_PER_MINUTE,
-    SETPOINT_BOOST_RATE,
-    SKIP_CYCLES_AFTER_RESUME,
-    LEARNING_PAUSE_RESUME_MIN,
-    HYST_UPPER_C,
-    HYST_LOWER_C,
-    DEFAULT_DEADBAND_C,
-    DEADBAND_BELOW_C,
-    DEADBAND_ABOVE_C,
-    AB_HISTORY_SIZE,
-    DEFAULT_NEAR_BAND_DEG,
-    DEFAULT_KP_NEAR_FACTOR,
-    DEFAULT_KI_NEAR_FACTOR,
-    FORCE_CALIBRATION_INTERVAL_HOURS,
-    CALIBRATION_RETRY_MAX,
-    CALIBRATION_TIMEOUT_MIN,
-    clamp,
+    SmartPIPhase as SmartPIPhase,
+    GovernanceRegime as GovernanceRegime,
+    GovernanceDecision as GovernanceDecision,
+    SmartPICalibrationPhase as SmartPICalibrationPhase,
+    KP_SAFE as KP_SAFE,
+    KI_SAFE as KI_SAFE,
+    KP_MAX as KP_MAX,
+    KI_MIN as KI_MIN,
+    KI_MAX as KI_MAX,
+    KP_MIN as KP_MIN,
+    MAX_STEP_PER_MINUTE as MAX_STEP_PER_MINUTE,
+    SETPOINT_BOOST_RATE as SETPOINT_BOOST_RATE,
+    SETPOINT_BOOST_THRESHOLD as SETPOINT_BOOST_THRESHOLD,
+    SETPOINT_BOOST_ERROR_MIN as SETPOINT_BOOST_ERROR_MIN,
+    SKIP_CYCLES_AFTER_RESUME as SKIP_CYCLES_AFTER_RESUME,
+    LEARNING_PAUSE_RESUME_MIN as LEARNING_PAUSE_RESUME_MIN,
+    EPISODE_MIN_DURATION_ON_S as EPISODE_MIN_DURATION_ON_S,
+    EPISODE_MIN_DURATION_OFF_S as EPISODE_MIN_DURATION_OFF_S,
+    SMARTPI_RECALC_INTERVAL_SEC as SMARTPI_RECALC_INTERVAL_SEC,
+    AW_TRACK_TAU_S as AW_TRACK_TAU_S,
+    AW_TRACK_MAX_DELTA_I as AW_TRACK_MAX_DELTA_I,
+    HYST_UPPER_C as HYST_UPPER_C,
+    HYST_LOWER_C as HYST_LOWER_C,
+    DEFAULT_DEADBAND_C as DEFAULT_DEADBAND_C,
+    DEADBAND_BELOW_C as DEADBAND_BELOW_C,
+    DEADBAND_ABOVE_C as DEADBAND_ABOVE_C,
+    DEADBAND_HYSTERESIS as DEADBAND_HYSTERESIS,
+    AB_HISTORY_SIZE as AB_HISTORY_SIZE,
+    AB_MIN_SAMPLES as AB_MIN_SAMPLES,
+    DEFAULT_NEAR_BAND_DEG as DEFAULT_NEAR_BAND_DEG,
+    DEFAULT_KP_NEAR_FACTOR as DEFAULT_KP_NEAR_FACTOR,
+    DEFAULT_KI_NEAR_FACTOR as DEFAULT_KI_NEAR_FACTOR,
+    FreezeReason as FreezeReason,
+    FORCE_CALIBRATION_INTERVAL_HOURS as FORCE_CALIBRATION_INTERVAL_HOURS,
+    CALIBRATION_RETRY_MAX as CALIBRATION_RETRY_MAX,
+    CALIBRATION_TIMEOUT_MIN as CALIBRATION_TIMEOUT_MIN,
+    clamp as clamp,
 )
 from .smartpi.learning import DeadTimeEstimator, ABEstimator
 from .smartpi.diagnostics import build_diagnostics
@@ -90,6 +103,7 @@ from .smartpi.calibration import CalibrationManager
 from .smartpi.gains import GainScheduler
 
 _LOGGER = logging.getLogger(__name__)
+
 
 
 class SmartPI(CycleManager):
@@ -182,25 +196,15 @@ class SmartPI(CycleManager):
         self._e_filt: Optional[float] = None
         # self._ema_alpha: float = 0.35  # Deprecated: using ERROR_FILTER_TAU
 
-        # Current gains
-        self.Kp: float = KP_SAFE
-        self.Ki: float = KI_SAFE
-        self._kp: float = KP_SAFE
-        self._ki: float = KI_SAFE
-        self._prev_kp: float = KP_SAFE
-        self._prev_ki: float = KI_SAFE
-
         # Outputs (duty-cycle only, timing calculated by handler)
         self._on_percent: float = 0.0
 
         # Diagnostics / status
-        self._last_u_ff: float = 0.0
-        self._last_u_pi: float = 0.0
         self._last_error: float = 0.0
         self._last_error_p: float = 0.0
-        self._last_i_mode: str = "init"
+        self._last_u_ff: float = 0.0
+        self._last_u_pi: float = 0.0
         self._tau_reliable: bool = False
-        self._last_sat: str = "init"
         self._sign_flip_active: bool = False
 
         # Track last time calculate() was executed for dt-based integration
@@ -229,15 +233,7 @@ class SmartPI(CycleManager):
         self._last_forced_by_timing: bool = False  # True when timing forced 0%/100%
         self._output_initialized: bool = False # True once calculate() runs successfully
 
-        # Setpoint step boost state (delegated to self.sp_mgr)
-
-        # Enhanced A/B Learning: Start-of-cycle snapshot managed by CycleManager
-
-        # Thermal Guard (delegated to self.ctl)
-
-        # Hysteresis state (delegated to self.ctl)
-
-        # --- Dead Time (L) Support (Smart-PI v2) ---
+        # --- Dead Time (L) Support ---
         self.dt_est = DeadTimeEstimator()
         self._heat_request_prev: bool = False
         self._t_heat_episode_start: float | None = None
@@ -247,7 +243,6 @@ class SmartPI(CycleManager):
 
         # Feature flag for integral freeze during deadtime (Default OFF)
         self.feature_integral_freeze: bool = False
-        self._kp_source: str = "heuristic" # "heuristic" or "imc_deadtime"
 
         # --- Near-Band Auto-Tuning (Phase 2) ---
         # Near-band state is now managed by DeadbandManager component
@@ -258,6 +253,10 @@ class SmartPI(CycleManager):
         # --- Safety-First Governance (Delegated to self.gov) ---
         if saved_state:
             self.load_state(saved_state)
+
+        # Legacy attributes for tests
+        self._prev_kp = self.Kp
+        self._prev_ki = self.Ki
 
         _LOGGER.debug("%s - SmartPI initialized", self._name)
 
@@ -274,10 +273,15 @@ class SmartPI(CycleManager):
     def reset_learning(self) -> None:
         """Reset all learned parameters to defaults."""
         self.est.reset()
-        if self.ctl: self.ctl.reset()
-        if self.sp_mgr: self.sp_mgr.reset()
-        if self.gov: self.gov.reset()
+        if self.ctl:
+            self.ctl.reset()
+        if self.sp_mgr:
+            self.sp_mgr.reset()
+        if self.gov:
+            self.gov.reset()
 
+        self._last_error = 0.0
+        self._last_error_p = 0.0
         self._on_percent = 0.0
         self._output_initialized = False
         self._last_u_ff = 0.0
@@ -287,10 +291,10 @@ class SmartPI(CycleManager):
         self._last_u_applied = 0.0
         self._last_aw_du = 0.0
         self._e_filt = None
-        self.Kp = KP_SAFE
-        self.Ki = KI_SAFE
         self._cycles_since_reset = 0
         self._accumulated_dt = 0.0
+        self._prev_kp = KP_SAFE
+        self._prev_ki = KI_SAFE
 
         # Reset learning states
         self._last_calculate_time = None
@@ -306,7 +310,6 @@ class SmartPI(CycleManager):
         self._t_heat_episode_start = None
         self._deadtime_skip_count_a = 0
         self._deadtime_skip_count_b = 0
-        self._kp_source = "heuristic"
 
         # Reset Phase 2 - near-band state is managed by DeadbandManager component
 
@@ -315,139 +318,224 @@ class SmartPI(CycleManager):
         # Governance is reset above (self.gov.reset())
 
         # Reset new component managers (Phase 2.5 refactoring)
-        if self.learn_win: self.learn_win.reset_all()
-        if self.deadband_mgr: self.deadband_mgr.reset()
-        if self.calibration_mgr: self.calibration_mgr.reset()
-        if self.gain_scheduler: self.gain_scheduler.reset()
+        if self.learn_win:
+            self.learn_win.reset_all()
+        if self.deadband_mgr:
+            self.deadband_mgr.reset()
+        if self.calibration_mgr:
+            self.calibration_mgr.reset()
+        if self.gain_scheduler:
+            self.gain_scheduler.reset()
 
         _LOGGER.info("%s - SmartPI learning and history reset", self._name)
 
+    # ------------------------------
+    # Property Mappings (Component Redirection)
+    # ------------------------------
+
     @property
     def calibration_state(self) -> SmartPICalibrationPhase:
-        """Return current calibration state, delegating to CalibrationManager."""
         return self.calibration_mgr.state
 
     @property
     def _last_calibration_time(self) -> float | None:
-        """Delegate to CalibrationManager for backward compatibility."""
         return self.calibration_mgr.last_calibration_time
 
     @_last_calibration_time.setter
-    def _last_calibration_time(self, value: float | None) -> None:
-        """Set last calibration time in CalibrationManager."""
+    def _last_calibration_time(self, value: float | None):
         self.calibration_mgr._last_calibration_time = value
 
     @property
-    def _force_calibration_requested(self) -> bool:
-        """Delegate to CalibrationManager for sync access."""
-        return self.calibration_mgr.calibration_requested
-
-    @property
     def _calibration_retry_count(self) -> int:
-        """Delegate to CalibrationManager for backward compatibility."""
         return self.calibration_mgr.retry_count
 
     @_calibration_retry_count.setter
-    def _calibration_retry_count(self, value: int) -> None:
-        """Set calibration retry count in CalibrationManager."""
+    def _calibration_retry_count(self, value: int):
         self.calibration_mgr._calibration_retry_count = value
 
     @property
     def _calibration_start_time(self) -> float | None:
-        """Backward-compatible access to calibration start time."""
         return self.calibration_mgr.calibration_start_time
 
     @_calibration_start_time.setter
-    def _calibration_start_time(self, value: float | None) -> None:
-        """Backward-compatible setter for calibration start time."""
+    def _calibration_start_time(self, value: float | None):
         self.calibration_mgr._calibration_start_time = value
 
     @property
     def _learning_resume_ts(self) -> float | None:
-        """Delegate to LearningWindowManager."""
         return self.learn_win.learning_resume_ts
 
     @_learning_resume_ts.setter
-    def _learning_resume_ts(self, value: float | None) -> None:
-        """Delegate to LearningWindowManager."""
+    def _learning_resume_ts(self, value: float | None):
         self.learn_win.set_learning_resume_ts(value)
 
     @property
     def _in_deadband(self) -> bool:
-        """Delegate to DeadbandManager."""
         return self.deadband_mgr.in_deadband
 
     @_in_deadband.setter
-    def _in_deadband(self, value: bool) -> None:
-        """Set deadband state in DeadbandManager."""
+    def _in_deadband(self, value: bool):
         self.deadband_mgr._in_deadband = value
 
     @property
     def _in_near_band(self) -> bool:
-        """Delegate to DeadbandManager."""
         return self.deadband_mgr.in_near_band
 
     @_in_near_band.setter
-    def _in_near_band(self, value: bool) -> None:
-        """Set near-band state in DeadbandManager."""
+    def _in_near_band(self, value: bool):
         self.deadband_mgr._in_near_band = value
 
     @property
+    def in_deadband(self) -> bool:
+        return self.deadband_mgr.in_deadband
+
+    @property
+    def in_near_band(self) -> bool:
+        return self.deadband_mgr.in_near_band
+
+    @property
     def _near_band_below_deg(self) -> float:
-        """Delegate to DeadbandManager for backward compatibility."""
         return self.deadband_mgr.near_band_below_deg
 
     @property
     def _near_band_above_deg(self) -> float:
-        """Delegate to DeadbandManager for backward compatibility."""
         return self.deadband_mgr.near_band_above_deg
 
     @property
     def _near_band_source(self) -> str:
-        """Delegate to DeadbandManager for backward compatibility."""
         return self.deadband_mgr.near_band_source
 
-    def force_calibration(self) -> None:
-        """Force a calibration cycle to refresh Dead Time estimation."""
-        # Delegate to CalibrationManager component
-        self.calibration_mgr.request_calibration()
+    @property
+    def Kp(self) -> float:
+        return self.gain_scheduler.kp
 
-    def notify_resume_after_interruption(self, skip_cycles: int = None) -> None:
-        """Notify SmartPI that the thermostat is resuming after an interruption.
+    @Kp.setter
+    def Kp(self, value: float):
+        self.gain_scheduler._kp = value
 
-        This is called when the thermostat resumes after a window close event
-        or similar interruption. It sets a deadline before which learning is ignored.
+    @property
+    def Ki(self) -> float:
+        return self.gain_scheduler.ki
 
-        Args:
-            skip_cycles: Legacy argument (count of cycles). Converted to duration approx.
-        """
-        if skip_cycles is None:
-            skip_cycles = SKIP_CYCLES_AFTER_RESUME
+    @Ki.setter
+    def Ki(self, value: float):
+        self.gain_scheduler._ki = value
 
-        # Robust conversion: assume at least 15 min per cycle equivalent if cycle_min is small,
-        # or use cycle_min. This is a heuristic.
-        duration_min = float(skip_cycles) * max(self._cycle_min, 15.0)
-        self.learn_win.set_learning_resume_ts(time.monotonic() + (duration_min * 60.0))
+    @property
+    def _kp(self) -> float:
+        return self.gain_scheduler.kp
 
-        # Notify DeadTimeEstimator of interruption
+    @_kp.setter
+    def _kp(self, value: float):
+        self.gain_scheduler._kp = value
 
-        # Also reset the learning timestamp to avoid using stale dt
-        self._learn_last_ts = None
+    @property
+    def _ki(self) -> float:
+        return self.gain_scheduler.ki
 
-        # Compute wall-clock time for logging/diagnostics
-        try:
-            # Just for logging
-            resume_dt_log = datetime.now().timestamp() + (duration_min * 60.0)
-            resume_dt_iso = datetime.fromtimestamp(resume_dt_log).isoformat()
-        except Exception:
-            resume_dt_iso = "unknown"
+    @_ki.setter
+    def _ki(self, value: float):
+        self.gain_scheduler._ki = value
 
-        _LOGGER.info("%s - SmartPI notified of resume after interruption, skipping learning until (approx) %s", self._name, resume_dt_iso)
+    @property
+    def _kp_source(self) -> str:
+        return self.gain_scheduler.kp_source
 
-    # ------------------------------
-    # Property Mappings (Legacy Support)
-    # ------------------------------
+    @_kp_source.setter
+    def _kp_source(self, value: str):
+        self.gain_scheduler._kp_source = value
 
+    @property
+    def _hysteresis_thermal_guard(self) -> bool:
+        return self.ctl.hysteresis_thermal_guard
+
+    @_hysteresis_thermal_guard.setter
+    def _hysteresis_thermal_guard(self, value: bool):
+        self.ctl.hysteresis_thermal_guard = value
+
+    @property
+    def _hysteresis_state(self) -> str:
+        return self.ctl.hysteresis_state
+
+    @property
+    def _last_i_mode(self) -> str:
+        return self.ctl.last_i_mode
+
+    @_last_i_mode.setter
+    def _last_i_mode(self, value: str):
+        self.ctl.last_i_mode = value
+
+    @property
+    def _last_sat(self) -> str:
+        return "both" if (self.ctl.sat_p and self.ctl.sat_i) else ("p" if self.ctl.sat_p else ("i" if self.ctl.sat_i else "none"))
+
+    @_last_sat.setter
+    def _last_sat(self, value: str):
+        # Allow tests to set it, although it's mostly derived
+        self.ctl.last_sat = value
+
+    @property
+    def last_decision_thermal(self) -> Dict[str, Any]:
+        return self.gov.last_decision_thermal
+
+    @last_decision_thermal.setter
+    def last_decision_thermal(self, value: Dict[str, Any]):
+        self.gov.last_decision_thermal = value
+
+    @property
+    def last_decision_gains(self) -> Dict[str, Any]:
+        return self.gov.last_decision_gains
+
+    @last_decision_gains.setter
+    def last_decision_gains(self, value: Dict[str, Any]):
+        self.gov.last_decision_gains = value
+
+
+    @property
+    def last_freeze_reason_thermal(self) -> str:
+        return self.freeze_reason_thermal
+
+    @property
+    def last_freeze_reason_gains(self) -> str:
+        return self.freeze_reason_gains
+
+    @property
+    def last_reason_thermal(self) -> str:
+        return self.freeze_reason_thermal
+
+    @property
+    def last_reason_gains(self) -> str:
+        return self.freeze_reason_gains
+
+    @property
+    def _current_governance_regime(self) -> str:
+        return self.gov.regime.value if hasattr(self.gov.regime, 'value') else str(self.gov.regime)
+
+    @_current_governance_regime.setter
+    def _current_governance_regime(self, value: str):
+        self.gov._current_regime = GovernanceRegime(value) if isinstance(value, str) else value
+
+    @property
+    def phase(self) -> str:
+        if self.calibration_mgr.state != SmartPICalibrationPhase.IDLE:
+            return SmartPIPhase.CALIBRATION
+        if len(self.est.a_meas_hist) < AB_HISTORY_SIZE or len(self.est.b_meas_hist) < AB_HISTORY_SIZE:
+            return SmartPIPhase.HYSTERESIS
+        return SmartPIPhase.STABLE
+
+    @property
+    def meas_count_a(self) -> int:
+        return len(self.est.a_meas_hist)
+
+    @property
+    def meas_count_b(self) -> int:
+        return len(self.est.b_meas_hist)
+
+    @property
+    def _cycle_regimes(self):
+        return self.gov._cycle_regimes
+
+    # --- Setpoint Manager Redirects ---
     @property
     def _filtered_setpoint(self) -> float | None:
         return self.sp_mgr.filtered_setpoint
@@ -489,60 +577,48 @@ class SmartPI(CycleManager):
         self.sp_mgr.prev_setpoint_for_boost = value
 
     @property
-    def _hysteresis_thermal_guard(self) -> bool:
-        return self.ctl.hysteresis_thermal_guard
+    def _force_calibration_requested(self) -> bool:
+        return self.calibration_mgr.calibration_requested
 
-    @_hysteresis_thermal_guard.setter
-    def _hysteresis_thermal_guard(self, value: bool):
-        self.ctl.hysteresis_thermal_guard = value
+    @_force_calibration_requested.setter
+    def _force_calibration_requested(self, value: bool):
+        self.calibration_mgr.calibration_requested = value
 
-    @property
-    def _cycle_regimes(self):
-        return self.gov._cycle_regimes
+    def force_calibration(self) -> None:
+        """Force a calibration cycle to refresh Dead Time estimation."""
+        # Delegate to CalibrationManager component
+        self.calibration_mgr.request_calibration()
 
-    @property
-    def _current_governance_regime(self):
-        return self.gov._current_regime
+    def notify_resume_after_interruption(self, skip_cycles: int = None) -> None:
+        """Notify SmartPI that the thermostat is resuming after an interruption.
 
-    @property
-    def _governance_decision_thermal(self):
-        return self.gov.last_decision_thermal
+        This is called when the thermostat resumes after a window close event
+        or similar interruption. It sets a deadline before which learning is ignored.
 
-    @property
-    def _governance_reason_thermal(self):
-        return self.gov.last_reason_thermal
+        Args:
+            skip_cycles: Legacy argument (count of cycles). Converted to duration approx.
+        """
+        if skip_cycles is None:
+            skip_cycles = SKIP_CYCLES_AFTER_RESUME
 
-    @property
-    def _governance_decision_gains(self):
-        return self.gov.last_decision_gains
+        # Robust conversion: assume at least 15 min per cycle equivalent if cycle_min is small,
+        # or use cycle_min. This is a heuristic.
+        duration_min = float(skip_cycles) * max(self._cycle_min, 15.0)
+        self.learn_win.set_learning_resume_ts(time.monotonic() + (duration_min * 60.0))
 
-    @property
-    def _governance_reason_gains(self):
-        return self.gov.last_reason_gains
+        # Also reset the learning timestamp to avoid using stale dt
+        self._learn_last_ts = None
 
-    @property
-    def _hysteresis_state(self) -> str:
-        return self.ctl.hysteresis_state
+        # Compute wall-clock time for logging/diagnostics
+        try:
+            # Just for logging
+            resume_dt_log = datetime.now().timestamp() + (duration_min * 60.0)
+            resume_dt_iso = datetime.fromtimestamp(resume_dt_log).isoformat()
+        except (ValueError, TypeError, OverflowError) as e:
+            _LOGGER.warning("Could not format resume time for logging: %s", e)
+            resume_dt_iso = "unknown"
 
-    @property
-    def phase(self) -> str:
-        """Current phase of the algorithm."""
-        if self.calibration_mgr.state != SmartPICalibrationPhase.IDLE:
-            return SmartPIPhase.CALIBRATION
-        # Hysteresis until we have AB_HISTORY_SIZE (31) measurements for both A and B
-        if len(self.est.a_meas_hist) < AB_HISTORY_SIZE or len(self.est.b_meas_hist) < AB_HISTORY_SIZE:
-            return SmartPIPhase.HYSTERESIS
-        return SmartPIPhase.STABLE
-
-    @property
-    def meas_count_a(self) -> int:
-        """Return number of collected 'a' measurements in the buffer."""
-        return len(self.est.a_meas_hist)
-
-    @property
-    def meas_count_b(self) -> int:
-        """Return number of collected 'b' measurements in the buffer."""
-        return len(self.est.b_meas_hist)
+        _LOGGER.info("%s - SmartPI notified of resume after interruption, skipping learning until (approx) %s", self._name, resume_dt_iso)
 
     # ------------------------------
     # Learning entry point
@@ -607,7 +683,7 @@ class SmartPI(CycleManager):
         # Update internal on_percent to match applied value
         self._on_percent = on_percent
         # Reset governance regime tracking for new cycle
-        self._cycle_regimes.clear()
+        self.gov.on_cycle_start()
 
     async def on_cycle_completed(self, new_params: dict, prev_params: dict | None) -> bool:
         """Handle end of cycle (learning). Return False to extend window."""
@@ -620,12 +696,6 @@ class SmartPI(CycleManager):
         # 1. Retrieve Context
         # Note: on_cycle_completed is now mainly used for cycle counting loops.
         # Learning accumulation is done via update_learning() in calculate().
-
-        # We can perform checks here if we want to invalidate the WHOLE cycle retroactively
-        # but update_learning handles it better in real-time.
-
-        # Just return True to allow logging/counting.
-        pass        # 5. Multi-cycle learning window logic
         # MOVED TO update_learning() called by calculate() heartbeat.
         # This method now only handles cycle counting/stats if needed.
 
@@ -636,14 +706,6 @@ class SmartPI(CycleManager):
         # or calculate() if needed.
 
         return True
-
-    ########################################################################
-    #                                                                      #
-    #                      API & PROPERTIES                                #
-    #                                                                      #
-    ########################################################################
-
-    # ------------------------------
 
     @property
     def a(self) -> float:
@@ -683,16 +745,6 @@ class SmartPI(CycleManager):
         return self._ki
 
     @property
-    def kp_reel(self) -> float:
-        """Return the actual Kp used for calculation (after near-band adjustment)."""
-        return self.Kp
-
-    @property
-    def ki_reel(self) -> float:
-        """Return the actual Ki used for calculation (after near-band adjustment)."""
-        return self.Ki
-
-    @property
     def u_ff(self) -> float:
         """Last feed-forward value."""
         return self._last_u_ff
@@ -700,6 +752,14 @@ class SmartPI(CycleManager):
     @property
     def u_pi(self) -> float:
         return self._last_u_pi
+
+    @property
+    def kp_reel(self) -> float:
+        """Return the actual Kp used for calculation (after near-band adjustment)."""
+        return self.Kp
+    def ki_reel(self) -> float:
+        """Return the actual Ki used for calculation (after near-band adjustment)."""
+        return self.Ki
 
     @property
     def tau_min(self) -> float:
@@ -734,24 +794,13 @@ class SmartPI(CycleManager):
         return self._learning_start_date.isoformat() if self._learning_start_date else None
 
     @property
-    def last_governance_decision_thermal(self) -> str:
-        return self.gov.last_decision_thermal.value
-
-    @property
     def last_decision_thermal(self) -> str:
         return self.gov.last_decision_thermal.value
 
-    @property
-    def last_freeze_reason_thermal(self) -> str:
-        return self.gov.last_freeze_reason_thermal.value
 
     @property
     def freeze_reason_thermal(self) -> str:
         return self.gov.last_freeze_reason_thermal.value
-
-    @property
-    def last_governance_decision_gains(self) -> str:
-        return self.gov.last_decision_gains.value
 
     @property
     def last_decision_gains(self) -> str:
@@ -761,13 +810,6 @@ class SmartPI(CycleManager):
     def freeze_reason_gains(self) -> str:
         return self.gov.last_freeze_reason_gains.value
 
-    @property
-    def last_freeze_reason_gains(self) -> str:
-        return self.gov.last_freeze_reason_gains.value
-
-    @property
-    def i_mode(self) -> str:
-        return self.ctl.last_i_mode
 
     @property
     def last_i_mode(self) -> str:
@@ -791,7 +833,7 @@ class SmartPI(CycleManager):
     def u_prev(self, value: float) -> None:
         self.ctl.u_prev = value
     @property
-    def sat(self) -> str:
+    def last_sat(self) -> str:
         return self.ctl.last_sat
 
     @property
@@ -862,13 +904,6 @@ class SmartPI(CycleManager):
 
         return u_final
 
-    @property
-    def in_deadband(self) -> bool:
-        return self._in_deadband
-
-    @property
-    def in_near_band(self) -> bool:
-        return self._in_near_band
 
     # Learning window properties - delegate to learn_win component
     @property
@@ -1253,23 +1288,6 @@ class SmartPI(CycleManager):
         if "est_state" not in state:
             _LOGGER.info("%s - Migrated old flat-key state format to new nested format", self._name)
 
-        # Extract component states
-        est_state = migrated.get("est_state", {})
-        dt_est_state = migrated.get("dt_est_state", {})
-        gov_state = migrated.get("gov_state", {})
-        ctl_state = migrated.get("ctl_state", {})
-        sp_state = migrated.get("sp_mgr_state", {})
-        lw_state = migrated.get("lw_state", {})
-        db_state = migrated.get("db_state", {})
-        cal_state = migrated.get("cal_state", {})
-        gs_state = migrated.get("gs_state", {})
-
-        # Top-level state
-        self._on_percent = float(migrated.get("on_percent") or 0.0)
-        self._last_target_temp = migrated.get("last_target_temp")
-        self._cycles_since_reset = int(migrated.get("cycles_since_reset") or 0)
-        self._accumulated_dt = float(migrated.get("accumulated_dt") or 0.0)
-
         # Load component states
         self.est.load_state(migrated.get("est_state", {}))
         self.dt_est.load_state(migrated.get("dt_est_state", {}))
@@ -1384,7 +1402,8 @@ class SmartPI(CycleManager):
         self._last_target_temp = target_temp
 
         error = target_temp_filt - current_temp
-        if hvac_mode == VThermHvacMode_COOL: error = -error
+        if hvac_mode == VThermHvacMode_COOL:
+            error = -error
 
         self._setpoint_boost_active = self.sp_mgr.update_boost_state(target_temp, error, hvac_mode)
 
@@ -1444,7 +1463,7 @@ class SmartPI(CycleManager):
         """
         # Delegate gain calculation to GainScheduler component
         tau_info = self.est.tau_reliability()
-        gain_result = self.gain_scheduler.calculate(
+        self.gain_scheduler.calculate(
             tau_reliable=self._tau_reliable,
             tau_min=tau_info.tau_min,
             estimator=self.est,
@@ -1455,12 +1474,7 @@ class SmartPI(CycleManager):
             governance_decision=gov_decision_g,
         )
 
-        # Sync gains
-        self.Kp = gain_result.kp
-        self.Ki = gain_result.ki
-        self._kp = gain_result.kp
-        self._ki = gain_result.ki
-        self._kp_source = gain_result.kp_source
+        # Gains updated within GainScheduler component
 
         # Feed Forward
         u_ff = 0.0
@@ -1469,7 +1483,8 @@ class SmartPI(CycleManager):
                 k_ff = clamp(self.est.b / max(self.est.a, 1e-6), 0.0, 3.0)
                 u_ff = clamp(k_ff * (target_temp_filt - ext_current_temp), 0.0, 1.0)
 
-        if hvac_mode == VThermHvacMode_COOL: u_ff = 0.0
+        if hvac_mode == VThermHvacMode_COOL:
+            u_ff = 0.0
 
         # FF Warmup
         learn_scale = clamp(self.est.learn_ok_count / float(self.ff_warmup_ok_count), 0.0, 1.0)
@@ -1514,14 +1529,27 @@ class SmartPI(CycleManager):
         self,
         target_temp: float | None,
         current_temp: float | None,
-        ext_current_temp: float | None,
-        hvac_mode: VThermHvacMode,
+        ext_current_temp: float | None = None,
+        hvac_mode: VThermHvacMode | None = None,
+        slope: float | None = None,
         integrator_hold: bool = False,
         power_shedding: bool = False,
-    ) -> None:
+        *args,
+        **kwargs,
+    ) -> float:
         """
         Compute the next duty-cycle command.
         """
+        # Compatibility handling for old signature: calculate(t, c, dt_min, now, hvac_mode)
+        # In old calls: ext_current_temp=dt_min, hvac_mode=now, slope=hvac_mode
+        if hvac_mode is not None and not isinstance(hvac_mode, VThermHvacMode) and isinstance(slope, VThermHvacMode):
+            # old call detected
+            hvac_mode = slope
+            slope = None
+        elif hvac_mode is None and len(args) > 0 and isinstance(args[0], VThermHvacMode):
+            # another old call variant
+            hvac_mode = args[0]
+
         now = time.monotonic()
 
         # --- 1. Validation & Handle OFF ---
@@ -1683,13 +1711,12 @@ class SmartPI(CycleManager):
 
         # --- 14. Update State & Diagnostics ---
         self._output_initialized = True
-        self.integral = self.ctl.integral
+        # Note: self.integral and self.u_prev are already updated in ctl and managed via properties
         self._last_u_pi = self.ctl.u_pi
         self._last_u_ff = self.ctl.u_ff
         self._last_u_cmd = self.ctl.u_cmd
         self._last_aw_du = self.ctl.last_aw_du
-        self._last_i_mode = self.ctl.last_i_mode
-        self._last_sat = self.ctl.last_sat
+        # self._last_i_mode and self._last_sat are now properties delegating to self.ctl
 
         # Dead Time Update
         self._last_target_temp = target_temp
@@ -1736,3 +1763,4 @@ class SmartPI(CycleManager):
 
     def get_diagnostics(self) -> Dict[str, Any]:
         """Return diagnostic information (suitable for attributes/UI)."""
+        return build_diagnostics(self)

@@ -2,13 +2,9 @@
 """Smart PI algorithm handler for ThermostatProp."""
 
 import logging
-from typing import Any, TYPE_CHECKING
-from homeassistant.helpers.storage import Store
-from homeassistant.exceptions import ServiceValidationError
-
+from typing import TYPE_CHECKING
 from homeassistant.util import slugify
 from homeassistant.helpers.storage import Store
-from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers.event import async_track_time_interval
 from datetime import timedelta, datetime
 
@@ -135,13 +131,12 @@ class SmartPIHandler:
         """Control heating using SmartPI."""
         t = self._thermostat
         from datetime import datetime
-        import time
         from .timing_utils import calculate_cycle_times
 
         if t.prop_algorithm:
             # Learning update
             current_temp = t.current_temperature
-            current_ext_temp = t.current_outdoor_temperature
+            # current_ext_temp is not used here but could be useful for logging if needed
 
             # Calculate uses current temp, ext temp, etc.
             t.prop_algorithm.calculate(
@@ -316,8 +311,8 @@ class SmartPIHandler:
                 "Kp_reel": algo.kp_reel,
                 "Ki_reel": algo.ki_reel,
                 "integral_error": algo.integral_error,
-                "i_mode": algo.i_mode,
-                "sat": algo.sat,
+                "last_i_mode": algo.last_i_mode,
+                "sat": algo.last_sat,
                 "error": algo.error,
                 "error_p": algo.error_p,
                 "error_filtered": algo.error_filtered,
@@ -370,10 +365,10 @@ class SmartPIHandler:
                 # Safety-First Governance
                 "governance_regime": algo.gov._current_regime.value,
                 "governance_cycle_regimes": [r.value for r in algo.gov._cycle_regimes],
-                "freeze_reason_thermal": algo.gov.last_freeze_reason_thermal.value,
-                "freeze_reason_gains": algo.gov.last_freeze_reason_gains.value,
-                "governance_decision_thermal": algo.gov.last_decision_thermal.value,
-                "governance_decision_gains": algo.gov.last_decision_gains.value,
+                "freeze_reason_thermal": algo.freeze_reason_thermal,
+                "freeze_reason_gains": algo.freeze_reason_gains,
+                "governance_decision_thermal": algo.last_decision_thermal,
+                "governance_decision_gains": algo.last_decision_gains,
             }
 
             # Add to configuration dict for consistency with TPI

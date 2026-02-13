@@ -1,16 +1,9 @@
 from __future__ import annotations
 
 import logging
-import math
-from typing import Optional
 
 from .const import (
-    KP_SAFE,
-    KI_SAFE,
-    KP_MIN,
-    KP_MAX,
     KI_MIN,
-    KI_MAX,
     INTEGRAL_LEAK,
     INTEGRAL_DEADBAND_MICROLEAK,
     DEADBAND_PLUS_MIN_U,
@@ -53,6 +46,8 @@ class SmartPIController:
         self.last_i_mode: str = "init"
         self.last_sat: str = "init"
         self.last_aw_du: float = 0.0
+        self.sat_p: bool = False
+        self.sat_i: bool = False
         
         # Hysteresis State
         self.hysteresis_state: str = "off"
@@ -73,6 +68,8 @@ class SmartPIController:
         self.u_pi = 0.0
         self.last_error = 0.0
         self.last_error_p = 0.0
+        self.sat_p = False
+        self.sat_i = False
         self.hysteresis_state = "off"
         self.hysteresis_thermal_guard = False
         
@@ -86,7 +83,8 @@ class SmartPIController:
             self.integral = clamp(self.integral, -i_max, i_max)
 
     def load_state(self, state: dict):
-        if not state: return
+        if not state:
+            return
         self.integral = float(state.get("integral") or 0.0)
         self.u_prev = float(state.get("u_prev") or 0.0)
         self.hysteresis_thermal_guard = bool(state.get("hysteresis_thermal_guard") or False)
@@ -198,16 +196,25 @@ class SmartPIController:
                 u_pi_pre = kp * error_p + ki * self.integral
                 u_raw_pre = u_ff + u_pi_pre
                 
-                if u_raw_pre > 1.0: sat = "SAT_HI"
-                elif u_raw_pre < 0.0: sat = "SAT_LO"
-                else: sat = "NO_SAT"
+                if u_raw_pre > 1.0:
+                    sat = "SAT_HI"
+                elif u_raw_pre < 0.0:
+                    sat = "SAT_LO"
+                else:
+                    sat = "NO_SAT"
                 self.last_sat = sat
+                
+                # P-Saturation check
+                u_raw_p = u_ff + kp * error_p
+                self.sat_p = (u_raw_p > 1.0 + 1e-9 or u_raw_p < -1e-9)
                 
                 # Conditional Integration
                 if (sat == "SAT_HI" and error > 0) or (sat == "SAT_LO" and error < 0):
                     self.last_i_mode = f"I:SKIP({sat})"
                     u_pi = u_pi_pre
+                    self.sat_i = True
                 else:
+                    self.sat_i = False
                     d_integral = error * dt_min
                     self.last_i_mode = "I:RUN"
                     
