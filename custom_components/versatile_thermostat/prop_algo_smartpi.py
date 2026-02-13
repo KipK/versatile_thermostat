@@ -757,6 +757,7 @@ class SmartPI(CycleManager):
     def kp_reel(self) -> float:
         """Return the actual Kp used for calculation (after near-band adjustment)."""
         return self.Kp
+    @property
     def ki_reel(self) -> float:
         """Return the actual Ki used for calculation (after near-band adjustment)."""
         return self.Ki
