@@ -101,7 +101,7 @@ The estimator monitors power $u$ transitions:
 
 #### 2. Takeoff Detection
 In the `WAITING_HEAT_RESPONSE` state, the algorithm monitors $T_{int}$ evolution:
-- If $T_{int} - T_{initial} \ge \text{detection\_threshold}$ (typically 0.05°C), the dead time is validated.
+- If $T_{int} - T_{initial} \ge 0.05°C$ (detection threshold), the dead time is validated.
 - $L = t_{current} - t_{transition}$.
 
 #### 3. Cooling Response Detection

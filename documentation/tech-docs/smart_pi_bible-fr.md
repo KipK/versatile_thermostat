@@ -100,7 +100,7 @@ L'estimateur surveille les transitions de puissance $u$ :
 
 #### 2. Détection de Décollage (Takeoff)
 Dans l'état `WAITING_HEAT_RESPONSE`, l'algorithme surveille l'évolution de $T_{int}$ :
-- Si $T_{int} - T_{initiale} \ge \text{detection\_threshold}$ (typiquement 0.05°C), le temps mort est validé.
+- Si $T_{int} - T_{initiale} \ge 0.05°C$ (seuil de détection), le temps mort est validé.
 - $L = t_{actuel} - t_{transition}$.
 
 #### 3. Détection de Descente (Cooling Response)
