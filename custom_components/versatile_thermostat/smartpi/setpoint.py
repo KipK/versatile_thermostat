@@ -2,18 +2,14 @@ from __future__ import annotations
 
 import logging
 import math
-import time
 from typing import Optional
 
 from .const import (
     SETPOINT_BOOST_THRESHOLD,
     SETPOINT_BOOST_ERROR_MIN,
-    SETPOINT_MODE_DELTA_C,
     SP_TAU_SLOW,
     SP_TAU_FAST,
-    SP_BAND,
-    ERROR_FILTER_TAU,
-    clamp
+    SP_BAND
 )
 from ..vtherm_hvac_mode import VThermHvacMode, VThermHvacMode_HEAT, VThermHvacMode_COOL
 
@@ -56,18 +52,22 @@ class SmartPISetpointManager:
             return
             
         fs = state.get("filtered_setpoint")
-        if fs is not None: self.filtered_setpoint = float(fs)
+        if fs is not None:
+            self.filtered_setpoint = float(fs)
         
         lrs = state.get("last_raw_setpoint")
-        if lrs is not None: self.last_raw_setpoint = float(lrs)
+        if lrs is not None:
+            self.last_raw_setpoint = float(lrs)
         
         it = state.get("initial_temp_for_filter")
-        if it is not None: self.initial_temp_for_filter = float(it)
+        if it is not None:
+            self.initial_temp_for_filter = float(it)
         
         self.boost_active = bool(state.get("setpoint_boost_active", False))
         
         ps = state.get("prev_setpoint_for_boost")
-        if ps is not None: self.prev_setpoint_for_boost = float(ps)
+        if ps is not None:
+            self.prev_setpoint_for_boost = float(ps)
 
     def save_state(self) -> dict:
         """Save state for persistence."""

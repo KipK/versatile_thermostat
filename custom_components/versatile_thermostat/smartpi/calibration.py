@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from .const import (
     HYST_LOWER_C,
@@ -383,4 +383,4 @@ class CalibrationManager:
 
 
 # Import VThermHvacMode at end to avoid circular imports
-from ..vtherm_hvac_mode import VThermHvacMode_OFF, VThermHvacMode_COOL
+from ..vtherm_hvac_mode import VThermHvacMode_OFF, VThermHvacMode_COOL  # noqa: E402

@@ -74,23 +74,31 @@ class SmartPIGovernance:
         # Last decisions for UI consistency
         rdt = state.get("freeze_reason_thermal")
         if rdt:
-             try: self.last_freeze_reason_thermal = FreezeReason(rdt)
-             except ValueError: pass
+            try:
+                self.last_freeze_reason_thermal = FreezeReason(rdt)
+            except ValueError:
+                pass
         
         rdg = state.get("freeze_reason_gains")
         if rdg:
-             try: self.last_freeze_reason_gains = FreezeReason(rdg)
-             except ValueError: pass
+            try:
+                self.last_freeze_reason_gains = FreezeReason(rdg)
+            except ValueError:
+                pass
              
         ddt = state.get("governance_decision_thermal")
         if ddt:
-             try: self.last_decision_thermal = GovernanceDecision(ddt)
-             except ValueError: pass
+            try:
+                self.last_decision_thermal = GovernanceDecision(ddt)
+            except ValueError:
+                pass
              
         ddg = state.get("governance_decision_gains")
         if ddg:
-             try: self.last_decision_gains = GovernanceDecision(ddg)
-             except ValueError: pass
+            try:
+                self.last_decision_gains = GovernanceDecision(ddg)
+            except ValueError:
+                pass
 
         # Update aliases after load
         self.last_reason_thermal = self.last_freeze_reason_thermal
