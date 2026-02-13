@@ -92,8 +92,8 @@ GOVERNANCE_MATRIX = {
         "gains": (GovernanceDecision.HARD_FREEZE, FreezeReason.DEAD_BAND),
     },
     GovernanceRegime.SATURATED: {
-        "thermal": (GovernanceDecision.HARD_FREEZE, FreezeReason.SATURATION),
-        "gains": (GovernanceDecision.FREEZE, FreezeReason.SATURATION),
+        "thermal": (GovernanceDecision.ADAPT_ON, FreezeReason.NONE),  # Allow learning
+        "gains": (GovernanceDecision.FREEZE, FreezeReason.SATURATION),  # Keep gains frozen
     },
     GovernanceRegime.HOLD: {
         "thermal": (GovernanceDecision.HARD_FREEZE, FreezeReason.HOLD),
