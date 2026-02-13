@@ -545,8 +545,7 @@ class UnderlyingSwitch(UnderlyingEntity):
         self._on_time_sec = on_time_sec
         self._off_time_sec = off_time_sec
         self._hvac_mode = hvac_mode
-        self._calculate_should_be_on(False)
-        
+
         # Cancel eventual previous cycle if any
         if self._async_cancel_cycle is not None:
             if force:
@@ -564,11 +563,13 @@ class UnderlyingSwitch(UnderlyingEntity):
         # If we should heat, starts the cycle with delay
 
         if on_time_sec > 0 and hvac_mode in [VThermHvacMode_HEAT, VThermHvacMode_COOL]:
+            # Set intended state before async scheduling to avoid race condition with keep_alive
+            self._calculate_should_be_on(True)
             # Calculate effective delay based on power level:
             # - At low power (off_time >> on_time): use initial_delay to spread switches
             # - At high power (off_time << on_time): reduce delay to create overlap
             # - At 100% power (off_time=0): all switches turn on immediately
-            
+
             if off_time_sec == 0:
                 # 100% power: no delay, all switches on simultaneously
                 effective_delay = 0
@@ -581,7 +582,7 @@ class UnderlyingSwitch(UnderlyingEntity):
                 # Scale delay proportionally to allow overlap
                 # This ensures switches can complete their on_time within the cycle
                 effective_delay = off_time_sec
-            
+
             self._async_cancel_cycle = self.call_later(
                 self._hass, effective_delay, self._turn_on_later
             )
@@ -595,6 +596,7 @@ class UnderlyingSwitch(UnderlyingEntity):
             )
         # if we not heat but device is active
         elif self.is_device_active:
+            self._calculate_should_be_on(False)
             _LOGGER.info(
                 "%s - stop heating (2) for %d min %d sec",
                 self,
@@ -603,6 +605,7 @@ class UnderlyingSwitch(UnderlyingEntity):
             )
             await self.turn_off()
         else:
+            self._calculate_should_be_on(False)
             _LOGGER.debug("%s - nothing to do", self)
 
     @overrides
