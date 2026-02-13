@@ -107,24 +107,24 @@ class GainScheduler:
                 if estimator.a > 1e-6:
                     kp_imc = 1.0 / (2.0 * estimator.a * (L_s / 60.0))
                     kp_calc = min(kp_imc, kp_heuristic)
-                    self._kp_source = "imc_deadtime"
+                    kp_source = "imc_deadtime"
                 else:
                     kp_calc = kp_heuristic
-                    self._kp_source = "heuristic"
+                    kp_source = "heuristic"
             else:
                 kp_calc = kp_heuristic
-                self._kp_source = "heuristic"
+                kp_source = "heuristic"
             
             # Clamp Kp and calculate Ki
             kp = clamp(kp_calc, 0.05, 10.0)
             ki = clamp(kp / max(tau_min, 10.0), 0.0001, 1.0)
-            self._ki_source = "heuristic"
+            ki_source = "heuristic"
         else:
             # Use safe defaults when tau is unreliable
             kp = KP_SAFE
             ki = KI_SAFE
-            self._kp_source = "safe"
-            self._ki_source = "safe"
+            kp_source = "safe"
+            ki_source = "safe"
         
         # Apply Near Band factor for stability near setpoint
         if in_near_band:
@@ -132,29 +132,31 @@ class GainScheduler:
             ki_near = ki * ki_near_factor
             ki = clamp(min(ki_near, ki), 0.0001, 1.0)
             # Mark source as near-band adjusted
-            self._kp_source = f"{self._kp_source}_nearband"
-            self._ki_source = f"{self._ki_source}_nearband"
+            kp_source = f"{kp_source}_nearband"
+            ki_source = f"{ki_source}_nearband"
         
         # Apply Governance Freeze
         if governance_decision == GovernanceDecision.HARD_FREEZE:
             kp = self._prev_kp
             ki = self._prev_ki
-            self._kp_source = "frozen"
-            self._ki_source = "frozen"
+            kp_source = "frozen"
+            ki_source = "frozen"
         elif governance_decision == GovernanceDecision.FREEZE:
             kp = self._prev_kp
             ki = self._prev_ki
-            self._kp_source = "frozen"
-            self._ki_source = "frozen"
+            kp_source = "frozen"
+            ki_source = "frozen"
         elif governance_decision == GovernanceDecision.SOFT_FREEZE_DOWN:
             kp = min(kp, self._prev_kp)
             ki = min(ki, self._prev_ki)
-            self._kp_source = f"{self._kp_source}_softfreeze"
-            self._ki_source = f"{self._ki_source}_softfreeze"
+            kp_source = f"{kp_source}_softfreeze"
+            ki_source = f"{ki_source}_softfreeze"
         
         # Store current values
         self._kp = kp
         self._ki = ki
+        self._kp_source = kp_source
+        self._ki_source = ki_source
         self._prev_kp = kp
         self._prev_ki = ki
         

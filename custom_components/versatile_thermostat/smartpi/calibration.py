@@ -144,16 +144,20 @@ class CalibrationManager:
         # Use string comparison for enums to handle both enum objects and string values
         regime_str = str(governance_regime).upper() if governance_regime is not None else ""
         phase_str = str(phase).upper() if phase is not None else ""
-        in_stable = "EXCITED_STABLE" in regime_str or "STABLE" in phase_str or "HYSTERESIS" in phase_str
+        # For periodic calibration, accept HYSTERESIS as system may be in early learning
+        in_stable_for_periodic = "EXCITED_STABLE" in regime_str or "STABLE" in phase_str or "HYSTERESIS" in phase_str
+        # For missing_deadtime calibration, only trigger in STABLE phase (not HYSTERESIS)
+        # HYSTERESIS is the expected phase during initial learning when deadtime is not yet reliable
+        in_stable_for_missing_deadtime = "EXCITED_STABLE" in regime_str or "STABLE" in phase_str
         
-        if periodic_due and in_stable:
+        if periodic_due and in_stable_for_periodic:
             reason = "periodic"
             _LOGGER.info("%s - Starting forced calibration (reason=%s)", self._name, reason)
             self.start_calibration(now, is_manual=False)
             return (True, reason)
         
-        # Check for missing deadtime
-        if not deadtime_reliable and self._calibration_retry_count < calibration_retry_max and in_stable:
+        # Check for missing deadtime - only in STABLE phase, not HYSTERESIS
+        if not deadtime_reliable and self._calibration_retry_count < calibration_retry_max and in_stable_for_missing_deadtime:
             reason = "missing_deadtime"
             _LOGGER.info("%s - Starting forced calibration (reason=%s)", self._name, reason)
             self.start_calibration(now, is_manual=False)
