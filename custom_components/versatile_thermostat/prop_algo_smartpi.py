@@ -1569,6 +1569,13 @@ class SmartPI(CycleManager):
         # Clear cycle regimes on setpoint change to prevent REGIME_TRANSITION freeze
         if setpoint_changed:
             self.gov.on_cycle_start()
+            # Handle integral reset and thermal guard on setpoint changes
+            new_error, new_error_p = self.ctl.handle_setpoint_change(
+                target_temp, self._last_target_temp, current_temp, hvac_mode, self.Kp, self.Ki
+            )
+            if new_error != 0.0:
+                self._last_error = new_error
+                self._last_error_p = new_error_p
 
         # --- 4. Learning & Calibration ---
         # Heartbeat learning update

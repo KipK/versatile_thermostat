@@ -11,6 +11,8 @@ from .const import (
     OVERSHOOT_I_CLAMP_EPS_C,
     AW_TRACK_TAU_S,
     AW_TRACK_MAX_DELTA_I,
+    SETPOINT_MODE_DELTA_C,
+    SETPOINT_BUMPLESS_MAX_DU,
     clamp
 )
 from ..vtherm_hvac_mode import VThermHvacMode, VThermHvacMode_COOL
@@ -81,6 +83,157 @@ class SmartPIController:
         if ki > KI_MIN:
             i_max = 2.0 / ki
             self.integral = clamp(self.integral, -i_max, i_max)
+
+    def bump_integral_for_setpoint_change(
+        self,
+        t_set_old: float,
+        t_set_new: float,
+        t_in: float,
+        kp: float,
+        ki: float,
+    ) -> None:
+        """Adjust integral to minimize output jump on small setpoint changes (bumpless transfer).
+
+        Theory: To keep u_pi ≈ Kp*e + Ki*I constant when setpoint changes:
+            ΔI = (Kp/Ki) * (e_old - e_new)
+
+        IMPORTANT: For thermal systems with low Ki, this ΔI can be huge.
+        We limit the impact by capping the output variation: |Ki * ΔI| <= SETPOINT_BUMPLESS_MAX_DU
+
+        Only use for small setpoint changes (< SETPOINT_MODE_DELTA_C).
+
+        Args:
+            t_set_old: Previous setpoint (°C)
+            t_set_new: New setpoint (°C)
+            t_in: Current indoor temperature (°C)
+            kp: Proportional gain
+            ki: Integral gain
+        """
+        if ki <= KI_MIN:
+            return
+
+        e_old = t_set_old - t_in
+        e_new = t_set_new - t_in
+
+        # Theoretical ΔI to keep u_pi constant
+        dI = (kp / ki) * (e_old - e_new)
+
+        # Overshoot I-clamp: when we are close to or above the (new) setpoint,
+        # do not allow bumpless logic to increase the integral (would push heating in the wrong direction).
+        if t_in >= (t_set_new - OVERSHOOT_I_CLAMP_EPS_C) and dI > 0.0:
+            dI = 0.0
+
+        # Limit bumpless: bound the output variation due to integral: Δu_I = Ki * ΔI
+        # => |ΔI| <= SETPOINT_BUMPLESS_MAX_DU / Ki
+        dI_max = SETPOINT_BUMPLESS_MAX_DU / max(ki, KI_MIN)
+        dI = clamp(dI, -dI_max, dI_max)
+
+        old_integral = self.integral
+        self.integral = self.integral + dI
+
+        # Clamp to same limits as in calculate() (dynamic integral limit)
+        i_max = 2.0 / max(ki, KI_MIN)
+        self.integral = clamp(self.integral, -i_max, i_max)
+
+        _LOGGER.debug(
+            "%s - Bumpless setpoint change (Δ=%.3f°C): integral %.4f → %.4f (ΔI=%.4f, capped=%.4f)",
+            self._name, t_set_new - t_set_old, old_integral, self.integral,
+            (kp / ki) * (e_old - e_new), dI
+        )
+
+    def handle_setpoint_change(
+        self,
+        target_temp: float,
+        last_target_temp: float,
+        current_temp: float,
+        hvac_mode: VThermHvacMode,
+        kp: float,
+        ki: float,
+    ) -> tuple[float, float]:
+        """Handle integral and thermal guard on setpoint changes.
+
+        Two-tier setpoint change handling:
+        - Large change (>= SETPOINT_MODE_DELTA_C): Reset integral to 0
+        - Small change: Apply bumpless transfer (with thermal guard logic)
+
+        Args:
+            target_temp: New setpoint (°C)
+            last_target_temp: Previous setpoint (°C)
+            current_temp: Current indoor temperature (°C)
+            hvac_mode: Current HVAC mode
+            kp: Proportional gain
+            ki: Integral gain
+
+        Returns:
+            Tuple of (new_error, new_error_p) to apply to main class state
+        """
+        if last_target_temp is None:
+            return 0.0, 0.0
+
+        sp_delta = abs(target_temp - last_target_temp)
+        if sp_delta <= 0.01:
+            return 0.0, 0.0
+
+        if sp_delta >= SETPOINT_MODE_DELTA_C:
+            # Large change: mode change (eco ↔ comfort) -> reset PI state
+            old_integral = self.integral
+            self.integral = 0.0
+
+            # Force reset error state to avoid "wrong" error history (e.g. sign flip)
+            new_e = float(target_temp - current_temp)
+            if hvac_mode == VThermHvacMode_COOL:
+                new_e = -new_e
+
+            self.last_error = new_e
+            self.last_error_p = new_e
+
+            _LOGGER.info(
+                "%s - Mode change detected (Δ=%.2f°C >= %.2f°C): PI state reset (integral %.4f → 0.0)",
+                self._name, sp_delta, SETPOINT_MODE_DELTA_C, old_integral
+            )
+
+            # Check for decrease to activate thermal guard (even on large change)
+            if (target_temp < last_target_temp) and hvac_mode != VThermHvacMode_COOL:
+                self.hysteresis_thermal_guard = True
+                _LOGGER.info("%s - Thermal guard activated (Large Decrease)", self._name)
+            elif (target_temp > last_target_temp) and hvac_mode != VThermHvacMode_COOL:
+                self.hysteresis_thermal_guard = False
+
+            return new_e, new_e
+
+        else:
+            # Small change logic
+            is_decrease = (target_temp < last_target_temp)
+
+            if is_decrease and hvac_mode != VThermHvacMode_COOL:
+                # Small decrease (Heating):
+                # 1. Activate Thermal Guard
+                self.hysteresis_thermal_guard = True
+                # 2. Skip Bumpless Transfer (to prevent artificial increase)
+                _LOGGER.info("%s - Small decrease detected (Δ=%.2f°C): Guard ON, Bumpless SKIPPED", self._name, sp_delta)
+            elif not is_decrease and hvac_mode != VThermHvacMode_COOL:
+                # Increase (Heating):
+                # 1. Deactivate Thermal Guard
+                self.hysteresis_thermal_guard = False
+                # 2. Apply Bumpless Transfer
+                self.bump_integral_for_setpoint_change(
+                    t_set_old=last_target_temp,
+                    t_set_new=target_temp,
+                    t_in=current_temp,
+                    kp=kp,
+                    ki=ki,
+                )
+            else:
+                # COOL mode or other: Default behavior (bumpless)
+                self.bump_integral_for_setpoint_change(
+                    t_set_old=last_target_temp,
+                    t_set_new=target_temp,
+                    t_in=current_temp,
+                    kp=kp,
+                    ki=ki,
+                )
+
+            return 0.0, 0.0
 
     def load_state(self, state: dict):
         if not state:
