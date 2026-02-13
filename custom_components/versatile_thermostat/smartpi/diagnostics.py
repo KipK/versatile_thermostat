@@ -39,9 +39,17 @@ def build_diagnostics(algo: SmartPI) -> Dict[str, Any]:
         "diag_a_mad_over_med": round(algo.est.diag_a_mad_over_med, 3) if algo.est.diag_a_mad_over_med is not None else None,
         # Learning metadata
         "learning_start_dt": algo._learning_start_date,
-        "learn_progress_percent": round((algo.learn_t_int_s / (EPISODE_MIN_DURATION_ON_S if algo.learn_u_int / max(algo.learn_t_int_s,1) > U_ON_MIN else EPISODE_MIN_DURATION_OFF_S)) * 100, 1) if algo.learn_win_active else 0,
+        "learn_progress_percent": (
+            round((algo.learn_t_int_s / (EPISODE_MIN_DURATION_ON_S if algo.learn_u_int / max(algo.learn_t_int_s, 1) > U_ON_MIN else EPISODE_MIN_DURATION_OFF_S)) * 100, 1)
+            if algo.learn_win_active
+            else 0
+        ),
         "learn_u_avg": round(algo.learn_u_int / max(algo.learn_t_int_s, 1.0), 3) if algo.learn_win_active else None,
-        "learn_time_remaining": round(max(0, (EPISODE_MIN_DURATION_ON_S if algo.learn_u_int / max(algo.learn_t_int_s,1) > U_ON_MIN else EPISODE_MIN_DURATION_OFF_S) - algo.learn_t_int_s), 0) if algo.learn_win_active else None,
+        "learn_time_remaining": (
+            round(max(0, (EPISODE_MIN_DURATION_ON_S if algo.learn_u_int / max(algo.learn_t_int_s, 1) > U_ON_MIN else EPISODE_MIN_DURATION_OFF_S) - algo.learn_t_int_s), 0)
+            if algo.learn_win_active
+            else None
+        ),
         # PI
         "Kp": round(algo.Kp, 6),
         "Ki": round(algo.Ki, 6),
@@ -81,7 +89,6 @@ def build_diagnostics(algo: SmartPI) -> Dict[str, Any]:
         # Deadband state
         "in_deadband": algo._in_deadband,
         "in_near_band": algo._in_near_band,
-
         # Setpoint boost state
         "setpoint_boost_active": algo.sp_mgr.boost_active,
         "hysteresis_thermal_guard": algo._hysteresis_thermal_guard,
@@ -98,12 +105,10 @@ def build_diagnostics(algo: SmartPI) -> Dict[str, Any]:
         "deadtime_last_power": algo.dt_est.last_power,
         "deadtime_heat_start_time": algo.dt_est.heat_start_time,
         "deadtime_cool_start_time": algo.dt_est.cool_start_time,
-        
         # Near-Band Auto (Phase 2) - delegated to DeadbandManager
         "near_band_below_deg": algo.deadband_mgr.near_band_below_deg,
         "near_band_above_deg": algo.deadband_mgr.near_band_above_deg,
         "near_band_source": algo.deadband_mgr.near_band_source,
-
         # Safety-First Governance
         "governance_regime": algo.gov._current_regime.value,
         "governance_cycle_regimes": [r.value for r in algo.gov._cycle_regimes],
@@ -117,6 +122,5 @@ def build_diagnostics(algo: SmartPI) -> Dict[str, Any]:
         "governance_decision_gains": algo.gov.last_decision_gains.value,
         "last_decision_gains": algo.gov.last_decision_gains.value,
         # Setpoint boost aliases
-        "setpoint_boost_active": algo.sp_mgr.boost_active,
         "boost_active": algo.sp_mgr.boost_active,
     }
