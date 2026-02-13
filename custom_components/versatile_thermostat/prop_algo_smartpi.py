@@ -369,29 +369,6 @@ class SmartPI(CycleManager):
     def _learning_resume_ts(self, value: float | None):
         self.learn_win.set_learning_resume_ts(value)
 
-    @property
-    def _in_deadband(self) -> bool:
-        return self.deadband_mgr.in_deadband
-
-    @_in_deadband.setter
-    def _in_deadband(self, value: bool):
-        self.deadband_mgr._in_deadband = value
-
-    @property
-    def _in_near_band(self) -> bool:
-        return self.deadband_mgr.in_near_band
-
-    @_in_near_band.setter
-    def _in_near_band(self, value: bool):
-        self.deadband_mgr._in_near_band = value
-
-    @property
-    def in_deadband(self) -> bool:
-        return self.deadband_mgr.in_deadband
-
-    @property
-    def in_near_band(self) -> bool:
-        return self.deadband_mgr.in_near_band
 
     @property
     def _near_band_below_deg(self) -> float:
@@ -467,45 +444,29 @@ class SmartPI(CycleManager):
 
     @property
     def _last_sat(self) -> str:
-        return "both" if (self.ctl.sat_p and self.ctl.sat_i) else ("p" if self.ctl.sat_p else ("i" if self.ctl.sat_i else "none"))
+        # Compatibility with legacy code that expects this attribute
+        return self.ctl.last_sat
 
     @_last_sat.setter
     def _last_sat(self, value: str):
-        # Allow tests to set it, although it's mostly derived
         self.ctl.last_sat = value
 
     @property
-    def last_decision_thermal(self) -> Dict[str, Any]:
-        return self.gov.last_decision_thermal
+    def _in_deadband(self) -> bool:
+        return self.deadband_mgr.in_deadband
 
-    @last_decision_thermal.setter
-    def last_decision_thermal(self, value: Dict[str, Any]):
-        self.gov.last_decision_thermal = value
-
-    @property
-    def last_decision_gains(self) -> Dict[str, Any]:
-        return self.gov.last_decision_gains
-
-    @last_decision_gains.setter
-    def last_decision_gains(self, value: Dict[str, Any]):
-        self.gov.last_decision_gains = value
-
+    @_in_deadband.setter
+    def _in_deadband(self, value: bool):
+        self.deadband_mgr._in_deadband = value
 
     @property
-    def last_freeze_reason_thermal(self) -> str:
-        return self.freeze_reason_thermal
+    def _in_near_band(self) -> bool:
+        return self.deadband_mgr.in_near_band
 
-    @property
-    def last_freeze_reason_gains(self) -> str:
-        return self.freeze_reason_gains
+    @_in_near_band.setter
+    def _in_near_band(self, value: bool):
+        self.deadband_mgr._in_near_band = value
 
-    @property
-    def last_reason_thermal(self) -> str:
-        return self.freeze_reason_thermal
-
-    @property
-    def last_reason_gains(self) -> str:
-        return self.freeze_reason_gains
 
     @property
     def _current_governance_regime(self) -> str:
@@ -798,6 +759,16 @@ class SmartPI(CycleManager):
     def last_decision_thermal(self) -> str:
         return self.gov.last_decision_thermal.value
 
+    @last_decision_thermal.setter
+    def last_decision_thermal(self, value: str | GovernanceDecision):
+        if isinstance(value, str):
+            try:
+                self.gov.last_decision_thermal = GovernanceDecision(value)
+            except ValueError:
+                pass
+        else:
+            self.gov.last_decision_thermal = value
+
 
     @property
     def freeze_reason_thermal(self) -> str:
@@ -806,6 +777,16 @@ class SmartPI(CycleManager):
     @property
     def last_decision_gains(self) -> str:
         return self.gov.last_decision_gains.value
+
+    @last_decision_gains.setter
+    def last_decision_gains(self, value: str | GovernanceDecision):
+        if isinstance(value, str):
+            try:
+                self.gov.last_decision_gains = GovernanceDecision(value)
+            except ValueError:
+                pass
+        else:
+            self.gov.last_decision_gains = value
 
     @property
     def freeze_reason_gains(self) -> str:
@@ -836,6 +817,26 @@ class SmartPI(CycleManager):
     @property
     def last_sat(self) -> str:
         return self.ctl.last_sat
+
+    @last_sat.setter
+    def last_sat(self, value: str):
+        self.ctl.last_sat = value
+
+    @property
+    def in_deadband(self) -> bool:
+        return self.deadband_mgr.in_deadband
+
+    @in_deadband.setter
+    def in_deadband(self, value: bool):
+        self.deadband_mgr._in_deadband = value
+
+    @property
+    def in_near_band(self) -> bool:
+        return self.deadband_mgr.in_near_band
+
+    @in_near_band.setter
+    def in_near_band(self, value: bool):
+        self.deadband_mgr._in_near_band = value
 
     @property
     def error(self) -> float:
