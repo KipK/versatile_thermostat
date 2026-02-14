@@ -263,3 +263,11 @@ DEFAULT_KI_NEAR_FACTOR = 0.6
 FORCE_CALIBRATION_INTERVAL_HOURS = 72
 CALIBRATION_RETRY_MAX = 1
 CALIBRATION_TIMEOUT_MIN = 600  # 10 hours timeout
+
+# --- Feed-Forward Gate Constants ---
+ENABLE_FF_SOFTGATE = False
+FF_SOFTGATE_D_MIN_C = 0.10    # Minimum anticipation distance (°C)
+FF_SOFTGATE_D_MAX_C = 2.00    # Maximum anticipation distance (°C)
+FF_SOFTGATE_MIN_LEARN_OK_A = 10  # Min learn_ok_count_a for soft gate eligibility
+FF_SOFTGATE_A_EPS = 1e-6      # Minimum a value for soft gate
+FF_SOFTGATE_S_NET_EPS = 1e-6  # Minimum net slope for soft gate

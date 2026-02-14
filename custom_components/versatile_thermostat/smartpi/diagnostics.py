@@ -69,6 +69,11 @@ def build_diagnostics(algo: SmartPI) -> Dict[str, Any]:
         "sign_flip_active": algo._sign_flip_active,
         # Output
         "u_ff": round(algo._last_u_ff, 6),
+        "ff_raw": round(algo._last_ff_raw, 6),
+        "ff_reason": algo._last_ff_reason,
+        "ff_scale": round(algo._last_ff_scale, 6) if algo._last_ff_scale is not None else None,
+        "ff_H_inertia_s": round(algo._last_ff_H_inertia_s, 1) if algo._last_ff_H_inertia_s is not None else None,
+        "ff_d_inertia_deg": round(algo._last_ff_d_inertia_deg, 4) if algo._last_ff_d_inertia_deg is not None else None,
         "u_pi": round(algo._last_u_pi, 6),
         "ff_warmup_ok_count": int(algo.ff_warmup_ok_count),
         "ff_warmup_cycles": int(algo.ff_warmup_cycles),

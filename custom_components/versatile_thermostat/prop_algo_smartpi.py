@@ -101,6 +101,7 @@ from .smartpi.learning_window import LearningWindowManager
 from .smartpi.deadband import DeadbandManager
 from .smartpi.calibration import CalibrationManager
 from .smartpi.gains import GainScheduler
+from .smartpi.feedforward import apply_ff_gate
 from .smartpi.timestamp_utils import convert_monotonic_to_wall_ts, convert_wall_to_monotonic_ts
 
 _LOGGER = logging.getLogger(__name__)
@@ -205,6 +206,11 @@ class SmartPI(CycleManager):
         self._last_error_p: float = 0.0
         self._last_u_ff: float = 0.0
         self._last_u_pi: float = 0.0
+        self._last_ff_raw: float = 0.0
+        self._last_ff_reason: str = "ff_none"
+        self._last_ff_scale: float | None = None
+        self._last_ff_H_inertia_s: float | None = None
+        self._last_ff_d_inertia_deg: float | None = None
         self._tau_reliable: bool = False
         self._sign_flip_active: bool = False
 
@@ -290,6 +296,11 @@ class SmartPI(CycleManager):
         self._output_initialized = False
         self._last_u_ff = 0.0
         self._last_u_pi = 0.0
+        self._last_ff_raw = 0.0
+        self._last_ff_reason = "ff_none"
+        self._last_ff_scale = None
+        self._last_ff_H_inertia_s = None
+        self._last_ff_d_inertia_deg = None
         self._last_u_cmd = 0.0
         self._last_u_limited = 0.0
         self._last_u_applied = 0.0
@@ -1045,6 +1056,11 @@ class SmartPI(CycleManager):
         self._last_i_mode = "CALIB"
         self._last_sat = "NO_SAT"
         self._last_u_ff = 0.0
+        self._last_ff_raw = 0.0
+        self._last_ff_reason = "ff_none"
+        self._last_ff_scale = None
+        self._last_ff_H_inertia_s = None
+        self._last_ff_d_inertia_deg = None
         self._last_u_pi = self._on_percent
         self._last_u_cmd = self._on_percent
         self._last_u_limited = self._on_percent
@@ -1432,6 +1448,7 @@ class SmartPI(CycleManager):
         ext_current_temp: float | None,
         hvac_mode: VThermHvacMode,
         error: float,
+        current_temp: float,
     ) -> tuple[float, bool]:
         """Calculate gains and feedforward, and handles integrator hold.
 
@@ -1469,9 +1486,30 @@ class SmartPI(CycleManager):
         reliable_cap = 1.0 if self._tau_reliable else self.ff_scale_unreliable_max
         u_ff *= clamp(reliable_cap * learn_scale * time_scale, 0.0, 1.0)
 
-        # FF gating above setpoint (overshoot protection)
-        if error < 0:
-            u_ff = 0.0
+        # FF gating (hard gate + optional soft gate)
+        self._last_ff_raw = u_ff  # Store raw value before gating
+        ff_result = apply_ff_gate(
+            u_ff_raw=u_ff,
+            error=error,
+            ext_temp=ext_current_temp,
+            Tin=current_temp,
+            a=self.est.a,
+            b=self.est.b,
+            learn_ok_count_a=self.est.learn_ok_count_a,
+            tau_reliable=self._tau_reliable,
+            deadtime_heat_s=self.dt_est.deadtime_heat_s,
+            deadtime_heat_reliable=self.dt_est.deadtime_heat_reliable,
+            deadtime_cool_s=self.dt_est.deadtime_cool_s,
+            deadtime_cool_reliable=self.dt_est.deadtime_cool_reliable,
+            cycle_s=self._cycle_min * 60.0,
+        )
+        u_ff = ff_result.u_ff_eff
+        self._last_ff_reason = ff_result.ff_reason
+        self._last_ff_scale = ff_result.ff_scale
+        self._last_ff_H_inertia_s = ff_result.H_inertia_s
+        self._last_ff_d_inertia_deg = ff_result.d_inertia_deg
+
+        if ff_result.ff_reason == "ff_cut_above_setpoint":
             _LOGGER.debug("%s - FF disabled (above setpoint)", self._name)
 
         integrator_hold = gov_decision_g in (GovernanceDecision.HARD_FREEZE, GovernanceDecision.FREEZE)
@@ -1638,7 +1676,7 @@ class SmartPI(CycleManager):
 
         # --- 8. Gains & FF ---
         u_ff, gov_hold = self._apply_gains_and_ff(
-            gov_decision_g, target_temp_filt, ext_current_temp, hvac_mode, error
+            gov_decision_g, target_temp_filt, ext_current_temp, hvac_mode, error, current_temp
         )
         # Apply explicit hold (parameter) or governance hold
         integrator_hold = integrator_hold or gov_hold
