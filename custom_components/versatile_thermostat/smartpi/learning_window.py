@@ -211,6 +211,7 @@ class LearningWindowManager:
         t_cool_episode_start: float | None,
         deadtime_skip_count_a: int = 0,
         deadtime_skip_count_b: int = 0,
+        is_calibrating: bool = False,
     ) -> tuple[int, int]:
         """
         Update learning window and submit to estimator if conditions met.
@@ -261,15 +262,19 @@ class LearningWindowManager:
             return deadtime_skip_count_a, deadtime_skip_count_b
 
         # --- Governance gate (thermal domain: a/b learning) ---
-        gov_decision, gov_reason = governance.decide_update(
-            'thermal', self._learning_resume_ts, now
-        )
-        if gov_decision in (GovernanceDecision.HARD_FREEZE, GovernanceDecision.FREEZE):
-            estimator.learn_skip_count += 1
-            estimator.learn_last_reason = f"skip: governance ({gov_reason.value})"
-            if self._active:
-                self.reset()
-            return deadtime_skip_count_a, deadtime_skip_count_b
+        # During calibration, bypass governance to allow A/B learning
+        # (the system traverses deadband/nearband at 100%/0%, governance
+        # restrictions are not relevant).
+        if not is_calibrating:
+            gov_decision, gov_reason = governance.decide_update(
+                'thermal', self._learning_resume_ts, now
+            )
+            if gov_decision in (GovernanceDecision.HARD_FREEZE, GovernanceDecision.FREEZE):
+                estimator.learn_skip_count += 1
+                estimator.learn_last_reason = f"skip: governance ({gov_reason.value})"
+                if self._active:
+                    self.reset()
+                return deadtime_skip_count_a, deadtime_skip_count_b
 
         # --- Interruption / Resume Check ---
         if self._learning_resume_ts:

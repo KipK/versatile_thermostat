@@ -637,6 +637,7 @@ class SmartPI(CycleManager):
             t_cool_episode_start=self._t_cool_episode_start,
             deadtime_skip_count_a=self._deadtime_skip_count_a,
             deadtime_skip_count_b=self._deadtime_skip_count_b,
+            is_calibrating=self.calibration_mgr.is_calibrating,
         )
 
     async def on_cycle_started(self, on_time_sec: float, off_time_sec: float, on_percent: float, hvac_mode: str) -> None:
