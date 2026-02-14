@@ -111,6 +111,11 @@ For advanced users, the climate entity exposes detailed attributes:
 | `learn_last_reason` | Reason for last learning attempt (success or rejection reason) |
 | `error` | Setpoint - Temperature deviation |
 | `u_ff` | "Feed-Forward" power share (weather anticipation) |
+| `ff_raw` | Raw Feed-Forward power before scaling (0.0 to 1.0) |
+| `ff_reason` | Reason for current Feed-Forward state/scaling |
+| `ff_scale` | Dynamic scaling factor for Feed-Forward (0.0=off, 1.0=full) |
+| `ff_H_inertia_s` | Inertia buffering duration for FF smoothing (seconds) |
+| `ff_d_inertia_deg` | Inertia buffering temperature delta for FF smoothing (°C) |
 | `u_pi` | "PI" power share (error correction) |
 | `Kp`, `Ki` | Calculated regulator gains |
 | `kp_source` | Gain Kp source: `imc_deadtime`, `heuristic`, `safe`, `frozen`, etc. |
@@ -133,6 +138,9 @@ For advanced users, the climate entity exposes detailed attributes:
 | `freeze_reason_gains` | Reason for freezing gains adaptation (Kp, Ki) |
 | `last_decision_thermal` | Governance decision for thermal learning |
 | `last_decision_gains` | Governance decision for gains adaptation |
+| `calibration_state` | Current calibration state: `Idle`, `CoolDown`, `HeatUp`, `CoolDownFinal` |
+| `last_calibration_time` | Timestamp of last successful calibration |
+| `calibration_retry_count` | Number of calibration retries |
 
 
 ## Services

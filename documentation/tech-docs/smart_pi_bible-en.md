@@ -185,6 +185,11 @@ $$ u_{FF} = \frac{b}{a} \cdot (T_{setpoint} - T_{ext}) $$
 
 This term relieves the integrator, which only needs to correct model errors and unmodeled disturbances.
 
+#### Feed-Forward Soft-Gating & Smoothing
+To prevent erratic behavior when the model is still learning or when conditions are unstable, the Feed-Forward term is gated and smoothed:
+- **Soft-Gate**: The FF term is only applied if the learned parameters ($a, b$) are sufficiently reliable and consistent. A dynamic scale factor (`ff_scale`) fades the FF term in/out based on model quality (0.0 to 1.0).
+- **Inertia Smoothing**: The FF output is smoothed using a thermal inertia buffer ($H\_inertia$) to avoid sudden jumps in power command when outdoor temperature fluctuates rapidly. This buffer adapts to the system's time constant.
+
 #### Instant Shut-off (Hysteresis & Protection)
 Although Smart-PI generally operates in PWM cycles, some protections act instantly:
 - In **Hysteresis** mode, if the temperature exceeds the upper threshold, shut-off is immediate (the current cycle is interrupted).
@@ -347,6 +352,14 @@ Key parameters are defined in `smartpi/const.py`:
 | `FORCE_CALIBRATION_INTERVAL_HOURS` | 72 | Periodic calibration interval (hours) |
 | `CALIBRATION_RETRY_MAX` | 1 | Maximum automatic retry count |
 | `CALIBRATION_TIMEOUT_MIN` | 600 | Per-phase calibration timeout (minutes) |
+
+#### Feed-Forward Gate
+| Constant | Value | Description |
+|----------|-------|-------------|
+| `ENABLE_FF_SOFTGATE` | False | Enable dynamic scaling of FF based on model quality |
+| `FF_SOFTGATE_D_MIN_C` | 0.10 | Min anticipation distance (°C) for FF activation |
+| `FF_SOFTGATE_D_MAX_C` | 2.00 | Max anticipation distance (°C) for full FF |
+| `FF_SOFTGATE_MIN_LEARN_OK_A` | 10 | Min valid learning samples for `a` |
 
 
 ## 8. Safety-First Governance

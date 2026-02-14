@@ -111,6 +111,11 @@ Pour les utilisateurs avancés, l'entité climate expose des attributs détaill�
 | `learn_last_reason` | Raison de la dernière tentative d'apprentissage (succès ou motif de rejet) |
 | `error` | Écart Consigne - Température |
 | `u_ff` | Part de puissance "Feed-Forward" (anticipation météo) |
+| `ff_raw` | Puissance brute Feed-Forward avant mise à l'échelle (0.0 à 1.0) |
+| `ff_reason` | Raison de l'état/échelle actuel du Feed-Forward |
+| `ff_scale` | Facteur d'échelle dynamique pour le Feed-Forward (0.0=off, 1.0=full) |
+| `ff_H_inertia_s` | Durée tampon d'inertie pour le lissage FF (secondes) |
+| `ff_d_inertia_deg` | Delta température tampon d'inertie pour le lissage FF (°C) |
 | `u_pi` | Part de puissance "PI" (correction d'erreur) |
 | `Kp`, `Ki` | Gains calculés du régulateur |
 | `kp_source` | Origine du gain Kp : `imc_deadtime`, `heuristic`, `safe`, `frozen`, etc. |
@@ -133,6 +138,9 @@ Pour les utilisateurs avancés, l'entité climate expose des attributs détaill�
 | `freeze_reason_gains` | Raison du gel de l'adaptation des gains (Kp, Ki) |
 | `last_decision_thermal` | Décision de gouvernance pour l'apprentissage thermique |
 | `last_decision_gains` | Décision de gouvernance pour l'adaptation des gains |
+| `calibration_state` | État actuel de la calibration : `Idle`, `CoolDown`, `HeatUp`, `CoolDownFinal` |
+| `last_calibration_time` | Horodatage de la dernière calibration réussie |
+| `calibration_retry_count` | Nombre de tentatives de calibration |
 
 
 ## Services
