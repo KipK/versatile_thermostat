@@ -185,6 +185,8 @@ CONF_AUTO_TPI_COOLING_POWER = "auto_tpi_cooling_rate"
 CONF_AUTO_TPI_AGGRESSIVENESS = "auto_tpi_aggressiveness"
 
 CONF_AUTO_TPI_EMA_DECAY_RATE = "auto_tpi_ema_decay_rate"
+CONF_AUTO_TPI_CONTINUOUS_KEXT = "auto_tpi_continuous_kext"
+CONF_AUTO_TPI_CONTINUOUS_KEXT_ALPHA = "auto_tpi_continuous_kext_alpha"
 
 # SmartPI specific parameters
 CONF_SMART_PI_DEADBAND = "smart_pi_deadband"
@@ -390,6 +392,8 @@ ALL_CONF = (
         CONF_AUTO_TPI_HEATING_POWER,
         CONF_AUTO_TPI_COOLING_POWER,
         CONF_AUTO_TPI_EMA_DECAY_RATE,
+        CONF_AUTO_TPI_CONTINUOUS_KEXT,
+        CONF_AUTO_TPI_CONTINUOUS_KEXT_ALPHA,
         CONF_AUTO_TPI_LEARNING_TYPE,
         CONF_AUTO_TPI_ENABLE_ADVANCED_SETTINGS,
         CONF_SYNC_DEVICE_INTERNAL_TEMP,

@@ -300,6 +300,28 @@ Kint_final = (1 - α) × Kint_old + α × Kint_new
 | `α₀` (initial alpha) | 0.08 | Initial weight of new values |
 | `decay_rate` | 0.12 | Alpha decrease speed |
 
+### Continuous Kext Learning
+
+This mechanism allows for long-term adaptation of $K_{ext}$ without an active learning session.
+
+#### Eligibility Conditions
+A cycle is used for continuous learning only if:
+1. **Feature enabled**: `auto_tpi_continuous_kext` is set to `true`.
+2. **Bootstrapped**: At least one outdoor learning cycle has been completed previously for the current mode.
+3. **Non-saturated power**: $0 < P_{real} < P_{saturation}$.
+4. **Stable system**: No cycle interruptions, no boiler off, no heating failure, and no excessive consecutive failures.
+5. **Significant outdoor delta**: $|Setpoint - T_{outdoor}| \ge 1.0°C$.
+6. **No setpoint change**: The target temperature did not change during the cycle.
+
+#### Continuous Learning Formula
+The correction is calculated similarly to the standard $K_{ext}$ learning:
+$$K_{ext}^{target} = K_{ext}^{old} + K_{int} \times \frac{\Delta T_{indoor}}{\Delta T_{outdoor}}$$
+
+Then, it is applied using an EWMA with a specific alpha:
+$$K_{ext}^{new} = (1 - \alpha_{cont}) \times K_{ext}^{old} + \alpha_{cont} \times K_{ext}^{target}$$
+
+By default, $\alpha_{cont} = 0.04$.
+
 ---
 
 ## Automatic Correction Mechanisms

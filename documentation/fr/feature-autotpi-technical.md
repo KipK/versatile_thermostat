@@ -300,6 +300,28 @@ Kint_final = (1 - α) × Kint_old + α × Kint_new
 | `α₀` (alpha initial) | 0.08 | Poids initial des nouvelles valeurs |
 | `decay_rate` | 0.12 | Vitesse de diminution de alpha |
 
+### Apprentissage Continu du Kext
+
+Ce mécanisme permet une adaptation à long terme de $K_{ext}$ sans session d'apprentissage active.
+
+#### Conditions d'éligibilité
+Un cycle est utilisé pour l'apprentissage continu uniquement si :
+1. **Fonctionnalité activée** : `auto_tpi_continuous_kext` est à `true`.
+2. **Bootstrap terminé** : Au moins un cycle d'apprentissage extérieur a été effectué précédemment pour le mode actuel.
+3. **Puissance non saturée** : $0 < P_{réelle} < P_{saturation}$.
+4. **Système stable** : Pas d'interruption de cycle, pas de chaudière arrêtée, pas de panne de chauffage, et pas d'échecs consécutifs excessifs.
+5. **Delta extérieur significatif** : $|Consigne - T_{ext}| \ge 1,0°C$.
+6. **Pas de changement de consigne** : La température cible n'a pas changé pendant le cycle.
+
+#### Formule d'apprentissage continu
+La correction est calculée de manière similaire à l'apprentissage $K_{ext}$ standard :
+$$K_{ext}^{cible} = K_{ext}^{ancien} + K_{int} \times \frac{\Delta T_{int}}{\Delta T_{ext}}$$
+
+Ensuite, elle est appliquée via un EWMA avec un alpha spécifique :
+$$K_{ext}^{nouveau} = (1 - \alpha_{cont}) \times K_{ext}^{ancien} + \alpha_{cont} \times K_{ext}^{cible}$$
+
+Par défaut, $\alpha_{cont} = 0,04$.
+
 ---
 
 ## Mécanismes de correction automatique
