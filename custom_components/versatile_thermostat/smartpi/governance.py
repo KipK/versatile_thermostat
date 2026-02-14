@@ -39,6 +39,15 @@ class SmartPIGovernance:
         """Expose current regime."""
         return self._current_regime
 
+    @regime.setter
+    def regime(self, value: GovernanceRegime) -> None:
+        self._current_regime = value
+
+    @property
+    def cycle_regimes(self) -> Set[GovernanceRegime]:
+        """Expose cycle regimes set."""
+        return self._cycle_regimes
+
     def reset(self):
         """Reset internal state."""
         self._cycle_regimes.clear()

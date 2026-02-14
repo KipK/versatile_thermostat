@@ -217,15 +217,27 @@ class GainScheduler:
         """Current proportional gain."""
         return self._kp
 
+    @kp.setter
+    def kp(self, value: float) -> None:
+        self._kp = value
+
     @property
     def ki(self) -> float:
         """Current integral gain."""
         return self._ki
 
+    @ki.setter
+    def ki(self, value: float) -> None:
+        self._ki = value
+
     @property
     def kp_source(self) -> str:
         """Source description for current Kp value."""
         return self._kp_source
+
+    @kp_source.setter
+    def kp_source(self, value: str) -> None:
+        self._kp_source = value
 
     @property
     def ki_source(self) -> str:

@@ -73,6 +73,11 @@ class DeadTimeEstimator:
         # History for external access (SmartPI learning)
         self._tin_history: Deque[Tuple[float, float]] = deque(maxlen=300)
 
+    @property
+    def tin_history(self) -> Deque[Tuple[float, float]]:
+        """Temperature history for learning window slope calculation."""
+        return self._tin_history
+
     def reset(self):
         """Reset estimator state."""
         self.deadtime_heat_s = None
@@ -86,7 +91,9 @@ class DeadTimeEstimator:
         self._history_cool.clear()
         self._tin_history.clear()
 
-    def update(self, now: float, tin: float, sp: float, u_applied: float, max_on_percent: float = 1.0, is_hysteresis: bool = False) -> None:
+    def update(  # pylint: disable=unused-argument
+        self, now: float, tin: float, sp: float, u_applied: float, max_on_percent: float = 1.0, is_hysteresis: bool = False
+    ) -> None:
         """
         Update state machine with new measures.
         """
@@ -101,22 +108,22 @@ class DeadTimeEstimator:
             # 1. Check Power Level
             if u_applied < self.min_power_heat_threshold:
                 allow_start = False
-                _LOGGER.debug(f"DeadTime: Heat Start ignored (Power {u_applied:.2f} < {self.min_power_heat_threshold})")
+                _LOGGER.debug("DeadTime: Heat Start ignored (Power %.2f < %s)", u_applied, self.min_power_heat_threshold)
             
             # 2. Check Min OFF Time
             if allow_start and self.last_stop_time is not None:
                 off_duration = now - self.last_stop_time
                 if off_duration < self.min_off_time_seconds:
                     allow_start = False
-                    _LOGGER.debug(f"DeadTime: Heat Start ignored (OFF duration {off_duration:.0f}s < {self.min_off_time_seconds})")
+                    _LOGGER.debug("DeadTime: Heat Start ignored (OFF duration %.0fs < %s)", off_duration, self.min_off_time_seconds)
             
             if allow_start:
                 self.heat_start_time = now
                 self.heat_start_temp = tin
                 self.state = "WAITING_HEAT_RESPONSE"
-                _LOGGER.debug(f"DeadTime: State -> WAITING_HEAT_RESPONSE (u={u_applied:.2f}, temp={tin:.3f})")
+                _LOGGER.debug("DeadTime: State -> WAITING_HEAT_RESPONSE (u=%.2f, temp=%.3f)", u_applied, tin)
             else:
-                 self.state = "HEATING" # Active but not detecting
+                self.state = "HEATING"  # Active but not detecting
 
         # >0 -> 0 (Cool Start)
         elif self.last_power > 0.01 and u_applied <= 0.01:
@@ -124,12 +131,12 @@ class DeadTimeEstimator:
             
             if self.last_power < self.min_power_cool_threshold:
                 self.state = "COOLING" # Ignore
-                _LOGGER.debug(f"DeadTime: Cool Start ignored (Prev Power {self.last_power:.2f} < {self.min_power_cool_threshold})")
+                _LOGGER.debug("DeadTime: Cool Start ignored (Prev Power %.2f < %s)", self.last_power, self.min_power_cool_threshold)
             else:
                 self.cool_start_time = now
                 self.cool_peak_temp = tin
                 self.state = "WAITING_COOL_RESPONSE"
-                _LOGGER.debug(f"DeadTime: State -> WAITING_COOL_RESPONSE (temp={tin:.3f})")
+                _LOGGER.debug("DeadTime: State -> WAITING_COOL_RESPONSE (temp=%.3f)", tin)
 
         # --- State Logic ---
         
@@ -140,14 +147,14 @@ class DeadTimeEstimator:
                 # Check Timeout
                 if elapsed > self.timeout_seconds:
                     self.state = "HEATING"
-                    _LOGGER.debug(f"DeadTime: Heat Timeout ({elapsed:.0f}s)")
+                    _LOGGER.debug("DeadTime: Heat Timeout (%.0fs)", elapsed)
                 else:
                     delta = tin - self.heat_start_temp
                     if delta >= self.detection_threshold:
                         dt = elapsed
                         self._add_sample_heat(dt)
                         self.state = "HEATING"
-                        _LOGGER.info(f"SmartPI: Heat Deadtime detected = {dt:.1f}s")
+                        _LOGGER.info("SmartPI: Heat Deadtime detected = %.1fs", dt)
         
         elif self.state == "WAITING_COOL_RESPONSE":
             if self.cool_start_time is not None:
@@ -156,11 +163,11 @@ class DeadTimeEstimator:
                 # Check Timeout
                 if elapsed > self.timeout_seconds:
                     self.state = "COOLING"
-                    _LOGGER.debug(f"DeadTime: Cool Timeout ({elapsed:.0f}s)")
+                    _LOGGER.debug("DeadTime: Cool Timeout (%.0fs)", elapsed)
                 else:
                     # Peak update
                     if tin > self.cool_peak_temp:
-                         self.cool_peak_temp = tin
+                        self.cool_peak_temp = tin
                     
                     # Drop detection
                     delta = self.cool_peak_temp - tin
@@ -168,13 +175,13 @@ class DeadTimeEstimator:
                         dt = elapsed
                         self._add_sample_cool(dt)
                         self.state = "COOLING"
-                        _LOGGER.info(f"SmartPI: Cool Deadtime detected = {dt:.1f}s")
+                        _LOGGER.info("SmartPI: Cool Deadtime detected = %.1fs", dt)
                         
         # Default states if running without detection
         elif u_applied > 0.01 and self.state == "OFF":
-             self.state = "HEATING"
+            self.state = "HEATING"
         elif u_applied <= 0.01 and self.state != "OFF" and self.state != "WAITING_COOL_RESPONSE":
-             self.state = "OFF"
+            self.state = "OFF"
 
         self.last_power = u_applied
 
@@ -324,7 +331,7 @@ class ABEstimator:
     @staticmethod
     def robust_dTdt_per_min(
         samples: list[Tuple[float, float]],
-        window_min: float = 8.0,
+        _window_min: float = 8.0,
         *,
         trim_start_frac: float = 0.0,
         trim_end_frac: float = 0.0,

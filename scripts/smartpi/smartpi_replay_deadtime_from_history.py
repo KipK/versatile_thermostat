@@ -9,7 +9,7 @@ import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
 from datetime import datetime
-from custom_components.versatile_thermostat.prop_algo_smartpi import DeadTimeEstimator
+from custom_components.versatile_thermostat.smartpi.learning import DeadTimeEstimator
 
 # Configure logging to show debug output
 logging.basicConfig(level=logging.DEBUG, format='%(name)s - %(levelname)s - %(message)s')

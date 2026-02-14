@@ -254,15 +254,15 @@ class SmartPIController:
         on_percent = 0.0
         
         if hvac_mode == VThermHvacMode_COOL:
-             if current_temp <= target_temp - hyst_lower:
+            if current_temp <= target_temp - hyst_lower:
                 on_percent = 0.0
                 self.hysteresis_state = "off"
-             elif current_temp >= target_temp + hyst_upper:
+            elif current_temp >= target_temp + hyst_upper:
                 on_percent = 1.0
                 self.hysteresis_state = "on"
-             else:
+            else:
                 self.hysteresis_state = "band"
-                on_percent = None # No change
+                on_percent = None  # No change
         else: # HEAT
             if current_temp >= target_temp + hyst_upper:
                 on_percent = 0.0
@@ -332,7 +332,7 @@ class SmartPIController:
                 
                 # Overshoot bleeding
                 if hvac_mode != VThermHvacMode_COOL and current_temp >= (target_temp - OVERSHOOT_I_CLAMP_EPS_C):
-                     if self.integral > 0.0:
+                    if self.integral > 0.0:
                         leak_eff = INTEGRAL_LEAK ** (dt_min / max(1e-9, float(cycle_min)))
                         self.integral *= leak_eff
                         self.last_i_mode = "I:BLEED(hold_ovr)"

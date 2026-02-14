@@ -1,7 +1,8 @@
 # tests/test_smartpi_nearband_model.py
 import pytest
 from unittest.mock import MagicMock, patch
-from custom_components.versatile_thermostat.prop_algo_smartpi import SmartPI, VThermHvacMode_HEAT
+from custom_components.versatile_thermostat.prop_algo_smartpi import SmartPI
+from custom_components.versatile_thermostat.vtherm_hvac_mode import VThermHvacMode_HEAT
 
 class TestSmartPINearBandModel:
 
@@ -33,7 +34,7 @@ class TestSmartPINearBandModel:
         self.pi.est.a = 0.02 # deg/min/% -> per minute at 100%
         self.pi.est.b = 0.001 # deg/min/deltaT -> loss per minute per degree difference
 
-    def test_update_near_band_auto_model_based(self):
+    def testupdate_near_band_auto_model_based(self):
         """
         Test that nearband is correctly calculated from model parameters a and b.
         """
@@ -65,11 +66,11 @@ class TestSmartPINearBandModel:
         
         # Perform update
         # We need to mock _t_ext_current somewhere if used, or pass it? 
-        # _update_near_band_auto signature is (hvac_mode, current_temp, ext_temp) potentially?
-        # WAIT: The current method in code is `_update_near_band_auto(self, hvac_mode)`.
+        # update_near_band_auto signature is (hvac_mode, current_temp, ext_temp) potentially?
+        # WAIT: The current method in code is `update_near_band_auto(self, hvac_mode)`.
         # It reads temps from self vars ?? NO, original code used self attributes if stored, 
         # but actually the ORIGINAL code didn't use temps because it used slope history!
-        # ===> I MUST MODIFY signature of _update_near_band_auto to accept temps OR store them.
+        # ===> I MUST MODIFY signature of update_near_band_auto to accept temps OR store them.
         # Let's assume I will modify it to accept current_temp and ext_temp.
         
         # For this test to run against *future* code, I will call it with arguments 
@@ -78,29 +79,29 @@ class TestSmartPINearBandModel:
         # So I need access to these temps.
         # I will modify the method to accept these arguments.
         
-        self.pi._update_near_band_auto(VThermHvacMode_HEAT, current_temp, ext_temp)
+        self.pi.update_near_band_auto(VThermHvacMode_HEAT, current_temp, ext_temp)
         
         assert self.pi._near_band_source == "auto_model_aware"
         assert self.pi._near_band_below_deg == pytest.approx(0.21, abs=0.01)
         # NB Above = 0.14 (calculated with corrected formula)
         assert self.pi._near_band_above_deg == pytest.approx(0.14, abs=0.01)
 
-    def test_update_near_band_auto_fallback_unreliable_deadtime(self):
+    def testupdate_near_band_auto_fallback_unreliable_deadtime(self):
         """Test fallback when DeadTime is unreliable."""
         self.pi.dt_est.deadtime_heat_reliable = False
         
         # Call with mocked temps
-        self.pi._update_near_band_auto(VThermHvacMode_HEAT, 20.0, 10.0)
+        self.pi.update_near_band_auto(VThermHvacMode_HEAT, 20.0, 10.0)
         
         assert self.pi._near_band_source == "fallback_deadtime"
         assert self.pi._near_band_below_deg == 0.5 # Default
     
-    def test_update_near_band_auto_fallback_unreliable_model(self):
+    def testupdate_near_band_auto_fallback_unreliable_model(self):
         """Test fallback when Model (a/b) is unreliable."""
         self.pi.est.learn_ok_count_a = 0 # Unreliable
         
         # Call with mocked temps
-        self.pi._update_near_band_auto(VThermHvacMode_HEAT, 20.0, 10.0)
+        self.pi.update_near_band_auto(VThermHvacMode_HEAT, 20.0, 10.0)
         
         assert self.pi._near_band_source == "fallback_model"
         # Checks defaults
@@ -144,7 +145,7 @@ class TestSmartPINearBandModel:
         
         # 0.135 vs 0.054 is distinguishable.
         
-        self.pi._update_near_band_auto(VThermHvacMode_HEAT, 20.0, 18.0) # deltaT=2
+        self.pi.update_near_band_auto(VThermHvacMode_HEAT, 20.0, 18.0) # deltaT=2
         
         # NB_below = 0.06 + 0.18 = 0.51 (corrected formula uses L_cool for H_below)
         assert self.pi._near_band_below_deg == pytest.approx(0.51, abs=0.01)

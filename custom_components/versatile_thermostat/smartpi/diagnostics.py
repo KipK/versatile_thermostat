@@ -1,6 +1,11 @@
 """
 Smart-PI Diagnostics Module.
+
+This module builds a diagnostics dict by reading internal state of the SmartPI
+algorithm. As a "friend" module tightly coupled to SmartPI internals, some
+protected member access is expected and intentional.
 """
+# pylint: disable=protected-access
 from __future__ import annotations
 
 from typing import Any, Dict, TYPE_CHECKING
@@ -54,46 +59,46 @@ def build_diagnostics(algo: SmartPI) -> Dict[str, Any]:
         "Kp": round(algo.Kp, 6),
         "Ki": round(algo.Ki, 6),
         "integral_error": round(algo.integral, 6),
-        "i_mode": algo._last_i_mode,
-        "sat": algo._last_sat,
+        "i_mode": algo.last_i_mode,
+        "sat": algo.last_sat,
         # Errors
-        "error": round(algo._last_error, 4),
-        "error_p": round(algo._last_error_p, 4),
-        "error_filtered": None if algo._e_filt is None else round(algo._e_filt, 4),
+        "error": round(algo.error, 4),
+        "error_p": round(algo.error_p, 4),
+        "error_filtered": round(algo.error_filtered, 4) if algo.error_filtered != 0.0 or algo._e_filt is not None else None,
         # 2DOF/scheduling
         "setpoint_weight_b": round(algo.setpoint_weight_b, 3),
         "near_band_deg": round(algo.near_band_deg, 3),
         "kp_near_factor": round(algo.kp_near_factor, 3),
         "ki_near_factor": round(algo.ki_near_factor, 3),
         "sign_flip_leak": round(algo.sign_flip_leak, 3),
-        "sign_flip_active": algo._sign_flip_active,
+        "sign_flip_active": algo.sign_flip_active,
         # Output
-        "u_ff": round(algo._last_u_ff, 6),
+        "u_ff": round(algo.u_ff, 6),
         "ff_raw": round(algo._last_ff_raw, 6),
         "ff_reason": algo._last_ff_reason,
         "ff_scale": round(algo._last_ff_scale, 6) if algo._last_ff_scale is not None else None,
         "ff_H_inertia_s": round(algo._last_ff_H_inertia_s, 1) if algo._last_ff_H_inertia_s is not None else None,
         "ff_d_inertia_deg": round(algo._last_ff_d_inertia_deg, 4) if algo._last_ff_d_inertia_deg is not None else None,
-        "u_pi": round(algo._last_u_pi, 6),
+        "u_pi": round(algo.u_pi, 6),
         "ff_warmup_ok_count": int(algo.ff_warmup_ok_count),
         "ff_warmup_cycles": int(algo.ff_warmup_cycles),
         "ff_scale_unreliable_max": round(algo.ff_scale_unreliable_max, 3),
-        "cycles_since_reset": int(algo._cycles_since_reset),
-        "on_percent": round(algo._on_percent, 6),
-        "cycle_min": round(algo._cycle_min, 3),
+        "cycles_since_reset": int(algo.cycles_since_reset),
+        "on_percent": round(algo.on_percent, 6),
+        "cycle_min": round(algo.cycle_min, 3),
         # Setpoint filter
         "filtered_setpoint": None if algo.sp_mgr.filtered_setpoint is None else round(algo.sp_mgr.filtered_setpoint, 2),
         # Resume skip
         "learning_resume_ts": int(algo._learning_resume_ts) if algo._learning_resume_ts else None,
         # Anti-windup tracking diagnostics
-        "u_cmd": round(algo._last_u_cmd, 6),
-        "u_limited": round(algo._last_u_limited, 6),
-        "u_applied": round(algo._last_u_applied, 6),
-        "aw_du": round(algo._last_aw_du, 6),
-        "forced_by_timing": algo._last_forced_by_timing,
+        "u_cmd": round(algo.u_cmd, 6),
+        "u_limited": round(algo.u_limited, 6),
+        "u_applied": round(algo.u_applied, 6),
+        "aw_du": round(algo.aw_du, 6),
+        "forced_by_timing": algo.forced_by_timing,
         # Deadband state
-        "in_deadband": algo._in_deadband,
-        "in_near_band": algo._in_near_band,
+        "in_deadband": algo.in_deadband,
+        "in_near_band": algo.in_near_band,
         # Setpoint boost state
         "setpoint_boost_active": algo.sp_mgr.boost_active,
         "hysteresis_thermal_guard": algo._hysteresis_thermal_guard,

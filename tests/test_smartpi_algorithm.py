@@ -6,11 +6,10 @@ import random
 import statistics
 import time
 from unittest.mock import MagicMock
-from custom_components.versatile_thermostat.prop_algo_smartpi import (
-    SmartPI,
-    ABEstimator,
+from custom_components.versatile_thermostat.prop_algo_smartpi import SmartPI
+from custom_components.versatile_thermostat.smartpi.learning import ABEstimator
+from custom_components.versatile_thermostat.smartpi.const import (
     KP_SAFE,
-    KI_SAFE,
     KI_SAFE,
     KP_MAX,
     AW_TRACK_TAU_S,
@@ -668,7 +667,7 @@ def test_near_band_gain_scheduling():
        (single attenuation - fixed behavior)
     3. Gains are re-clamped to stay within bounds after reduction
     """
-    from custom_components.versatile_thermostat.prop_algo_smartpi import KP_MIN, KI_MIN
+    from custom_components.versatile_thermostat.smartpi.const import KP_MIN, KI_MIN
 
     # Create SmartPI with near-band enabled
     smartpi = SmartPI(hass=MagicMock(), 
@@ -754,7 +753,7 @@ def test_near_band_gain_scheduling():
 
 def test_near_band_gains_clamped_at_minimum():
     """Test that near-band reduction doesn't push gains below their minimums."""
-    from custom_components.versatile_thermostat.prop_algo_smartpi import KP_MIN, KI_MIN
+    from custom_components.versatile_thermostat.smartpi.const import KP_MIN, KI_MIN
 
     # Create SmartPI with minimum possible gains that will be reduced
     smartpi = SmartPI(hass=MagicMock(), 
@@ -787,7 +786,7 @@ def test_near_band_gains_clamped_at_minimum():
 
 def test_notify_resume_after_interruption_sets_skip_counter():
     """Test that notify_resume_after_interruption sets the skip timestamp."""
-    from custom_components.versatile_thermostat.prop_algo_smartpi import SKIP_CYCLES_AFTER_RESUME
+    from custom_components.versatile_thermostat.smartpi.const import SKIP_CYCLES_AFTER_RESUME
 
     smartpi = SmartPI(hass=MagicMock(), 
         cycle_min=10,
@@ -1419,7 +1418,7 @@ def test_deadband_hysteresis_entry_and_exit():
     - Exit deadband only when |e| > deadband_c + DEADBAND_HYSTERESIS
     - In between (hysteresis zone), maintain previous state
     """
-    from custom_components.versatile_thermostat.prop_algo_smartpi import DEADBAND_HYSTERESIS
+    from custom_components.versatile_thermostat.smartpi.const import DEADBAND_HYSTERESIS
 
     deadband_c = 0.10  # 0.1°C deadband
     exit_threshold = deadband_c + DEADBAND_HYSTERESIS  # 0.125°C

@@ -2,11 +2,11 @@
 import pytest
 from unittest.mock import MagicMock, patch
 import time
-from custom_components.versatile_thermostat.prop_algo_smartpi import (
-    SmartPI,
-    ABEstimator,
+from custom_components.versatile_thermostat.prop_algo_smartpi import SmartPI
+from custom_components.versatile_thermostat.smartpi.learning import ABEstimator
+from custom_components.versatile_thermostat.smartpi.const import (
     EPISODE_MIN_DURATION_ON_S,
-    EPISODE_MIN_DURATION_OFF_S
+    EPISODE_MIN_DURATION_OFF_S,
 )
 from custom_components.versatile_thermostat.vtherm_hvac_mode import VThermHvacMode_HEAT
 

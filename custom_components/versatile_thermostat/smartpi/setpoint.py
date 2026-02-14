@@ -91,9 +91,9 @@ class SmartPISetpointManager:
         Apply asymmetric EMA filter to setpoint with midpoint activation.
         """
         if not self.enabled:
-             self.filtered_setpoint = target_temp
-             self.last_raw_setpoint = target_temp
-             return target_temp
+            self.filtered_setpoint = target_temp
+            self.last_raw_setpoint = target_temp
+            return target_temp
 
         # First call or no previous setpoint: initialize
         if self.filtered_setpoint is None or self.last_raw_setpoint is None:
@@ -168,7 +168,9 @@ class SmartPISetpointManager:
 
         return self.filtered_setpoint
 
-    def update_boost_state(self, target_temp: float, error: float, hvac_mode: VThermHvacMode) -> bool:
+    def update_boost_state(  # pylint: disable=unused-argument
+        self, target_temp: float, error: float, hvac_mode: VThermHvacMode
+    ) -> bool:
         """Check and update boost state based on setpoint changes."""
         if self.prev_setpoint_for_boost is None:
             self.prev_setpoint_for_boost = target_temp

@@ -4,7 +4,8 @@ import time
 from unittest.mock import MagicMock
 from datetime import datetime, timedelta
 
-from custom_components.versatile_thermostat.prop_algo_smartpi import ABEstimator, SmartPI
+from custom_components.versatile_thermostat.prop_algo_smartpi import SmartPI
+from custom_components.versatile_thermostat.smartpi.learning import ABEstimator
 
 def test_theil_sen_slope_robustness():
     """Test Theil-Sen slope estimation with outliers."""

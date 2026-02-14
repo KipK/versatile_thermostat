@@ -3,7 +3,8 @@ import pytest
 from datetime import datetime
 from unittest.mock import MagicMock, AsyncMock, patch
 from custom_components.versatile_thermostat.prop_handler_smartpi import SmartPIHandler
-from custom_components.versatile_thermostat.prop_algo_smartpi import SmartPI, SmartPIPhase
+from custom_components.versatile_thermostat.prop_algo_smartpi import SmartPI
+from custom_components.versatile_thermostat.smartpi.const import SmartPIPhase
 from custom_components.versatile_thermostat.vtherm_hvac_mode import VThermHvacMode_HEAT
 
 @pytest.mark.asyncio

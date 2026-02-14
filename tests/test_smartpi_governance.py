@@ -6,11 +6,9 @@ import time
 import pytest
 from unittest.mock import MagicMock, patch, AsyncMock
 
-from custom_components.versatile_thermostat.prop_algo_smartpi import (
-    SmartPI,
-    ABEstimator,
-    SmartPI,
-    ABEstimator,
+from custom_components.versatile_thermostat.prop_algo_smartpi import SmartPI
+from custom_components.versatile_thermostat.smartpi.learning import ABEstimator
+from custom_components.versatile_thermostat.smartpi.const import (
     AB_HISTORY_SIZE,
     SmartPIPhase,
 )

@@ -1,7 +1,8 @@
 import pytest
-from custom_components.versatile_thermostat.prop_algo_smartpi import DeadTimeEstimator
+from custom_components.versatile_thermostat.smartpi.learning import DeadTimeEstimator
 from unittest.mock import MagicMock
-from custom_components.versatile_thermostat.prop_algo_smartpi import SmartPI, SmartPIPhase
+from custom_components.versatile_thermostat.prop_algo_smartpi import SmartPI
+from custom_components.versatile_thermostat.smartpi.const import SmartPIPhase
 from custom_components.versatile_thermostat.vtherm_hvac_mode import VThermHvacMode_HEAT
 
 class TestSmartPiHysteresisLearning:

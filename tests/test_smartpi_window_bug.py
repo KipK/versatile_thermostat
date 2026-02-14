@@ -1,7 +1,8 @@
 """Test for SmartPI Negative Integral Bug (Window close)."""
 import pytest
 from unittest.mock import MagicMock
-from custom_components.versatile_thermostat.prop_algo_smartpi import SmartPI, AB_HISTORY_SIZE
+from custom_components.versatile_thermostat.prop_algo_smartpi import SmartPI
+from custom_components.versatile_thermostat.smartpi.const import AB_HISTORY_SIZE
 from custom_components.versatile_thermostat.vtherm_hvac_mode import VThermHvacMode_HEAT, VThermHvacMode_OFF
 
 def test_smartpi_window_negative_integral_bug():

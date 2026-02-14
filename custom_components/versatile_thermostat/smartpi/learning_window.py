@@ -441,7 +441,7 @@ class LearningWindowManager:
         if u_eff < U_OFF_MAX:
             # OFF Learning
             relevant_samples = [
-                p for p in dt_est._tin_history 
+                p for p in dt_est.tin_history 
                 if p[0] >= self._start_ts
             ]
 
@@ -469,7 +469,7 @@ class LearningWindowManager:
         elif u_eff > U_ON_MIN:
             # ON phase
             relevant_samples = [
-                p for p in dt_est._tin_history 
+                p for p in dt_est.tin_history 
                 if p[0] >= self._start_ts
             ]
 

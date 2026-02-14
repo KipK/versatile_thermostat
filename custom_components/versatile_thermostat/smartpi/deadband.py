@@ -147,7 +147,7 @@ class DeadbandManager:
             if hvac_mode is not None and hvac_mode != VThermHvacMode_COOL:
                 # HEAT mode: update auto near-band if deadtime is reliable
                 if dt_est.deadtime_heat_reliable:
-                    self._update_near_band_auto(
+                    self.update_near_band_auto(
                         hvac_mode, current_temp, ext_temp, dt_est, estimator, cycle_min
                     )
                 
@@ -175,9 +175,9 @@ class DeadbandManager:
             deadband_changed=deadband_changed,
         )
 
-    def _update_near_band_auto(
+    def update_near_band_auto(  # pylint: disable=unused-argument
         self,
-        hvac_mode,  # VThermHvacMode
+        hvac_mode,  # VThermHvacMode - reserved for future mode-specific logic
         current_temp: float,
         ext_temp: Optional[float],
         dt_est: "DeadTimeEstimator",
@@ -329,10 +329,18 @@ class DeadbandManager:
         """Whether currently in deadband."""
         return self._in_deadband
 
+    @in_deadband.setter
+    def in_deadband(self, value: bool) -> None:
+        self._in_deadband = value
+
     @property
     def in_near_band(self) -> bool:
         """Whether currently in near-band."""
         return self._in_near_band
+
+    @in_near_band.setter
+    def in_near_band(self, value: bool) -> None:
+        self._in_near_band = value
 
     @property
     def near_band_below_deg(self) -> float:

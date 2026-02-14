@@ -8,7 +8,8 @@ from homeassistant.helpers.storage import Store
 from homeassistant.helpers.event import async_track_time_interval
 from datetime import timedelta, datetime
 
-from .prop_algo_smartpi import SmartPI, SMARTPI_RECALC_INTERVAL_SEC, SmartPIPhase
+from .prop_algo_smartpi import SmartPI
+from .smartpi.const import SMARTPI_RECALC_INTERVAL_SEC, SmartPIPhase
 from .const import (
     CONF_MINIMAL_ACTIVATION_DELAY,
     CONF_MINIMAL_DEACTIVATION_DELAY,

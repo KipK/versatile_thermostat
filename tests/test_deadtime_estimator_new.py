@@ -1,5 +1,5 @@
 import pytest
-from custom_components.versatile_thermostat.prop_algo_smartpi import DeadTimeEstimator
+from custom_components.versatile_thermostat.smartpi.learning import DeadTimeEstimator
 
 class TestDeadTimeEstimatorNew:
     def setup_method(self):

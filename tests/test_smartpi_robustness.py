@@ -4,7 +4,8 @@ Tests are designed for the Theil-Sen robust regression algorithm which requires
 varying input values (delta for b, u for a) to compute slopes.
 """
 
-from custom_components.versatile_thermostat.prop_algo_smartpi import ABEstimator, SmartPI
+from custom_components.versatile_thermostat.prop_algo_smartpi import SmartPI
+from custom_components.versatile_thermostat.smartpi.learning import ABEstimator
 from custom_components.versatile_thermostat.vtherm_hvac_mode import VThermHvacMode_HEAT
 from unittest.mock import MagicMock
 from .commons import force_smartpi_stable_mode

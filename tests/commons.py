@@ -55,7 +55,7 @@ from custom_components.versatile_thermostat.underlyings import overrides, Underl
 
 from custom_components.versatile_thermostat.vtherm_api import VersatileThermostatAPI
 from custom_components.versatile_thermostat.vtherm_hvac_mode import VThermHvacMode, VThermHvacMode_OFF, VThermHvacMode_HEAT, VThermHvacMode_COOL, VThermHvacMode_SLEEP
-from custom_components.versatile_thermostat.prop_algo_smartpi import AB_HISTORY_SIZE
+from custom_components.versatile_thermostat.smartpi.const import AB_HISTORY_SIZE
 from custom_components.versatile_thermostat.vtherm_preset import VThermPreset
 
 from .const import (  # pylint: disable=unused-import

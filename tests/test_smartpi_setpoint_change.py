@@ -2,10 +2,8 @@
 import logging
 from datetime import datetime, timedelta
 import pytest
-from custom_components.versatile_thermostat.prop_algo_smartpi import (
-    SmartPI,
-    VThermHvacMode_HEAT,
-)
+from custom_components.versatile_thermostat.prop_algo_smartpi import SmartPI
+from custom_components.versatile_thermostat.vtherm_hvac_mode import VThermHvacMode_HEAT
 from .commons import force_smartpi_stable_mode
 from unittest.mock import MagicMock
 

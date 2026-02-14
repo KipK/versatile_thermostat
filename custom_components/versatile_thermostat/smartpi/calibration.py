@@ -168,8 +168,8 @@ class CalibrationManager:
     def should_start_calibration(
         self,
         now: float,
-        governance_regime,  # GovernanceRegime
-        phase,  # SmartPIPhase
+        _governance_regime,  # GovernanceRegime
+        _phase,  # SmartPIPhase
         deadtime_reliable: bool,
     ) -> tuple[bool, str]:
         """
@@ -366,20 +366,36 @@ class CalibrationManager:
         """Get timestamp of last completed calibration."""
         return self._last_calibration_time
 
+    @last_calibration_time.setter
+    def last_calibration_time(self, value: float | None) -> None:
+        self._last_calibration_time = value
+
     @property
     def calibration_start_time(self) -> float | None:
         """Get timestamp of current calibration start."""
         return self._calibration_start_time
+
+    @calibration_start_time.setter
+    def calibration_start_time(self, value: float | None) -> None:
+        self._calibration_start_time = value
 
     @property
     def retry_count(self) -> int:
         """Get current retry count."""
         return self._calibration_retry_count
 
+    @retry_count.setter
+    def retry_count(self, value: int) -> None:
+        self._calibration_retry_count = value
+
     @property
     def calibration_requested(self) -> bool:
         """Check if calibration has been requested."""
         return self._force_calibration_requested
+
+    @calibration_requested.setter
+    def calibration_requested(self, value: bool) -> None:
+        self._force_calibration_requested = value
 
 
 # Import VThermHvacMode at end to avoid circular imports

@@ -4,12 +4,11 @@ import pytest
 from unittest.mock import MagicMock, patch
 import time
 
-from custom_components.versatile_thermostat.prop_algo_smartpi import (
-    SmartPI,
+from custom_components.versatile_thermostat.prop_algo_smartpi import SmartPI
+from custom_components.versatile_thermostat.smartpi.const import (
     SmartPIPhase,
     SmartPICalibrationPhase,
     FORCE_CALIBRATION_INTERVAL_HOURS,
-    HYST_LOWER_C,
     HYST_LOWER_C,
     HYST_UPPER_C,
 )

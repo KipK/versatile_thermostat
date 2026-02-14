@@ -54,43 +54,30 @@ from .cycle_manager import CycleManager
 from homeassistant.core import HomeAssistant
 
 from .smartpi.const import (
-    SmartPIPhase as SmartPIPhase,
-    GovernanceRegime as GovernanceRegime,
-    GovernanceDecision as GovernanceDecision,
-    SmartPICalibrationPhase as SmartPICalibrationPhase,
-    KP_SAFE as KP_SAFE,
-    KI_SAFE as KI_SAFE,
-    KP_MAX as KP_MAX,
-    KI_MIN as KI_MIN,
-    KI_MAX as KI_MAX,
-    KP_MIN as KP_MIN,
-    MAX_STEP_PER_MINUTE as MAX_STEP_PER_MINUTE,
-    SETPOINT_BOOST_RATE as SETPOINT_BOOST_RATE,
-    SETPOINT_BOOST_THRESHOLD as SETPOINT_BOOST_THRESHOLD,
-    SETPOINT_BOOST_ERROR_MIN as SETPOINT_BOOST_ERROR_MIN,
-    SKIP_CYCLES_AFTER_RESUME as SKIP_CYCLES_AFTER_RESUME,
-    LEARNING_PAUSE_RESUME_MIN as LEARNING_PAUSE_RESUME_MIN,
-    EPISODE_MIN_DURATION_ON_S as EPISODE_MIN_DURATION_ON_S,
-    EPISODE_MIN_DURATION_OFF_S as EPISODE_MIN_DURATION_OFF_S,
-    SMARTPI_RECALC_INTERVAL_SEC as SMARTPI_RECALC_INTERVAL_SEC,
-    AW_TRACK_TAU_S as AW_TRACK_TAU_S,
-    AW_TRACK_MAX_DELTA_I as AW_TRACK_MAX_DELTA_I,
-    HYST_UPPER_C as HYST_UPPER_C,
-    HYST_LOWER_C as HYST_LOWER_C,
-    DEFAULT_DEADBAND_C as DEFAULT_DEADBAND_C,
-    DEADBAND_BELOW_C as DEADBAND_BELOW_C,
-    DEADBAND_ABOVE_C as DEADBAND_ABOVE_C,
-    DEADBAND_HYSTERESIS as DEADBAND_HYSTERESIS,
-    AB_HISTORY_SIZE as AB_HISTORY_SIZE,
-    AB_MIN_SAMPLES as AB_MIN_SAMPLES,
-    DEFAULT_NEAR_BAND_DEG as DEFAULT_NEAR_BAND_DEG,
-    DEFAULT_KP_NEAR_FACTOR as DEFAULT_KP_NEAR_FACTOR,
-    DEFAULT_KI_NEAR_FACTOR as DEFAULT_KI_NEAR_FACTOR,
-    FreezeReason as FreezeReason,
-    FORCE_CALIBRATION_INTERVAL_HOURS as FORCE_CALIBRATION_INTERVAL_HOURS,
-    CALIBRATION_RETRY_MAX as CALIBRATION_RETRY_MAX,
-    CALIBRATION_TIMEOUT_MIN as CALIBRATION_TIMEOUT_MIN,
-    clamp as clamp,
+    SmartPIPhase,
+    GovernanceRegime,
+    GovernanceDecision,
+    SmartPICalibrationPhase,
+    KP_SAFE,
+    KI_SAFE,
+    KI_MIN,
+    MAX_STEP_PER_MINUTE,
+    SETPOINT_BOOST_RATE,
+    SKIP_CYCLES_AFTER_RESUME,
+    LEARNING_PAUSE_RESUME_MIN,
+    HYST_UPPER_C,
+    HYST_LOWER_C,
+    DEFAULT_DEADBAND_C,
+    DEADBAND_BELOW_C,
+    DEADBAND_ABOVE_C,
+    AB_HISTORY_SIZE,
+    DEFAULT_NEAR_BAND_DEG,
+    DEFAULT_KP_NEAR_FACTOR,
+    DEFAULT_KI_NEAR_FACTOR,
+    FORCE_CALIBRATION_INTERVAL_HOURS,
+    CALIBRATION_RETRY_MAX,
+    CALIBRATION_TIMEOUT_MIN,
+    clamp,
 )
 from .smartpi.learning import DeadTimeEstimator, ABEstimator
 from .smartpi.diagnostics import build_diagnostics
@@ -102,7 +89,7 @@ from .smartpi.deadband import DeadbandManager
 from .smartpi.calibration import CalibrationManager
 from .smartpi.gains import GainScheduler
 from .smartpi.feedforward import apply_ff_gate
-from .smartpi.timestamp_utils import convert_monotonic_to_wall_ts, convert_wall_to_monotonic_ts
+from .smartpi.timestamp_utils import convert_monotonic_to_wall_ts
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -254,6 +241,9 @@ class SmartPI(CycleManager):
         # Feature flag for integral freeze during deadtime (Default OFF)
         self.feature_integral_freeze: bool = False
 
+        # Cycle tracking
+        self._setpoint_changed_in_cycle: bool = False
+
         # --- Near-Band Auto-Tuning (Phase 2) ---
         # Near-band state is now managed by DeadbandManager component
 
@@ -359,7 +349,7 @@ class SmartPI(CycleManager):
 
     @_last_calibration_time.setter
     def _last_calibration_time(self, value: float | None):
-        self.calibration_mgr._last_calibration_time = value
+        self.calibration_mgr.last_calibration_time = value
 
     @property
     def _calibration_retry_count(self) -> int:
@@ -367,7 +357,7 @@ class SmartPI(CycleManager):
 
     @_calibration_retry_count.setter
     def _calibration_retry_count(self, value: int):
-        self.calibration_mgr._calibration_retry_count = value
+        self.calibration_mgr.retry_count = value
 
     @property
     def _calibration_start_time(self) -> float | None:
@@ -375,7 +365,7 @@ class SmartPI(CycleManager):
 
     @_calibration_start_time.setter
     def _calibration_start_time(self, value: float | None):
-        self.calibration_mgr._calibration_start_time = value
+        self.calibration_mgr.calibration_start_time = value
 
     @property
     def _learning_resume_ts(self) -> float | None:
@@ -404,7 +394,7 @@ class SmartPI(CycleManager):
 
     @Kp.setter
     def Kp(self, value: float):
-        self.gain_scheduler._kp = value
+        self.gain_scheduler.kp = value
 
     @property
     def Ki(self) -> float:
@@ -412,7 +402,7 @@ class SmartPI(CycleManager):
 
     @Ki.setter
     def Ki(self, value: float):
-        self.gain_scheduler._ki = value
+        self.gain_scheduler.ki = value
 
     @property
     def _kp(self) -> float:
@@ -420,7 +410,7 @@ class SmartPI(CycleManager):
 
     @_kp.setter
     def _kp(self, value: float):
-        self.gain_scheduler._kp = value
+        self.gain_scheduler.kp = value
 
     @property
     def _ki(self) -> float:
@@ -428,7 +418,7 @@ class SmartPI(CycleManager):
 
     @_ki.setter
     def _ki(self, value: float):
-        self.gain_scheduler._ki = value
+        self.gain_scheduler.ki = value
 
     @property
     def _kp_source(self) -> str:
@@ -436,7 +426,7 @@ class SmartPI(CycleManager):
 
     @_kp_source.setter
     def _kp_source(self, value: str):
-        self.gain_scheduler._kp_source = value
+        self.gain_scheduler.kp_source = value
 
     @property
     def _hysteresis_thermal_guard(self) -> bool:
@@ -473,7 +463,7 @@ class SmartPI(CycleManager):
 
     @_in_deadband.setter
     def _in_deadband(self, value: bool):
-        self.deadband_mgr._in_deadband = value
+        self.deadband_mgr.in_deadband = value
 
     @property
     def _in_near_band(self) -> bool:
@@ -481,8 +471,7 @@ class SmartPI(CycleManager):
 
     @_in_near_band.setter
     def _in_near_band(self, value: bool):
-        self.deadband_mgr._in_near_band = value
-
+        self.deadband_mgr.in_near_band = value
 
     @property
     def _current_governance_regime(self) -> str:
@@ -490,7 +479,7 @@ class SmartPI(CycleManager):
 
     @_current_governance_regime.setter
     def _current_governance_regime(self, value: str):
-        self.gov._current_regime = GovernanceRegime(value) if isinstance(value, str) else value
+        self.gov.regime = GovernanceRegime(value) if isinstance(value, str) else value
 
     @property
     def phase(self) -> str:
@@ -510,7 +499,7 @@ class SmartPI(CycleManager):
 
     @property
     def _cycle_regimes(self):
-        return self.gov._cycle_regimes
+        return self.gov.cycle_regimes
 
     # --- Setpoint Manager Redirects ---
     @property
@@ -650,9 +639,6 @@ class SmartPI(CycleManager):
             deadtime_skip_count_b=self._deadtime_skip_count_b,
         )
 
-        # Sync learning_resume_ts from component (may have been cleared)
-        # self.learn_win.learning_resume_ts is the source of truth
-        pass
     async def on_cycle_started(self, on_time_sec: float, off_time_sec: float, on_percent: float, hvac_mode: str) -> None:
         """Called when a cycle starts."""
         await super().on_cycle_started(on_time_sec, off_time_sec, on_percent, hvac_mode)
@@ -844,7 +830,7 @@ class SmartPI(CycleManager):
 
     @in_deadband.setter
     def in_deadband(self, value: bool):
-        self.deadband_mgr._in_deadband = value
+        self.deadband_mgr.in_deadband = value
 
     @property
     def in_near_band(self) -> bool:
@@ -852,7 +838,7 @@ class SmartPI(CycleManager):
 
     @in_near_band.setter
     def in_near_band(self, value: bool):
-        self.deadband_mgr._in_near_band = value
+        self.deadband_mgr.in_near_band = value
 
     @property
     def error(self) -> float:
@@ -998,14 +984,14 @@ class SmartPI(CycleManager):
         return False
 
     # Phase 2: Helper for Near-Band Auto-Calculation
-    def _update_near_band_auto(self, hvac_mode: VThermHvacMode, current_temp: float, ext_temp: Optional[float]) -> None:
+    def update_near_band_auto(self, hvac_mode: VThermHvacMode, current_temp: float, ext_temp: Optional[float]) -> None:
         """
         Calculate Near-Band thresholds based on Dead Time and Model Slopes (Phase 2).
 
         Delegates to DeadbandManager component.
         """
         # Delegate to DeadbandManager component
-        self.deadband_mgr._update_near_band_auto(
+        self.deadband_mgr.update_near_band_auto(
             hvac_mode=hvac_mode,
             current_temp=current_temp,
             ext_temp=ext_temp,
@@ -1073,7 +1059,7 @@ class SmartPI(CycleManager):
         dt_min: float = 0.0,
         forced_by_timing: bool = False,
         realized_percent: float | None = None,
-        **kwargs
+        **_kwargs
     ) -> None:
         """
         Adjust integral term based on REALIZED power (Energy Awareness).
@@ -1312,8 +1298,8 @@ class SmartPI(CycleManager):
             self.ctl.reset()
             self._on_percent = 0.0
             self._last_u_applied = 0.0
-            self.deadband_mgr._in_deadband = False
-            self.deadband_mgr._in_near_band = False
+            self.deadband_mgr.in_deadband = False
+            self.deadband_mgr.in_near_band = False
             self._output_initialized = True
             self._last_calculate_time = None
             return True
@@ -1327,7 +1313,7 @@ class SmartPI(CycleManager):
             # We update regime to PERTURBED but SKIP PID calculation
             self.gov.on_cycle_start()
             self.gov.update_regime(GovernanceRegime.PERTURBED)
-            decision, reason = self.gov.decide_update("thermal")
+            _, reason = self.gov.decide_update("thermal")
             self._last_i_mode = f"I:RESET({reason.value})"
             self._output_initialized = True
             return True
@@ -1540,7 +1526,7 @@ class SmartPI(CycleManager):
         self._on_percent = clamp(u_limited, 0.0, self._max_on_percent if self._max_on_percent is not None else 1.0)
         return self._on_percent
 
-    def calculate(
+    def calculate(  # pylint: disable=keyword-arg-before-vararg
         self,
         target_temp: float | None,
         current_temp: float | None,
@@ -1550,7 +1536,7 @@ class SmartPI(CycleManager):
         integrator_hold: bool = False,
         power_shedding: bool = False,
         *args,
-        **kwargs,
+        **_kwargs,
     ) -> float:
         """
         Compute the next duty-cycle command.
@@ -1582,7 +1568,7 @@ class SmartPI(CycleManager):
         self._last_hvac_mode = hvac_mode
 
         # --- 2. Update Time Tracking ---
-        dt_min, is_first_run = self._update_time_tracking(now)
+        dt_min, _ = self._update_time_tracking(now)
 
         # --- 3. Setpoint Management ---
         target_temp_filt, setpoint_changed, error, old_target_temp = self._manage_setpoint(
@@ -1671,8 +1657,8 @@ class SmartPI(CycleManager):
             self.deadband_mgr.in_near_band
         )
         self.gov.update_regime(regime)
-        gov_decision_g, gov_reason_g = self.gov.decide_update('gains')
-        gov_decision_t, gov_reason_t = self.gov.decide_update('thermal', self.learn_win.learning_resume_ts, now)
+        gov_decision_g, _ = self.gov.decide_update('gains')
+        self.gov.decide_update('thermal', self.learn_win.learning_resume_ts, now)
 
         # --- 8. Gains & FF ---
         u_ff, gov_hold = self._apply_gains_and_ff(

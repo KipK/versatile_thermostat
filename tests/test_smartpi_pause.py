@@ -2,7 +2,9 @@
 import pytest
 from unittest.mock import MagicMock
 import time
-from custom_components.versatile_thermostat.prop_algo_smartpi import SmartPI, VThermHvacMode_HEAT, VThermHvacMode_OFF, LEARNING_PAUSE_RESUME_MIN
+from custom_components.versatile_thermostat.prop_algo_smartpi import SmartPI
+from custom_components.versatile_thermostat.vtherm_hvac_mode import VThermHvacMode_HEAT, VThermHvacMode_OFF
+from custom_components.versatile_thermostat.smartpi.const import LEARNING_PAUSE_RESUME_MIN
 from .commons import force_smartpi_stable_mode
 
 class MockVTherm:
