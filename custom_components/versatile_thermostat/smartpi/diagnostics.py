@@ -8,6 +8,7 @@ protected member access is expected and intentional.
 # pylint: disable=protected-access
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Dict, TYPE_CHECKING
 from .const import (
     SmartPIPhase,
@@ -119,6 +120,13 @@ def build_diagnostics(algo: SmartPI) -> Dict[str, Any]:
         "near_band_below_deg": algo.deadband_mgr.near_band_below_deg,
         "near_band_above_deg": algo.deadband_mgr.near_band_above_deg,
         "near_band_source": algo.deadband_mgr.near_band_source,
+        # Forced Calibration
+        "calibration_state": algo.calibration_state,
+        "last_calibration_time": (
+            datetime.fromtimestamp(algo.calibration_mgr.last_calibration_time).isoformat()
+            if algo.calibration_mgr.last_calibration_time else None
+        ),
+        "calibration_retry_count": algo.calibration_mgr.retry_count,
         # Safety-First Governance
         "governance_regime": algo.gov._current_regime.value,
         "governance_cycle_regimes": [r.value for r in algo.gov._cycle_regimes],

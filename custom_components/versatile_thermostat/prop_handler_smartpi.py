@@ -294,83 +294,20 @@ class SmartPIHandler:
         t = self._thermostat
         if t.prop_algorithm and isinstance(t.prop_algorithm, SmartPI):
             algo = t.prop_algorithm
-            t._attr_extra_state_attributes["specific_states"]["smart_pi"] = {
-                "a": algo.a,
-                "b": algo.b,
-                "tau_min": algo.tau_min,
-                "tau_reliable": algo.tau_reliable,
-                "learn_ok_count": algo.learn_ok_count,
-                "learn_ok_count_a": algo.learn_ok_count_a,
-                "learn_ok_count_b": algo.learn_ok_count_b,
-                "learn_skip_count": algo.learn_skip_count,
-                "learn_last_reason": algo.learn_last_reason,
-                "meas_count_a": algo.meas_count_a,
-                "meas_count_b": algo.meas_count_b,
-                "learning_start_dt": algo.learning_start_dt,
-                "Kp": algo.kp,
-                "Ki": algo.ki,
-                "Kp_reel": algo.kp_reel,
-                "Ki_reel": algo.ki_reel,
-                "integral_error": algo.integral_error,
-                "last_i_mode": algo.last_i_mode,
-                "sat": algo.last_sat,
-                "error": algo.error,
-                "error_p": algo.error_p,
-                "error_filtered": algo.error_filtered,
-                "setpoint_weight_b": algo.setpoint_weight_b,
-                "near_band_deg": algo.near_band_deg,
-                "kp_near_factor": algo.kp_near_factor,
-                "ki_near_factor": algo.ki_near_factor,
-                "sign_flip_leak": algo.sign_flip_leak,
-                "sign_flip_active": algo.sign_flip_active,
-                "u_ff": algo.u_ff,
-                "u_pi": algo.u_pi,
-                "ff_warmup_ok_count": algo.ff_warmup_ok_count,
-                "ff_warmup_cycles": algo.ff_warmup_cycles,
-                "ff_scale_unreliable_max": algo.ff_scale_unreliable_max,
-                "cycles_since_reset": algo.cycles_since_reset,
-                "on_percent": algo.on_percent,
-                "cycle_min": algo.cycle_min,
-                "filtered_setpoint": algo.filtered_setpoint,
-                "learning_resume_ts": algo.learning_resume_ts,
-                "u_cmd": algo.u_cmd,
-                "u_limited": algo.u_limited,
-                "u_applied": algo.u_applied,
-                "aw_du": algo.aw_du,
-                "forced_by_timing": algo.forced_by_timing,
-                "in_deadband": algo.in_deadband,
-                "in_near_band": algo.in_near_band,
-                "setpoint_boost_active": algo.setpoint_boost_active,
-                "cycle_start_dt": algo.cycle_start_dt,
-                "phase": algo.phase,
-                # Dead Time (Smart-PI v2)
-                "deadtime_heat_s": algo.dt_est.deadtime_heat_s,
-                "deadtime_heat_reliable": algo.dt_est.deadtime_heat_reliable,
-                "deadtime_cool_s": algo.dt_est.deadtime_cool_s,
-                "deadtime_cool_reliable": algo.dt_est.deadtime_cool_reliable,
-                "in_deadtime_window": algo.in_deadtime_window,
-                "kp_source": algo._kp_source,
-                "deadtime_skip_count_a": algo._deadtime_skip_count_a,
-                "deadtime_skip_count_b": algo._deadtime_skip_count_b,
-                # Phase 2: Near-Band
-                "near_band_below_deg": algo.deadband_mgr.near_band_below_deg,
-                "near_band_above_deg": algo.deadband_mgr.near_band_above_deg,
-                "near_band_source": algo.deadband_mgr.near_band_source,
-                # Forced Calibration
-                "calibration_state": algo.calibration_state,
-                "last_calibration_time": (
-                    datetime.fromtimestamp(algo.calibration_mgr.last_calibration_time).isoformat()
-                    if algo.calibration_mgr.last_calibration_time else None
-                ),
-                "calibration_retry_count": algo.calibration_mgr.retry_count,
-                # Safety-First Governance
-                "governance_regime": algo.gov._current_regime.value,
-                "governance_cycle_regimes": [r.value for r in algo.gov._cycle_regimes],
-                "freeze_reason_thermal": algo.freeze_reason_thermal,
-                "freeze_reason_gains": algo.freeze_reason_gains,
-                "governance_decision_thermal": algo.last_decision_thermal,
-                "governance_decision_gains": algo.last_decision_gains,
-            }
+            # Retrieve diagnostics from algorithm (base)
+            diag_data = algo.get_diagnostics()
+
+            # Merge Handler-specific formatting (e.g. timestamps from Handler/Manager)
+            # Note: algo.get_diagnostics() already returns ISO strings for timestamps managed by algo
+            # We override or add only what is specific to the handler context if needed.
+
+            # We want to ensure specific formatting for `last_calibration_time` if it's not already in ISO
+            # algo.get_diagnostics() returns it as ISO string if available in `smartpi/diagnostics.py`,
+            # but let's double check `prop_handler` was doing it manually.
+            # In `diagnostics.py`: "last_calibration_time": ... isoformat() ...
+            # So we don't need to re-do it here.
+
+            t._attr_extra_state_attributes["specific_states"]["smart_pi"] = diag_data
 
             # Add to configuration dict for consistency with TPI
             t._attr_extra_state_attributes["configuration"].update({
