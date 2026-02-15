@@ -212,9 +212,10 @@ class DeadbandManager:
             return
 
         # Horizons Configuration
-        L_heat = dt_est.deadtime_heat_s
+        L_heat = dt_est.deadtime_heat_s or 0.0
         use_cool_deadtime = dt_est.deadtime_cool_reliable and dt_est.deadtime_cool_s is not None
         L_cool = dt_est.deadtime_cool_s if use_cool_deadtime else L_heat
+        assert L_heat is not None and L_cool is not None
 
         cycle_s = max(cycle_min * 60.0, 60.0)  # Safety
 

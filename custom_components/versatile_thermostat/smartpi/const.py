@@ -124,7 +124,6 @@ KI_MIN = 0.001
 KI_MAX = 0.050
 
 
-
 # Anti-windup / integrator behavior
 INTEGRAL_LEAK = 0.995  # leak factor per cycle when inside deadband
 MAX_STEP_PER_MINUTE = 0.25  # max output change per minute (rate limit)
@@ -256,7 +255,7 @@ EPISODE_MIN_DURATION_OFF_S = 900  # 15 min
 # --- SmartPI Near Band Defaults ---
 DEFAULT_NEAR_BAND_DEG = 0.40
 DEFAULT_KP_NEAR_FACTOR = 0.80
-DEFAULT_KI_NEAR_FACTOR = 0.6
+DEFAULT_KI_NEAR_FACTOR = 0.9
 
 
 # --- Forcé Calibration Constants ---
