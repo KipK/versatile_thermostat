@@ -37,7 +37,7 @@ class DeadbandResult:
 class DeadbandManager:
     """
     Manages deadband and near-band state detection with hysteresis.
-    
+
     Features:
     - Asymmetric deadband thresholds for HEAT mode
     - Hysteresis for deadband entry/exit to prevent oscillations
@@ -48,18 +48,18 @@ class DeadbandManager:
     def __init__(self, name: str, near_band_deg: float):
         """
         Initialize DeadbandManager.
-        
+
         Args:
             name: Entity name for logging
             near_band_deg: Configured near-band threshold (°C)
         """
         self._name = name
         self._near_band_deg = near_band_deg
-        
+
         # State
         self._in_deadband: bool = False
         self._in_near_band: bool = False
-        
+
         # Near-band thresholds (auto-calculated or fallback)
         self._near_band_below_deg: float = near_band_deg
         self._near_band_above_deg: float = near_band_deg * NEAR_BAND_ABOVE_FACTOR
@@ -87,7 +87,7 @@ class DeadbandManager:
     ) -> DeadbandResult:
         """
         Detect deadband and near-band state.
-        
+
         Args:
             error: Current error (setpoint - temperature) in °C
             hvac_mode: Current HVAC mode (VThermHvacMode)
@@ -98,13 +98,13 @@ class DeadbandManager:
             ext_temp: Current outdoor temperature (°C), optional
             cycle_min: Cycle duration in minutes
             deadband_c: Configured deadband for COOL mode (°C)
-            
+
         Returns:
             DeadbandResult with current state and change flag
         """
         abs_e = abs(error)
         was_in_deadband = self._in_deadband
-        
+
         # --- Deadband Detection ---
         if not tau_reliable:
             in_deadband_now = False
@@ -118,7 +118,7 @@ class DeadbandManager:
                 h_above = max(DEADBAND_HYSTERESIS, 0.0)
                 db_entry = db_below if error >= 0.0 else db_above
                 db_exit = (db_below + h_below) if error >= 0.0 else (db_above + h_above)
-                
+
                 if abs_e < db_entry:
                     in_deadband_now = True
                 elif abs_e > db_exit:
@@ -138,7 +138,7 @@ class DeadbandManager:
 
         self._in_deadband = in_deadband_now
         deadband_changed = was_in_deadband and not in_deadband_now
-        
+
         # --- Near-Band Detection ---
         if not tau_reliable:
             in_near_band_now = False
@@ -150,13 +150,13 @@ class DeadbandManager:
                     self.update_near_band_auto(
                         hvac_mode, current_temp, ext_temp, dt_est, estimator, cycle_min
                     )
-                
+
                 nb_below = self._near_band_below_deg
                 nb_above = self._near_band_above_deg
                 nb_hyst = max(NEAR_BAND_HYSTERESIS_C, 0.0)
                 nb_entry = nb_below if error >= 0.0 else nb_above
                 nb_exit = nb_entry + nb_hyst
-                
+
                 if abs_e <= nb_entry:
                     in_near_band_now = True
                 elif abs_e >= nb_exit:
@@ -168,7 +168,7 @@ class DeadbandManager:
                 in_near_band_now = (self._near_band_deg > 0.0) and (abs_e <= self._near_band_deg)
 
         self._in_near_band = in_near_band_now
-        
+
         return DeadbandResult(
             in_deadband=in_deadband_now,
             in_near_band=in_near_band_now,
@@ -186,7 +186,7 @@ class DeadbandManager:
     ) -> None:
         """
         Calculate Near-Band thresholds based on Dead Time and Model Slopes.
-        
+
         Logic:
         1. If deadtime not reliable, fallback to manual config.
         2. Calculate Horizons (H) based on Dead Time (L) + half cycle.
@@ -203,7 +203,7 @@ class DeadbandManager:
             self._near_band_above_deg = self._near_band_deg * NEAR_BAND_ABOVE_FACTOR
             self._near_band_source = "fallback_deadtime"
             return
-            
+
         # Check External Temp availability for Slope Estimation
         if ext_temp is None:
             self._near_band_below_deg = self._near_band_deg
@@ -215,13 +215,13 @@ class DeadbandManager:
         L_heat = dt_est.deadtime_heat_s
         use_cool_deadtime = dt_est.deadtime_cool_reliable and dt_est.deadtime_cool_s is not None
         L_cool = dt_est.deadtime_cool_s if use_cool_deadtime else L_heat
-        
+
         cycle_s = max(cycle_min * 60.0, 60.0)  # Safety
-        
+
         # Horizon H = L + delta (delta = half cycle delay approx)
         H_below = L_cool + (cycle_s / 2.0)
         H_above = L_heat + (cycle_s / 2.0)
-        
+
         # 2. Model-based Slope Estimation
         # Check basic model reliability
         # We need positive 'a' and 'b'.
@@ -241,38 +241,38 @@ class DeadbandManager:
         # If Tin < Text, s_cool would be negative (gain), which confuses the logic.
         # We assume s_cool >= 0 (loss).
         s_cool = estimator.b * max(delta_T, 0.0)
-        
+
         # s_heat_net (deg/min) = a - s_cool
         # This is the net temperature rise rate at 100% power.
         s_heat_net = estimator.a - s_cool
-        
+
         # Safety: if s_heat_net is too small, fallback
         if s_heat_net <= 1e-5:
             self._near_band_below_deg = self._near_band_deg
             self._near_band_above_deg = self._near_band_deg * NEAR_BAND_ABOVE_FACTOR
             self._near_band_source = "fallback_slope_low"
             return
-            
+
         # 3. Asymmetry Factor
         # alpha = s_cool / (s_heat_net + eps) clamped [0.3, 1.0]
         alpha = clamp(s_cool / s_heat_net, 0.3, 1.0)
-        
+
         # 4. Calculate Raw Bands
         # Convert slopes to deg/sec for H multiplication
         s_heat_s = s_heat_net / 60.0
-        
+
         # Deadbands (Manual Config) - Base
         db_below = max(DEADBAND_BELOW_C, 0.0)
         db_above = max(DEADBAND_ABOVE_C, 0.0)
-        
+
         # Formula: NB = DB + Slope*H
         nb_below_raw = db_below + (1.0 * s_heat_s * H_below)
         nb_above_raw = db_above + (alpha * s_heat_s * H_above)
-        
+
         # 5. Apply Constraints
         # NB_below >= DB_below + 0.1
         self._near_band_below_deg = clamp(nb_below_raw, db_below + 0.1, 2.0)
-        
+
         # NB_above >= DB_above + 0.1 AND <= NB_below
         nb_above_constrained = clamp(nb_above_raw, db_above + 0.1, self._near_band_below_deg)
         self._near_band_above_deg = nb_above_constrained
@@ -284,22 +284,22 @@ class DeadbandManager:
             not use_cool_deadtime,
             f"{self._near_band_above_deg:.3f}",
         )
-        
+
         self._near_band_source = "auto_model_aware"
 
     def load_state(self, state: dict) -> None:
         """
         Load state from persistence dict.
-        
+
         Args:
             state: Dictionary with persisted state
         """
         if not state:
             return
-            
+
         self._in_deadband = bool(state.get("in_deadband", False))
         self._in_near_band = bool(state.get("in_near_band", False))
-        
+
         if "near_band_below_deg_auto" in state and state["near_band_below_deg_auto"] is not None:
             self._near_band_below_deg = float(state["near_band_below_deg_auto"])
         if "near_band_above_deg_auto" in state and state["near_band_above_deg_auto"] is not None:
@@ -310,7 +310,7 @@ class DeadbandManager:
     def save_state(self) -> dict:
         """
         Save state to persistence dict.
-        
+
         Returns:
             Dictionary with current state for persistence
         """
