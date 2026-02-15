@@ -20,11 +20,26 @@ from .const import (
 if TYPE_CHECKING:
     from ..prop_algo_smartpi import SmartPI
 
-def build_diagnostics(algo: SmartPI) -> Dict[str, Any]:
+ESSENTIAL_KEYS = {
+    "phase",
+    "regulation_mode",
+    "hysteresis_state",
+    "on_percent",
+    "error",
+    "u_pi",
+    "u_ff",
+    "Kp",
+    "Ki",
+    "integral_error",
+    "governance_regime",
+    "last_decision_thermal",
+}
+
+def build_diagnostics(algo: SmartPI, debug_mode: bool = False) -> Dict[str, Any]:
     """Return diagnostic information (suitable for attributes/UI)."""
     tau_info = algo.est.tau_reliability()
 
-    return {
+    diag = {
         # Phase / Mode
         "phase": algo.phase,
         "regulation_mode": "hysteresis" if algo.phase == SmartPIPhase.HYSTERESIS else "smartpi",
@@ -135,3 +150,8 @@ def build_diagnostics(algo: SmartPI) -> Dict[str, Any]:
         # Setpoint boost aliases
         "boost_active": algo.sp_mgr.boost_active,
     }
+
+    if debug_mode:
+        return diag
+    
+    return {k: v for k, v in diag.items() if k in ESSENTIAL_KEYS}

@@ -137,8 +137,14 @@ class SmartPI(CycleManager):
         sign_flip_leak_cycles: int = 3,
         sign_flip_band_mult: float = 2.0,
         use_setpoint_filter: bool = True,
+        hysteresis_on: float = HYST_LOWER_C,
+        hysteresis_off: float = HYST_UPPER_C,
+        debug_mode: bool = False,
     ) -> None:
         super().__init__(hass, name, cycle_min, minimal_deactivation_delay)
+        self._hyst_on = hysteresis_on
+        self._hyst_off = hysteresis_off
+        self._debug_mode = debug_mode
 
         self._name = name
         # self._cycle_min is managed by CycleManager
@@ -1602,7 +1608,7 @@ class SmartPI(CycleManager):
 
         # --- 5. Hysteresis Phase ---
         if self.phase == SmartPIPhase.HYSTERESIS:
-            out = self.ctl.calculate_hysteresis(target_temp_filt, current_temp, hvac_mode, HYST_UPPER_C, HYST_LOWER_C)
+            out = self.ctl.calculate_hysteresis(target_temp_filt, current_temp, hvac_mode, self._hyst_off, self._hyst_on)
             if out is not None:
                 self._on_percent = out
 
@@ -1759,4 +1765,4 @@ class SmartPI(CycleManager):
 
     def get_diagnostics(self) -> Dict[str, Any]:
         """Return diagnostic information (suitable for attributes/UI)."""
-        return build_diagnostics(self)
+        return build_diagnostics(self, self._debug_mode)

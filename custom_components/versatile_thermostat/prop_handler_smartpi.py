@@ -16,6 +16,9 @@ from .const import (
     CONF_MAX_ON_PERCENT,
     CONF_SMART_PI_DEADBAND,
     CONF_SMART_PI_USE_SETPOINT_FILTER,
+    CONF_SMART_PI_HYSTERESIS_ON,
+    CONF_SMART_PI_HYSTERESIS_OFF,
+    CONF_SMART_PI_DEBUG,
     EventType,
 )
 from .vtherm_hvac_mode import VThermHvacMode_OFF, VThermHvacMode_HEAT, VThermHvacMode_COOL
@@ -66,6 +69,9 @@ class SmartPIHandler:
         # SmartPI specific
         deadband = entry.get(CONF_SMART_PI_DEADBAND, 0.05)
         use_setpoint_filter = entry.get(CONF_SMART_PI_USE_SETPOINT_FILTER, True)
+        hyst_on = entry.get(CONF_SMART_PI_HYSTERESIS_ON, 0.3)
+        hyst_off = entry.get(CONF_SMART_PI_HYSTERESIS_OFF, 0.5)
+        debug_mode = entry.get(CONF_SMART_PI_DEBUG, False)
 
         # Create SmartPI instance
         # Note: saved_state is loaded asynchronously later
@@ -78,6 +84,9 @@ class SmartPIHandler:
             max_on_percent=max_on_percent,
             deadband_c=deadband,
             use_setpoint_filter=use_setpoint_filter,
+            hysteresis_on=hyst_on,
+            hysteresis_off=hyst_off,
+            debug_mode=debug_mode,
         )
 
         _LOGGER.info("%s - SmartPI Algorithm initialized", t)

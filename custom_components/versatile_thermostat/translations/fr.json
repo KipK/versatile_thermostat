@@ -757,14 +757,20 @@
           "smart_pi_deadband": "Bande morte (°C)",
           "smart_pi_use_setpoint_filter": "Utiliser le filtre de consigne",
           "minimal_activation_delay": "Délai minimal d'activation",
-          "minimal_deactivation_delay": "Délai de désactivation minimal"
+          "minimal_deactivation_delay": "Délai de désactivation minimal",
+          "smart_pi_hysteresis_on": "Seuil d'hystérésis ON (°C)",
+          "smart_pi_hysteresis_off": "Seuil d'hystérésis OFF (°C)",
+          "smart_pi_debug": "Debug diagnostic"
         },
         "data_description": {
           "use_smart_pi_central_config": "Cochez pour utiliser la configuration SmartPI centrale. Décochez pour utiliser une configuration SmartPI spécifique pour ce VTherm",
           "smart_pi_deadband": "Bande morte autour de la consigne. Aucune action de régulation dans cette plage. Évite les oscillations près de la cible.",
           "smart_pi_use_setpoint_filter": "Activez le filtre de consigne asymétrique pour réduire le dépassement lors de l'augmentation de la consigne. Décochez si vous voulez que le thermostat réagisse immédiatement aux changements de consigne.",
           "minimal_activation_delay": "Délai en secondes en-dessous duquel l'équipement ne sera pas activé",
-          "minimal_deactivation_delay": "Délai en secondes en-dessous duquel l'équipement sera laissé actif"
+          "minimal_deactivation_delay": "Délai en secondes en-dessous duquel l'équipement sera laissé actif",
+          "smart_pi_hysteresis_on": "Seuil relatif à la consigne pour allumer le chauffage. (ex: 0.3 signifie allumage à consigne - 0.3°C)",
+          "smart_pi_hysteresis_off": "Seuil relatif à la consigne pour éteindre le chauffage. (ex: 0.5 signifie extinction à consigne + 0.5°C)",
+          "smart_pi_debug": "Cochez pour publier tous les attributs de diagnostic à des fins de débogage. Décochez pour ne publier que les diagnostics essentiels."
         }
       },
       "sync_device_internal_temp": {

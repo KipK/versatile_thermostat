@@ -190,6 +190,9 @@ CONF_AUTO_TPI_CONTINUOUS_KEXT_ALPHA = "auto_tpi_continuous_kext_alpha"
 
 # SmartPI specific parameters
 CONF_SMART_PI_DEADBAND = "smart_pi_deadband"
+CONF_SMART_PI_HYSTERESIS_ON = "smart_pi_hysteresis_on"
+CONF_SMART_PI_HYSTERESIS_OFF = "smart_pi_hysteresis_off"
+CONF_SMART_PI_DEBUG = "smart_pi_debug"
 CONF_SMART_PI_USE_SETPOINT_FILTER = "smart_pi_use_setpoint_filter"
 
 CONF_USE_SMART_PI_CENTRAL_CONFIG = "use_smart_pi_central_config"

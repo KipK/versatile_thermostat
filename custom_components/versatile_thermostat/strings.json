@@ -337,11 +337,17 @@
         "description": "Configure the SmartPI adaptive controller parameters.",
         "data": {
           "use_smart_pi_central_config": "Use central SmartPI configuration",
-          "smart_pi_deadband": "Deadband (°C)"
+          "smart_pi_deadband": "Deadband (°C)",
+          "smart_pi_hysteresis_on": "Hysteresis ON threshold (°C)",
+          "smart_pi_hysteresis_off": "Hysteresis OFF threshold (°C)",
+          "smart_pi_debug": "Debug diagnostic"
         },
         "data_description": {
           "use_smart_pi_central_config": "Check to use the central SmartPI configuration. Uncheck to use a specific SmartPI configuration for this VTherm",
-          "smart_pi_deadband": "Deadband around setpoint. No regulation action within this range. Prevents oscillations near target."
+          "smart_pi_deadband": "Deadband around setpoint. No regulation action within this range. Prevents oscillations near target.",
+          "smart_pi_hysteresis_on": "Threshold relative to the setpoint for turning heating ON. (e.g. 0.3 means heat ON at setpoint - 0.3°C)",
+          "smart_pi_hysteresis_off": "Threshold relative to the setpoint for turning heating OFF. (e.g. 0.5 means heat OFF at setpoint + 0.5°C)",
+          "smart_pi_debug": "Check to publish full diagnostic attributes for debugging purposes. Uncheck to publish only essential diagnostics"
         }
       },
       "sync_device_internal_temp": {
@@ -764,6 +770,30 @@
           "heating_failure_detection_delay": "Time in minutes to wait before checking if temperature has changed as expected",
           "temperature_change_tolerance": "Minimum temperature change in degrees to consider significant. Smaller changes are ignored to filter sensor noise (default: 0.5°C)",
           "failure_detection_enable_template": "An optional Jinja2 template that must return True to enable detection. Useful to temporarily disable detection when an external heat source is active (e.g., `is_state('binary_sensor.wood_stove', 'off')` in double curly braces). If empty, detection is always enabled."
+        }
+      },
+      "smart_pi": {
+        "title": "SmartPI Controller Parameters - {name}",
+        "description": "Configure the SmartPI adaptive controller parameters.",
+        "data": {
+          "use_smart_pi_central_config": "Use central SmartPI configuration",
+          "smart_pi_deadband": "Deadband (°C)",
+          "smart_pi_use_setpoint_filter": "Use Setpoint Filter",
+          "minimal_activation_delay": "Minimum activation delay",
+          "minimal_deactivation_delay": "Minimum deactivation delay",
+          "smart_pi_hysteresis_on": "Hysteresis ON threshold (°C)",
+          "smart_pi_hysteresis_off": "Hysteresis OFF threshold (°C)",
+          "smart_pi_debug": "Debug diagnostic"
+        },
+        "data_description": {
+          "use_smart_pi_central_config": "Check to use the central SmartPI configuration. Uncheck to use a specific SmartPI configuration for this VTherm",
+          "smart_pi_deadband": "Deadband around setpoint. No regulation action within this range. Prevents oscillations near target.",
+          "smart_pi_use_setpoint_filter": "Enable the asymmetric setpoint filter to reduce overshoot on setpoint increase. Uncheck if you want the thermostat to react immediately to setpoint changes.",
+          "minimal_activation_delay": "Delay in seconds under which the equipment will not be activated",
+          "minimal_deactivation_delay": "Delay in seconds under which the equipment will be kept active",
+          "smart_pi_hysteresis_on": "Threshold relative to the setpoint for turning heating ON. (e.g. 0.3 means heat ON at setpoint - 0.3°C)",
+          "smart_pi_hysteresis_off": "Threshold relative to the setpoint for turning heating OFF. (e.g. 0.5 means heat OFF at setpoint + 0.5°C)",
+          "smart_pi_debug": "Check to publish full diagnostic attributes for debugging purposes. Uncheck to publish only essential diagnostics"
         }
       }
     },
