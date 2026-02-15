@@ -195,9 +195,6 @@ class SmartPI(CycleManager):
         self._last_u_pi: float = 0.0
         self._last_ff_raw: float = 0.0
         self._last_ff_reason: str = "ff_none"
-        self._last_ff_scale: float | None = None
-        self._last_ff_H_inertia_s: float | None = None
-        self._last_ff_d_inertia_deg: float | None = None
         self._tau_reliable: bool = False
         self._sign_flip_active: bool = False
 
@@ -288,9 +285,6 @@ class SmartPI(CycleManager):
         self._last_u_pi = 0.0
         self._last_ff_raw = 0.0
         self._last_ff_reason = "ff_none"
-        self._last_ff_scale = None
-        self._last_ff_H_inertia_s = None
-        self._last_ff_d_inertia_deg = None
         self._last_u_cmd = 0.0
         self._last_u_limited = 0.0
         self._last_u_applied = 0.0
@@ -1045,9 +1039,6 @@ class SmartPI(CycleManager):
         self._last_u_ff = 0.0
         self._last_ff_raw = 0.0
         self._last_ff_reason = "ff_none"
-        self._last_ff_scale = None
-        self._last_ff_H_inertia_s = None
-        self._last_ff_d_inertia_deg = None
         self._last_u_pi = self._on_percent
         self._last_u_cmd = self._on_percent
         self._last_u_limited = self._on_percent
@@ -1473,28 +1464,14 @@ class SmartPI(CycleManager):
         reliable_cap = 1.0 if self._tau_reliable else self.ff_scale_unreliable_max
         u_ff *= clamp(reliable_cap * learn_scale * time_scale, 0.0, 1.0)
 
-        # FF gating (hard gate + optional soft gate)
+        # FF gating (hard gate only)
         self._last_ff_raw = u_ff  # Store raw value before gating
         ff_result = apply_ff_gate(
             u_ff_raw=u_ff,
             error=error,
-            ext_temp=ext_current_temp,
-            Tin=current_temp,
-            a=self.est.a,
-            b=self.est.b,
-            learn_ok_count_a=self.est.learn_ok_count_a,
-            tau_reliable=self._tau_reliable,
-            deadtime_heat_s=self.dt_est.deadtime_heat_s,
-            deadtime_heat_reliable=self.dt_est.deadtime_heat_reliable,
-            deadtime_cool_s=self.dt_est.deadtime_cool_s,
-            deadtime_cool_reliable=self.dt_est.deadtime_cool_reliable,
-            cycle_s=self._cycle_min * 60.0,
         )
         u_ff = ff_result.u_ff_eff
         self._last_ff_reason = ff_result.ff_reason
-        self._last_ff_scale = ff_result.ff_scale
-        self._last_ff_H_inertia_s = ff_result.H_inertia_s
-        self._last_ff_d_inertia_deg = ff_result.d_inertia_deg
 
         if ff_result.ff_reason == "ff_cut_above_setpoint":
             _LOGGER.debug("%s - FF disabled (above setpoint)", self._name)
