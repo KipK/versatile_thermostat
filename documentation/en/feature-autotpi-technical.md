@@ -511,6 +511,11 @@ flowchart TD
 
 This file contains the complete learning state and is restored on Home Assistant restart. It can be deleted to force a complete reset (not recommended).
 
+#### Startup Synchronization
+At each startup, if **Continuous Kext Learning** is enabled, the system performs an **Alignment** between the stored data (JSON) and the Home Assistant configuration (`ConfigEntry`):
+1. **Clamping**: Loaded coefficients are immediately capped to the `max_coef_int` limit (standard safety).
+2. **Kext and Capacity Configuration Sync**: If the $K_{ext}$ or the **heating/cooling capacity** in the configuration differs from the learned value in storage (captured through background adaptation without integration reload), the system performs an atomic update of the configuration. This ensures that the user interface and the YAML/UI configuration remain synchronized with the most accurate building model.
+
 ---
 
 ## Appendices

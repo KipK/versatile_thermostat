@@ -339,6 +339,42 @@ class AutoTpiManager(CycleManager):
             f"{capacity:.3f}" if capacity is not None else "N/A"
         )
 
+    async def async_sync_config_at_startup(self):
+        """Sync the configuration with the latest learned data from storage at startup."""
+        # Only sync if Continuous Kext is enabled. 
+        # Standard learning sessions handle their own persistence upon completion.
+        if not self._enable_update_config or not self._continuous_kext:
+            return
+
+        # Check last known mode to determine which coefficients to sync
+        # Default to heat if unknown or not cool
+        is_cool = self.state.last_state == "cool"
+        
+        target_ext = self.state.coeff_outdoor_cool if is_cool else self.state.coeff_outdoor_heat
+        target_cap = self.state.max_capacity_cool if is_cool else self.state.max_capacity_heat
+
+        current_ext = self._config_entry.data.get(CONF_TPI_COEF_EXT)
+        current_cap = self._config_entry.data.get(CONF_AUTO_TPI_COOLING_POWER if is_cool else CONF_AUTO_TPI_HEATING_POWER)
+        
+        # Internal units check vs Config Entry (User units)
+        update_ext = target_ext if current_ext is not None and abs(current_ext - (target_ext / self._unit_factor)) > 0.001 else None
+        # Capacity is already stored in User Units * self._unit_factor internally?
+        # Actually in __init__: self._heating_rate = heating_rate / self._unit_factor
+        # So we should compare with target_cap * self._unit_factor
+        update_cap = target_cap if current_cap is not None and target_cap > 0 and abs(current_cap - (target_cap * self._unit_factor)) > 0.01 else None
+
+        if update_ext is not None or update_cap is not None:
+            _LOGGER.info(
+                "%s - Auto TPI: Syncing Kext/Capacity in configuration with stored learned data at startup (target_mode=%s)",
+                self._name, "cool" if is_cool else "heat"
+            )
+            # async_update_learning_data expects internal units
+            await self.async_update_learning_data(
+                coef_ext=update_ext,
+                capacity=update_cap,
+                is_heat_mode=not is_cool
+            )
+
 
 
 
@@ -1383,8 +1419,8 @@ class AutoTpiManager(CycleManager):
 
     def _should_learn_capacity(self) -> bool:
         """Check if capacity learning should occur this cycle."""
-        if not self.learning_active:
-             _LOGGER.debug("%s - Not learning capacity: learning is disabled", self._name)
+        if not self.learning_active and not self._continuous_kext:
+             _LOGGER.debug("%s - Not learning capacity: learning and continuous kext are disabled", self._name)
              return False
         
         # Determine if we are in bootstrap

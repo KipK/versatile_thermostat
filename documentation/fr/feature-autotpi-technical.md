@@ -511,6 +511,11 @@ flowchart TD
 
 Ce fichier contient l'état complet de l'apprentissage et est restauré au redémarrage de Home Assistant. Il peut être supprimé pour forcer un reset complet (non recommandé).
 
+#### Synchronisation au démarrage
+À chaque démarrage, si l'**Apprentissage Continu du Kext** est activé, le système effectue un **Alignement** entre les données stockées (JSON) et la configuration Home Assistant (`ConfigEntry`) :
+1. **Plafonnement** : Les coefficients chargés sont immédiatement limités par la borne `max_coef_int` (sécurité standard).
+2. **Synchronisation Kext et Puissance** : Si le $K_{ext}$ ou la **puissance de chauffe/clim** en configuration diffèrent de la valeur apprise stockée (capturée via l'adaptation en arrière-plan sans rechargement immédiat), l'intégration effectue une mise à jour atomique de la configuration. Cela garantit que l'interface utilisateur et la configuration restent synchronisées avec le modèle de bâtiment le plus précis.
+
 ---
 
 ## Annexes
