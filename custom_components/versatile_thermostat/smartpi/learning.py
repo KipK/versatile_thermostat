@@ -406,7 +406,11 @@ class ABEstimator:
         if dt_min_window > 0.5:
             min_abs_slope = DT_DERIVATIVE_MIN_ABS / dt_min_window
             if abs(slope_min) < min_abs_slope:
-                return None, "low_slope", len(samples_sorted)
+                # Fallback for quantized data: Theil-Sen fails on step functions (median slope 0).
+                # If we have significant amplitude (checked above), trust the simple slope.
+                # using the sorted (and potentially trimmed) samples.
+                simple_slope_sec = (y[-1] - y[0]) / (x[-1] - x[0]) if (x[-1] - x[0]) > 0 else 0
+                return simple_slope_sec * 60.0, "low_slope_fallback", len(samples_sorted)
         
         # Clamp result to physically reasonable values for HVAC (-0.35 to +0.35 C/min)
         # This prevents wild values from exploding the estimator
