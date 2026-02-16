@@ -71,6 +71,7 @@ from .smartpi.const import (
     DEADBAND_BELOW_C,
     DEADBAND_ABOVE_C,
     AB_HISTORY_SIZE,
+    AB_MIN_SAMPLES,
     DEFAULT_NEAR_BAND_DEG,
     DEFAULT_KP_NEAR_FACTOR,
     DEFAULT_KI_NEAR_FACTOR,
@@ -795,6 +796,44 @@ class SmartPI(CycleManager):
     def freeze_reason_gains(self) -> str:
         return self.gov.last_freeze_reason_gains.value
 
+
+    @property
+    def bootstrap_progress(self) -> int | None:
+        """
+        Progress of the bootstrap (hysteresis) phase in percent (0-100).
+        Returns None if not in Hysteresis phase.
+        Formula: ((len(a) + len(b)) / (2 * 31)) * 100
+        """
+        if self.phase != SmartPIPhase.HYSTERESIS:
+            return None
+
+        # Total needed: 31 samples of A + 31 samples of B
+        total_needed = AB_HISTORY_SIZE * 2
+        current_count = len(self.est.a_meas_hist) + len(self.est.b_meas_hist)
+
+        pct = (current_count / total_needed) * 100.0
+        return int(clamp(pct, 0, 100))
+
+    @property
+    def bootstrap_state(self) -> str | None:
+        """
+        Detailed state message for the bootstrap process.
+        Returns None if not in Hysteresis phase.
+        """
+        if self.phase != SmartPIPhase.HYSTERESIS:
+            return None
+
+        nb_a = len(self.est.a_meas_hist)
+        nb_b = len(self.est.b_meas_hist)
+        ok_a = self.est.learn_ok_count_a
+        ok_b = self.est.learn_ok_count_b
+
+        # Phase 1: Collecting initial samples (min 11)
+        if nb_a < AB_MIN_SAMPLES or nb_b < AB_MIN_SAMPLES:
+            return f"collecting initial emeas : a:{nb_a}/{AB_MIN_SAMPLES} b:{nb_b}/{AB_MIN_SAMPLES}"
+
+        # Phase 2: Building full history (up to 31)
+        return f"learning thermal model a:{ok_a} b:{ok_b} emea_a:{nb_a}/{AB_HISTORY_SIZE} emea_b:{nb_b}/{AB_HISTORY_SIZE}"
 
     @property
     def last_i_mode(self) -> str:

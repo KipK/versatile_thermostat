@@ -15,6 +15,9 @@ from .const import (
     EPISODE_MIN_DURATION_ON_S,
     EPISODE_MIN_DURATION_OFF_S,
     U_ON_MIN,
+    AB_HISTORY_SIZE,
+    AB_MIN_SAMPLES,
+    clamp,
 )
 
 if TYPE_CHECKING:
@@ -32,7 +35,14 @@ ESSENTIAL_KEYS = {
     "Ki",
     "integral_error",
     "governance_regime",
+    "governance_regime",
     "last_decision_thermal",
+    # Bootstrap / Learning (Always published)
+    "bootstrap_progress",
+    "bootstrap_state",
+    # Deadtimes (Always published)
+    "deadtime_heat_s",
+    "deadtime_cool_s",
 }
 
 def build_diagnostics(algo: SmartPI, debug_mode: bool = False) -> Dict[str, Any]:
@@ -150,6 +160,13 @@ def build_diagnostics(algo: SmartPI, debug_mode: bool = False) -> Dict[str, Any]
         # Setpoint boost aliases
         "boost_active": algo.sp_mgr.boost_active,
     }
+
+    # --- Bootstrap / Learning Diagnostics ---
+    # Only added if available (Hysteresis phase)
+    if algo.bootstrap_progress is not None:
+        diag["bootstrap_progress"] = algo.bootstrap_progress
+        diag["bootstrap_state"] = algo.bootstrap_state
+
 
     if debug_mode:
         return diag
