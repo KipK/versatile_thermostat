@@ -316,7 +316,7 @@ class TPIHandler:
             )
 
             # 2. Drive the cycle processing passively
-            if self._auto_tpi_manager.learning_active:
+            if self._auto_tpi_manager.learning_active or self._auto_tpi_manager._continuous_kext:
                 await self._auto_tpi_manager.process_cycle(
                     # Use provided timestamp or current time if missing
                     timestamp=dt_util.now(),

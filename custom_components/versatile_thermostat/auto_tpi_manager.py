@@ -253,6 +253,20 @@ class AutoTpiManager(CycleManager):
         if "recent_errors" in data:
             del data["recent_errors"]
 
+        # 2. Filter counters if learning session is NOT active (Continuous Kext only)
+        if not self.state.autolearn_enabled:
+            # If main learning is off, hide indoor counters as they are not updated/relevant in continuous mode
+            # (Continuous mode only updates Kext/Outdoor)
+            keys_to_hide = [
+                "coeff_indoor_autolearn", 
+                "coeff_indoor_cool_autolearn",
+                "learning_start_date",
+                "last_learning_status"
+            ]
+            for k in keys_to_hide:
+                if k in data:
+                    del data[k]
+
         # 2. Filter based on Mode
         is_cool_mode = self._current_hvac_mode == "cool"
 
@@ -761,7 +775,10 @@ class AutoTpiManager(CycleManager):
 
     def _should_learn(self) -> bool:
         """Check if learning should be performed."""
-        if not self.state.autolearn_enabled:
+        # We learn if:
+        # 1. Main learning session is active (autolearn_enabled)
+        # 2. OR Continuous Kext is enabled (we will filter Kint vs Kext inside _perform_learning)
+        if not self.state.autolearn_enabled and not self._continuous_kext:
             return False
 
         # Power conditions: 0 < last_power < saturation_threshold
@@ -822,7 +839,7 @@ class AutoTpiManager(CycleManager):
 
     def _get_no_learn_reason(self) -> str:
         """Get reason why learning is not happening."""
-        if not self.state.autolearn_enabled:
+        if not self.state.autolearn_enabled and not self._continuous_kext:
             return "learning_disabled"
 
         saturation_threshold = self.saturation_threshold  # pylint: disable=no-member
@@ -946,8 +963,9 @@ class AutoTpiManager(CycleManager):
         # - Significant temperature progress (> 0.05°C)
         # - Significant gap to cover (> 0.1°C)
         # - Power not saturated (0 < power < 0.99)
+        # - Main Learning Session MUST be active (we don't learn Kint in continuous mode)
 
-        if 0 < self.state.last_power < 0.99:
+        if self.state.autolearn_enabled and 0 < self.state.last_power < 0.99:
             temp_progress_threshold = 0.05
             target_diff_threshold = 0.01
             if temp_progress > temp_progress_threshold and target_diff > target_diff_threshold:

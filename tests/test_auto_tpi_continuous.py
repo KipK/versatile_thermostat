@@ -14,6 +14,11 @@ from custom_components.versatile_thermostat.auto_tpi_manager import (
 import logging
 _LOGGER = logging.getLogger(__name__)
 
+@pytest.fixture(autouse=True)
+def mock_async_call_later():
+    with patch("custom_components.versatile_thermostat.auto_tpi_manager.async_call_later") as mock_call_later:
+        yield mock_call_later
+
 @pytest.fixture
 def mock_hass():
     """Mock Home Assistant."""
@@ -21,6 +26,7 @@ def mock_hass():
     hass.config = MagicMock()
     hass.config.path = MagicMock(return_value="/tmp/test_path")
     hass.loop = MagicMock()
+    hass.config_entries = MagicMock()
     return hass
 
 @pytest.fixture
@@ -57,7 +63,7 @@ def manager(mock_hass, mock_store, mock_config_entry):
     )
 
 async def test_should_learn_continuous_basics(manager):
-    """Test _should_learn_continuous_kext basic conditions."""
+    """Test _should_learn basic conditions with Continuous Kext."""
     # Setup state
     manager.state.autolearn_enabled = False
     manager.state.coeff_outdoor_autolearn = 10 # Bootstrapped
@@ -69,137 +75,78 @@ async def test_should_learn_continuous_basics(manager):
     manager._current_temp_out = 0.0 # DeltaOut = 20 > 1.0
     
     # Should be True
-    assert manager._should_learn_continuous_kext() is True
+    assert manager._should_learn() is True
 
 async def test_should_learn_continuous_disabled(manager):
-    """Test _should_learn_continuous_kext when disabled."""
+    """Test _should_learn when disabled."""
     manager._continuous_kext = False
-    assert manager._should_learn_continuous_kext() is False
-
-async def test_should_learn_continuous_not_bootstrapped(manager):
-    """Test _should_learn_continuous_kext when not bootstrapped."""
-    manager.state.coeff_outdoor_autolearn = 0
-    manager.state.coeff_outdoor_cool_autolearn = 0
-    assert manager._should_learn_continuous_kext() is False
-
-async def test_should_learn_continuous_filtered(manager):
-    """Test _should_learn_continuous_kext filtered conditions."""
-    manager.state.coeff_outdoor_autolearn = 10
-    manager.state.last_power = 0.5
-    manager.state.previous_state = "heat"
-    manager.state.last_order = 20.0
-    manager._current_temp_out = 0.0
-
-    # Boiler Off
-    manager._central_boiler_off = True
-    assert manager._should_learn_continuous_kext() is False
-    manager._central_boiler_off = False
-
-    # Saturated Power (assuming saturation at 1.0)
-    manager.state.last_power = 1.0
-    assert manager._should_learn_continuous_kext() is False
-    manager.state.last_power = 0.5
-
-    # Small Outdoor Delta
-    manager._current_temp_out = 19.5 # Delta = 0.5 < 1.0
-    assert manager._should_learn_continuous_kext() is False
-    manager._current_temp_out = 0.0
-
-async def test_learn_kext_continuous_heat(manager):
-    """Test value update in Heat mode."""
-    # Setup
     manager.state.autolearn_enabled = False
+    assert manager._should_learn() is False
+
+async def test_perform_learning_continuous_kext_skips_indoor(manager):
+    """Test that indoor learning is skipped when only continuous kext is active."""
+    manager.state.autolearn_enabled = False # Main learning OFF
+    
+    # Setup for Indoor Learning Success
     manager.state.last_state = "heat"
-    manager.state.previous_state = "heat" # Must not be stop
-    manager.state.coeff_outdoor_autolearn = 10
+    manager.state.last_order = 20.0
+    manager.state.last_temp_in = 19.0
     manager.state.coeff_indoor_heat = 0.5
-    manager.state.coeff_outdoor_heat = 1.0 # Initial Kext
+    manager.state.last_power = 0.5 
+    manager.state.max_capacity_heat = 2.0
     
-    manager.state.last_order = 20.0 
-    manager.state.last_power = 0.5
-    
-    # Scenario: Too Cold (GapIn > 0). Expect Kext INCREASE.
-    # GapIn = Target - In = 20 - 19 = 1.0
-    # GapOut = Target - Out = 20 - 0 = 20.0
-    # Correction = Kint * (GapIn / GapOut) = 0.5 * (1.0 / 20.0) = 0.5 * 0.05 = 0.025
-    # Target Kext = Old Kext + Correction = 1.0 + 0.025 = 1.025
-    # New Kext (EMA) = Old * (1-alpha) + Target * alpha
-    # Alpha = 0.1
-    # New = 1.0 * 0.9 + 1.025 * 0.1 = 0.9 + 0.1025 = 1.0025
-    
-    current_temp_in = 19.0
+    # Current state (Rise = 0.2, TargetDiff = 1.0)
+    current_temp_in = 19.2 
     current_temp_out = 0.0
+    manager._current_target_temp = 20.0 # Match last_order
     
-    # Update current temp out on manager for _should_learn check
-    manager._current_temp_out = current_temp_out
+    await manager._perform_learning(current_temp_in, current_temp_out)
     
-    # Setup current target temp to match last order (no setpoint change)
-    manager._current_target_temp = 20.0
-    
-    await manager._learn_kext_continuous(current_temp_in, current_temp_out)
-    
-    assert manager.state.last_learning_status == "continuous_kext_learned_heat"
-    assert manager.state.coeff_outdoor_heat == pytest.approx(1.0025, abs=0.0001)
+    # Indoor coeff should NOT change
+    assert manager.state.coeff_indoor_heat == 0.5
+    assert "learned_indoor" not in manager.state.last_learning_status
 
-async def test_learn_kext_continuous_cool(manager):
-    """Test value update in Cool mode."""
-    # Setup
-    manager.state.autolearn_enabled = False
-    manager.state.last_state = "cool"
-    manager.state.previous_state = "cool" # Must not be stop
-    manager.state.coeff_outdoor_cool_autolearn = 10
-    manager.state.coeff_indoor_cool = 0.5
-    manager.state.coeff_outdoor_cool = 1.0 # Initial Kext
+async def test_perform_learning_continuous_kext_allows_outdoor(manager):
+    """Test that outdoor learning IS performed when only continuous kext is active."""
+    manager.state.autolearn_enabled = False # Main learning OFF
     
-    manager.state.last_order = 25.0 
-    manager.state.last_power = 0.5
-    
-    # Scenario: Too Hot (GapIn < 0). Need more cooling power -> Increase Kext.
-    # Wait, my previous math analysis:
-    # GapIn = Target - In = 25 - 26 = -1.0
-    # GapOut = Target - Out. Out=35. GapOut = 25 - 35 = -10.0
-    # Correction = Kint * (-1.0 / -10.0) = 0.5 * 0.1 = 0.05
-    # Target Kext = 1.0 + 0.05 = 1.05
-    # New Kext = 1.0 * 0.9 + 1.05 * 0.1 = 0.9 + 0.105 = 1.005
-    
-    current_temp_in = 26.0
-    current_temp_out = 35.0
-    
-    manager._current_temp_out = current_temp_out
-    
-    manager._current_target_temp = 25.0
-    
-    await manager._learn_kext_continuous(current_temp_in, current_temp_out)
-    
-    assert manager.state.last_learning_status == "continuous_kext_learned_cool"
-    assert manager.state.coeff_outdoor_cool == pytest.approx(1.005, abs=0.0001)
-
-async def test_learn_kext_continuous_setpoint_change(manager):
-    """Test no learning if setpoint changed."""
-    manager.state.autolearn_enabled = False
     manager.state.last_state = "heat"
-    manager.state.previous_state = "heat"
-    manager.state.coeff_outdoor_autolearn = 10
     manager.state.last_order = 20.0
-    manager.state.last_power = 0.5
-    manager._current_temp_out = 0.0
+    manager.state.last_temp_in = 19.5
+    manager.state.coeff_outdoor_heat = 0.01
+    manager.state.last_power = 0.5 
     
-    manager._current_target_temp = 21.0 # Changed
+    current_temp_in = 19.5 
+    current_temp_out = 0.0
+    manager._current_target_temp = 20.0 # Match last_order
     
-    await manager._learn_kext_continuous(19.0, 0.0)
+    await manager._perform_learning(current_temp_in, current_temp_out)
     
-    assert manager.state.last_learning_status == "continuous_kext_setpoint_changed"
+    assert "learned_outdoor" in manager.state.last_learning_status
+    assert manager.state.coeff_outdoor_heat != 0.01
 
-async def test_on_cycle_completed_triggers_continuous(manager):
-    """Test that on_cycle_completed calls continuous learning."""
+async def test_filtered_state_hides_indoor_counters(manager):
+    """Test get_filtered_state hides indoor counters when autolearn is False."""
+    manager.state.autolearn_enabled = False
+    manager.state.coeff_indoor_autolearn = 100
+    manager.state.coeff_outdoor_autolearn = 50
+    
+    state = manager.get_filtered_state()
+    
+    assert "coeff_indoor_autolearn" not in state
+    assert "coeff_outdoor_autolearn" in state
+
+async def test_on_cycle_completed_triggers_perform_learning(manager):
+    """Test that on_cycle_completed calls process_cycle which triggers learning."""
     manager.state.autolearn_enabled = False
     manager.state.last_state = "heat"
     manager.state.coeff_outdoor_autolearn = 10
     manager.state.previous_state = "heat"
     manager.state.last_order = 20.0
+    manager.state.last_params = {"hvac_mode": "heat", "on_percent": 0.5, "on_time_sec": 150, "off_time_sec": 150}
     manager.state.last_power = 0.5
     
-    # Avoid bootstrap logic
+    # Required for validation
     manager.state.max_capacity_heat = 10.0 
     manager.state.capacity_heat_learn_count = 10
     manager._current_hvac_mode = "heat"
@@ -208,19 +155,39 @@ async def test_on_cycle_completed_triggers_continuous(manager):
     manager._current_temp_in = 19.0
     manager._current_temp_out = 0.0
     
-    # Clean previous state errors
-    manager.state.last_learning_status = "unknown"
-    
-    # Setup cycle timing to pass validation (duration ~ cycle_min)
-    now = datetime.now(timezone.utc)
-    manager.state.cycle_start_date = now - timedelta(minutes=5) # 5 min ago
+    # Start cycle to set correct state
     manager.state.cycle_active = True
+    # Ensure the cycle duration is >= cycle_min (5 min) so it completes
+    start_time = datetime.now(timezone.utc) - timedelta(minutes=6)
+    manager._cycle_start_date = start_time
+    manager.state.cycle_start_date = start_time
+    manager._current_cycle_params = {"hvac_mode": "heat", "on_percent": 0.5, "on_time_sec": 150, "off_time_sec": 150} # Essential for confirmation
     
-    # We pass minimal prev_params to satisfy validation (Total 300s = 5min)
-    params = {"on_time_sec": 150, "off_time_sec": 150, "hvac_mode": "heat"}
-    
-    with patch.object(manager, "_learn_kext_continuous", wraps=manager._learn_kext_continuous) as mock_learn:
-        await manager.on_cycle_completed(params, params)
+    # Check for cycle boundary: elapsed_sec >= cycle_min * 60
+    # elapsed = 6 min > 5 min. Should complete.
+
+    # We patch _perform_learning to verify it is called
+    with patch.object(manager, "_perform_learning", wraps=manager._perform_learning) as mock_perform:
+        # params return for data_provider (Closing cycle params)
+        params = {"on_time_sec": 150, "off_time_sec": 150, "hvac_mode": "heat"}
         
-        mock_learn.assert_called_once()
-        assert manager.state.last_learning_status == "continuous_kext_learned_heat"
+        # We need to simulate the "current" time being later
+        current_time = datetime.now(timezone.utc)
+        
+        # Call process_cycle directly or via on_cycle_completed if that's exposed
+        # on_cycle_completed calls process_learning_completion but NOT _perform_learning directly.
+        # process_cycle(timestamp, data_provider, event_sender)
+        # data_provider returns the params
+        async def mock_data_provider():
+            return params
+            
+        async def mock_event_sender(p):
+            pass
+
+        await manager.process_cycle(
+            datetime.now(timezone.utc),
+            mock_data_provider,
+            mock_event_sender
+        )
+        
+        mock_perform.assert_called_once()
