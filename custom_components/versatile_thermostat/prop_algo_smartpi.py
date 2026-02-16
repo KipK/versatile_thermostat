@@ -85,6 +85,7 @@ from .smartpi.thermal_twin_1r1c import ThermalTwin1R1C, eta_best_case
 from .smartpi.diagnostics import build_diagnostics
 from .smartpi.governance import SmartPIGovernance
 from .smartpi.setpoint import SmartPISetpointManager
+from .smartpi.guards import SmartPIGuards
 from .smartpi.controller import SmartPIController
 from .smartpi.learning_window import LearningWindowManager
 from .smartpi.deadband import DeadbandManager
@@ -251,13 +252,8 @@ class SmartPI(CycleManager):
         # Feature flag for integral freeze during deadtime (Default OFF)
         self.feature_integral_freeze: bool = False
 
-        # Guard Cut: cycle interruption on nearband exit above setpoint
-        self._guard_cut_active: bool = False
-        self._guard_cut_count: int = 0
-
-        # Guard Kick: cycle interruption on nearband exit below setpoint
-        self._guard_kick_active: bool = False
-        self._guard_kick_count: int = 0
+        # --- Guard Manager (Phase 2.5 refactoring) ---
+        self.guards = SmartPIGuards()
 
         # Cycle tracking
         self._setpoint_changed_in_cycle: bool = False
@@ -346,7 +342,11 @@ class SmartPI(CycleManager):
 
         # Reset Calibration - calibration state is managed by CalibrationManager component
 
-        # Governance is reset above (self.gov.reset())
+        if self.gov:
+            self.gov.reset()
+
+        # Reset guard manager
+        self.guards.reset(keep_counts=True)
 
         # Reset new component managers (Phase 2.5 refactoring)
         if self.learn_win:
@@ -363,6 +363,22 @@ class SmartPI(CycleManager):
     # ------------------------------
     # Property Mappings (Component Redirection)
     # ------------------------------
+
+    @property
+    def guard_cut_active(self) -> bool:
+        return self.guards.guard_cut_active
+
+    @property
+    def guard_cut_count(self) -> int:
+        return self.guards.guard_cut_count
+
+    @property
+    def guard_kick_active(self) -> bool:
+        return self.guards.guard_kick_active
+
+    @property
+    def guard_kick_count(self) -> int:
+        return self.guards.guard_kick_count
 
     @property
     def calibration_state(self) -> SmartPICalibrationPhase:
@@ -922,27 +938,27 @@ class SmartPI(CycleManager):
 
     @property
     def guard_cut_active(self) -> bool:
-        return self._guard_cut_active
+        return self.guards.guard_cut_active
 
     @guard_cut_active.setter
     def guard_cut_active(self, value: bool) -> None:
-        self._guard_cut_active = value
+        self.guards.guard_cut_active = value
 
     @property
     def guard_cut_count(self) -> int:
-        return self._guard_cut_count
+        return self.guards.guard_cut_count
 
     @property
     def guard_kick_active(self) -> bool:
-        return self._guard_kick_active
+        return self.guards.guard_kick_active
 
     @guard_kick_active.setter
     def guard_kick_active(self, value: bool) -> None:
-        self._guard_kick_active = value
+        self.guards.guard_kick_active = value
 
     @property
     def guard_kick_count(self) -> int:
-        return self._guard_kick_count
+        return self.guards.guard_kick_count
 
     @property
     def cycles_since_reset(self) -> int:
@@ -1216,10 +1232,7 @@ class SmartPI(CycleManager):
             "cal_state": self.calibration_mgr.save_state() if hasattr(self.calibration_mgr, "save_state") else {},
             "gs_state": self.gain_scheduler.save_state() if hasattr(self.gain_scheduler, "save_state") else {},
             "twin_state": self.twin.save_state(),
-            "guard_cut_active": self._guard_cut_active,
-            "guard_cut_count": self._guard_cut_count,
-            "guard_kick_active": self._guard_kick_active,
-            "guard_kick_count": self._guard_kick_count,
+            "guards_state": self.guards.save_state(),
         }
         return state
 
@@ -1366,10 +1379,9 @@ class SmartPI(CycleManager):
         self.calibration_mgr.load_state(migrated.get("cal_state", {}))
         self.gain_scheduler.load_state(migrated.get("gs_state", {}))
         self.twin.load_state(migrated.get("twin_state", {}))
-
-        # Guard Kick state
-        self._guard_kick_active = bool(migrated.get("guard_kick_active", False))
-        self._guard_kick_count = int(migrated.get("guard_kick_count", 0))
+        
+        # Load Guard State
+        self.guards.load_state(migrated.get("guards_state", {}))
 
     def _validate_and_handle_off(
         self,
@@ -1636,6 +1648,12 @@ class SmartPI(CycleManager):
 
         # --- 1. Validation & Handle OFF ---
         if self._validate_and_handle_off(target_temp, current_temp, hvac_mode, power_shedding):
+            return
+
+        # Guard Cut: force 0% if active
+        if self.guards.guard_cut_active:
+            self._on_percent = 0.0
+            self._last_u_applied = 0.0
             return
 
         # --- 1b. HVAC mode transition (HEAT↔COOL) → reset integral ---
