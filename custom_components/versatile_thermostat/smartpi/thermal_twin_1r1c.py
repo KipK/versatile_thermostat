@@ -241,6 +241,60 @@ class ThermalTwin1R1C:
             n = self.dead_steps + 1
             self.u_buffer = deque([0.0] * n)
 
+    def update_with_eta(
+        self,
+        tin: float,
+        text: float | None,
+        target: float,
+        on_percent: float,
+        tau_reliable: bool,
+        a: float,
+        b: float,
+        mode: str,
+        deadtime_heat_s: float | None,
+        deadtime_cool_s: float | None,
+        deadtime_heat_reliable: bool,
+        deadtime_cool_reliable: bool,
+    ) -> dict:
+        """Update thermal twin and compute ETA best-case (diagnostics-only)."""
+        if not tau_reliable:
+            return {"status": "not_reliable"}
+
+        # Lazy init twin on first reliable tick
+        if self.T_hat is None:
+            self.reset(tin, text, u_init=on_percent)
+
+        # Step twin
+        deadtime_s = deadtime_heat_s or 0.0
+        twin_result = self.step(
+            tin_meas=tin,
+            text_meas=text,
+            a=a,
+            b=b,
+            u_now=on_percent,
+            deadtime_s=deadtime_s,
+        )
+
+        # ETA best-case
+        eta_result = eta_best_case(
+            tin0=tin,
+            text=text,
+            target=target,
+            a=a,
+            b=b,
+            mode=mode,
+            deadtime_heat_s=deadtime_heat_s,
+            deadtime_cool_s=deadtime_cool_s,
+            deadtime_heat_ok=deadtime_heat_reliable,
+            deadtime_cool_ok=deadtime_cool_reliable,
+            last_text=self.last_text,
+        )
+
+        return {
+            **twin_result,
+            **{f"eta_{k}": v for k, v in eta_result.items()},
+        }
+
 
 # ---------------------------------------------------------------------------
 # ETA best-case (standalone function)

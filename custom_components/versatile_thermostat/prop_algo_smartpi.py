@@ -1813,55 +1813,23 @@ class SmartPI(CycleManager):
         self._cycles_since_reset += 1
 
         # --- 15. Thermal Twin & ETA (diagnostics-only) ---
-        self._update_twin(current_temp, ext_current_temp, target_temp, hvac_mode)
-
-    def _update_twin(
-        self,
-        tin: float,
-        text: float | None,
-        target: float,
-        hvac_mode: VThermHvacMode,
-    ) -> None:
-        """Update thermal twin and compute ETA best-case (diagnostics-only)."""
-        if not self._tau_reliable:
-            self._last_twin_diag = {"status": "not_reliable"}
-            return
-
-        # Lazy init twin on first reliable tick
-        if self.twin.T_hat is None:
-            self.twin.reset(tin, text, u_init=self._on_percent)
-
-        # Step twin
-        deadtime_s = self.dt_est.deadtime_heat_s or 0.0
-        twin_result = self.twin.step(
-            tin_meas=tin,
-            text_meas=text,
-            a=self.est.a,
-            b=self.est.b,
-            u_now=self._on_percent,
-            deadtime_s=deadtime_s,
-        )
-
-        # ETA best-case
         mode = "heat" if hvac_mode == VThermHvacMode_HEAT else "cool"
-        eta_result = eta_best_case(
-            tin0=tin,
-            text=text,
-            target=target,
+        self._last_twin_diag = self.twin.update_with_eta(
+            tin=current_temp,
+            text=ext_current_temp,
+            target=target_temp,
+            on_percent=self._on_percent,
+            tau_reliable=self._tau_reliable,
             a=self.est.a,
             b=self.est.b,
             mode=mode,
             deadtime_heat_s=self.dt_est.deadtime_heat_s,
             deadtime_cool_s=self.dt_est.deadtime_cool_s,
-            deadtime_heat_ok=self.dt_est.deadtime_heat_reliable,
-            deadtime_cool_ok=self.dt_est.deadtime_cool_reliable,
-            last_text=self.twin.last_text,
+            deadtime_heat_reliable=self.dt_est.deadtime_heat_reliable,
+            deadtime_cool_reliable=self.dt_est.deadtime_cool_reliable,
         )
 
-        self._last_twin_diag = {
-            **twin_result,
-            **{f"eta_{k}": v for k, v in eta_result.items()},
-        }
+
 
     def _update_deadtime_episode_status(self, u_applied: float, hvac_mode: VThermHvacMode, now: float) -> None:
         """
