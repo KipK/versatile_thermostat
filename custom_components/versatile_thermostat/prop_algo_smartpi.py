@@ -81,6 +81,7 @@ from .smartpi.const import (
     clamp,
 )
 from .smartpi.learning import DeadTimeEstimator, ABEstimator
+from .smartpi.thermal_twin_1r1c import ThermalTwin1R1C, eta_best_case
 from .smartpi.diagnostics import build_diagnostics
 from .smartpi.governance import SmartPIGovernance
 from .smartpi.setpoint import SmartPISetpointManager
@@ -236,6 +237,11 @@ class SmartPI(CycleManager):
 
         # --- Dead Time (L) Support ---
         self.dt_est = DeadTimeEstimator()
+        # --- Thermal Twin 1R1C (diagnostics-only) ---
+        self.twin = ThermalTwin1R1C(
+            dt_s=int(cycle_min * 60), gamma=0.1
+        )
+        self._last_twin_diag: dict = {}
         self._heat_request_prev: bool = False
         self._t_heat_episode_start: float | None = None
         self._t_cool_episode_start: float | None = None
@@ -310,6 +316,12 @@ class SmartPI(CycleManager):
         self._learning_start_date = datetime.now()
 
         # Learning window state is managed by learn_win component
+
+        # Reset Thermal Twin
+        self.twin = ThermalTwin1R1C(
+            dt_s=int(self._cycle_min * 60), gamma=0.1
+        )
+        self._last_twin_diag = {}
 
         # Reset Dead Time Estimator
         self.dt_est.reset()
@@ -1166,7 +1178,8 @@ class SmartPI(CycleManager):
             "lw_state": self.learn_win.save_state() if hasattr(self.learn_win, "save_state") else {},
             "db_state": self.deadband_mgr.save_state() if hasattr(self.deadband_mgr, "save_state") else {},
             "cal_state": self.calibration_mgr.save_state() if hasattr(self.calibration_mgr, "save_state") else {},
-            "gs_state": self.gain_scheduler.save_state() if hasattr(self.gain_scheduler, "save_state") else {}
+            "gs_state": self.gain_scheduler.save_state() if hasattr(self.gain_scheduler, "save_state") else {},
+            "twin_state": self.twin.save_state(),
         }
         return state
 
@@ -1312,6 +1325,7 @@ class SmartPI(CycleManager):
         self.deadband_mgr.load_state(migrated.get("db_state", {}))
         self.calibration_mgr.load_state(migrated.get("cal_state", {}))
         self.gain_scheduler.load_state(migrated.get("gs_state", {}))
+        self.twin.load_state(migrated.get("twin_state", {}))
 
     def _validate_and_handle_off(
         self,
@@ -1772,6 +1786,57 @@ class SmartPI(CycleManager):
         )
         self.u_prev = self._on_percent
         self._cycles_since_reset += 1
+
+        # --- 15. Thermal Twin & ETA (diagnostics-only) ---
+        self._update_twin(current_temp, ext_current_temp, target_temp, hvac_mode)
+
+    def _update_twin(
+        self,
+        tin: float,
+        text: float | None,
+        target: float,
+        hvac_mode: VThermHvacMode,
+    ) -> None:
+        """Update thermal twin and compute ETA best-case (diagnostics-only)."""
+        if not self._tau_reliable:
+            self._last_twin_diag = {"status": "not_reliable"}
+            return
+
+        # Lazy init twin on first reliable tick
+        if self.twin.T_hat is None:
+            self.twin.reset(tin, text, u_init=self._on_percent)
+
+        # Step twin
+        deadtime_s = self.dt_est.deadtime_heat_s or 0.0
+        twin_result = self.twin.step(
+            tin_meas=tin,
+            text_meas=text,
+            a=self.est.a,
+            b=self.est.b,
+            u_now=self._on_percent,
+            deadtime_s=deadtime_s,
+        )
+
+        # ETA best-case
+        mode = "heat" if hvac_mode == VThermHvacMode_HEAT else "cool"
+        eta_result = eta_best_case(
+            tin0=tin,
+            text=text,
+            target=target,
+            a=self.est.a,
+            b=self.est.b,
+            mode=mode,
+            deadtime_heat_s=self.dt_est.deadtime_heat_s,
+            deadtime_cool_s=self.dt_est.deadtime_cool_s,
+            deadtime_heat_ok=self.dt_est.deadtime_heat_reliable,
+            deadtime_cool_ok=self.dt_est.deadtime_cool_reliable,
+            last_text=self.twin.last_text,
+        )
+
+        self._last_twin_diag = {
+            **twin_result,
+            **{f"eta_{k}": v for k, v in eta_result.items()},
+        }
 
     def _update_deadtime_episode_status(self, u_applied: float, hvac_mode: VThermHvacMode, now: float) -> None:
         """

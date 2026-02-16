@@ -169,7 +169,19 @@ def build_diagnostics(algo: SmartPI, debug_mode: bool = False) -> Dict[str, Any]
         diag["bootstrap_state"] = algo.bootstrap_state
 
 
+    # --- Thermal Twin / ETA (diagnostics-only) ---
+    twin_diag = getattr(algo, '_last_twin_diag', None)
+    if twin_diag and twin_diag.get("status") == "ok":
+        diag["pred"] = {
+            "twin_T_hat": round(twin_diag.get("T_hat_next", 0), 3),
+            "twin_T_pred": round(twin_diag.get("T_pred", 0), 3),
+            "twin_innovation": round(twin_diag.get("innovation", 0), 3),
+            "eta_heat_100_s": twin_diag.get("eta_eta_s"),
+            "eta_cool_0_s": twin_diag.get("eta_eta_s") if twin_diag.get("eta_u") == 0.0 else None,
+            "eta_reason": twin_diag.get("eta_reason"),
+        }
+
     if debug_mode:
         return diag
-    
+
     return {k: v for k, v in diag.items() if k in ESSENTIAL_KEYS}
