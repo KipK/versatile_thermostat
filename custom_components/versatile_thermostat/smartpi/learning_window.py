@@ -332,6 +332,7 @@ class LearningWindowManager:
                 return deadtime_skip_count_a, deadtime_skip_count_b
 
         # --- Learning Window Accumulation ---
+        early_submit = False
         if not self._active:
             # Before starting window, check if backdated start would be in deadtime
             proposed_start_ts = now - dt_s
@@ -374,65 +375,87 @@ class LearningWindowManager:
         else:
             # Check power consistency
             if (
-                self._u_first is not None 
+                self._u_first is not None
                 and abs(u_active - self._u_first) > 1e-3
             ):
-                estimator.learn_skip_count += 1
-                estimator.learn_last_reason = "skip: power instability"
+                # Power transition detected (e.g. hysteresis phase boundary).
+                # Attempt early submission with accumulated data instead of
+                # discarding the window.
+                dT_early = current_temp - self._T_int_start
+                abs_dT_early = abs(dT_early)
+                delta_T_early = abs(self._T_int_start - self._T_ext_start)
+                if abs_dT_early >= MIN_ABS_DT and delta_T_early >= DELTA_MIN:
+                    _LOGGER.debug(
+                        "%s - power transition: early submit (%.0fs, dT=%.3f)",
+                        self._name, self._t_int_s, dT_early,
+                    )
+                    early_submit = True
+                else:
+                    estimator.learn_skip_count += 1
+                    estimator.learn_last_reason = "skip: power instability"
+                    self.reset()
+                    return deadtime_skip_count_a, deadtime_skip_count_b
+            else:
+                early_submit = False
+
+        if early_submit:
+            # Use already-accumulated data (do not add the transition tick)
+            window_dt_min = self._t_int_s / 60.0
+            dT = current_temp - self._T_int_start
+            abs_dT = abs(dT)
+            delta_T = self._T_int_start - self._T_ext_start
+        else:
+            # Accumulate
+            self._u_int += clamp(u_active, 0.0, 1.0) * dt_s
+            self._t_int_s += dt_s
+
+            # Current Window Stats
+            window_dt_min = self._t_int_s / 60.0
+
+            dT = current_temp - self._T_int_start
+            abs_dT = abs(dT)
+            delta_T = self._T_int_start - self._T_ext_start
+
+            # Calculate preliminary u_eff for duration check
+            if self._t_int_s > 0.0:
+                u_eff_pre = self._u_int / self._t_int_s
+            else:
+                u_eff_pre = 0.0
+
+            # Determine min duration based on power state
+            if u_eff_pre > U_ON_MIN:
+                min_dur_s = EPISODE_MIN_DURATION_ON_S
+            elif u_eff_pre < U_OFF_MAX:
+                min_dur_s = EPISODE_MIN_DURATION_OFF_S
+            else:
+                min_dur_s = EPISODE_MIN_DURATION_ON_S
+
+            # --- Extension Checks ---
+            if abs(delta_T) < DELTA_MIN:
                 self.reset()
+                estimator.learn_last_reason = "skip: delta too small"
                 return deadtime_skip_count_a, deadtime_skip_count_b
 
-        # Accumulate
-        self._u_int += clamp(u_active, 0.0, 1.0) * dt_s
-        self._t_int_s += dt_s
+            # Extend if duration not met or dT too small (and not timed out)
+            duration_ok = self._t_int_s >= min_dur_s
+            amplitude_ok = abs_dT >= MIN_ABS_DT
 
-        # Current Window Stats
-        window_dt_min = self._t_int_s / 60.0
+            if (not duration_ok or not amplitude_ok) and window_dt_min < DT_MAX_MIN:
+                reason = []
+                if not duration_ok:
+                    reason.append(f"dur {self._t_int_s:.0f}/{min_dur_s}s")
+                if not amplitude_ok:
+                    reason.append(f"dT {abs_dT:.2f}/{MIN_ABS_DT}")
+                estimator.learn_last_reason = f"skip: extending ({', '.join(reason)})"
+                return deadtime_skip_count_a, deadtime_skip_count_b  # Extend window
 
-        dT = current_temp - self._T_int_start
-        abs_dT = abs(dT)
-        delta_T = self._T_int_start - self._T_ext_start
-
-        # Calculate preliminary u_eff for duration check
-        if self._t_int_s > 0.0:
-            u_eff_pre = self._u_int / self._t_int_s
-        else:
-            u_eff_pre = 0.0
-
-        # Determine min duration based on power state
-        if u_eff_pre > U_ON_MIN:
-            min_dur_s = EPISODE_MIN_DURATION_ON_S
-        elif u_eff_pre < U_OFF_MAX:
-            min_dur_s = EPISODE_MIN_DURATION_OFF_S
-        else:
-            min_dur_s = EPISODE_MIN_DURATION_ON_S
-
-        # --- Extension Checks ---
-        if abs(delta_T) < DELTA_MIN:
-            self.reset()
-            estimator.learn_last_reason = "skip: delta too small"
-            return deadtime_skip_count_a, deadtime_skip_count_b
-
-        # Extend if duration not met or dT too small (and not timed out)
-        duration_ok = self._t_int_s >= min_dur_s
-        amplitude_ok = abs_dT >= MIN_ABS_DT
-
-        if (not duration_ok or not amplitude_ok) and window_dt_min < DT_MAX_MIN:
-            reason = []
-            if not duration_ok:
-                reason.append(f"dur {self._t_int_s:.0f}/{min_dur_s}s")
-            if not amplitude_ok:
-                reason.append(f"dT {abs_dT:.2f}/{MIN_ABS_DT}")
-            estimator.learn_last_reason = f"skip: extending ({', '.join(reason)})"
-            return deadtime_skip_count_a, deadtime_skip_count_b  # Extend window
-
-        # Timeout Logic
-        if window_dt_min >= DT_MAX_MIN:
-            if not amplitude_ok:
-                self.reset()
-                estimator.learn_last_reason = "skip: window timeout (dT too small)"
-                return deadtime_skip_count_a, deadtime_skip_count_b
-            # If amplitude OK but duration short (shouldn't happen), proceed
+            # Timeout Logic
+            if window_dt_min >= DT_MAX_MIN:
+                if not amplitude_ok:
+                    self.reset()
+                    estimator.learn_last_reason = "skip: window timeout (dT too small)"
+                    return deadtime_skip_count_a, deadtime_skip_count_b
+                # If amplitude OK but duration short (shouldn't happen), proceed
 
         if self._t_int_s <= 0.0:
             self.reset()
