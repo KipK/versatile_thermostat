@@ -239,7 +239,7 @@ QUANTIZATION_ROUND_TO = 0.001   # Rounding / binning for quantization detection
 
 # --- SmartPI Learning Window Constants ---
 # Learning requires at least one full cycle (measured by _cycle_min)
-DT_MAX_MIN = 30
+DT_MAX_MIN = 120
 MIN_ABS_DT = 0.03      # °C
 DELTA_MIN = 0.2        # °C (Matches DELTA_MIN_ON)
 U_OFF_MAX = 0.05
