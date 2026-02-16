@@ -9,7 +9,7 @@ from homeassistant.helpers.event import async_track_time_interval
 from datetime import timedelta, datetime
 
 from .prop_algo_smartpi import SmartPI
-from .smartpi.const import SMARTPI_RECALC_INTERVAL_SEC, SmartPIPhase
+from .smartpi.const import SMARTPI_RECALC_INTERVAL_SEC, SmartPIPhase, NEAR_BAND_HYSTERESIS_C
 from .const import (
     CONF_MINIMAL_ACTIVATION_DELAY,
     CONF_MINIMAL_DEACTIVATION_DELAY,
@@ -146,7 +146,56 @@ class SmartPIHandler:
         if t.prop_algorithm:
             # Learning update
             current_temp = t.current_temperature
-            # current_ext_temp is not used here but could be useful for logging if needed
+
+            # --- Guard Cut: interrupt cycle on nearband exit above setpoint ---
+            algo = t.prop_algorithm
+            if (
+                current_temp is not None
+                and t.target_temperature is not None
+                and t.vtherm_hvac_mode == VThermHvacMode_HEAT
+                and algo.phase != SmartPIPhase.CALIBRATION
+            ):
+                threshold_above = t.target_temperature + algo._near_band_above_deg
+                reset_threshold = threshold_above - NEAR_BAND_HYSTERESIS_C
+
+                if algo.guard_cut_active:
+                    if current_temp <= reset_threshold:
+                        # Temperature back below threshold: reset guard cut
+                        algo.guard_cut_active = False
+                        _LOGGER.info(
+                            "%s - Guard cut reset: T=%.2f°C <= %.2f°C",
+                            t, current_temp, reset_threshold,
+                        )
+                        # Fall through to normal calculate()
+                    else:
+                        # Maintain guard cut: keep OFF
+                        algo._on_percent = 0.0
+                        _LOGGER.debug("%s - Guard cut active, maintaining OFF", t)
+                        t._on_time_sec = 0
+                        t._off_time_sec = int(t.cycle_min * 60)
+                        await self._async_save()
+                        return
+
+                elif (
+                    algo.in_near_band
+                    and current_temp > threshold_above
+                    and any(under.is_device_active for under in t.underlyings)
+                ):
+                    # Trigger guard cut: exit nearband above while ON
+                    algo.guard_cut_active = True
+                    algo._guard_cut_count += 1
+                    algo._on_percent = 0.0
+                    _LOGGER.warning(
+                        "%s - Guard cut triggered (#%d): T=%.2f°C > %.2f°C (SP+NB). Forcing OFF.",
+                        t, algo._guard_cut_count, current_temp, threshold_above,
+                    )
+                    for under in t.underlyings:
+                        await under.turn_off_and_cancel_cycle()
+                    t._on_time_sec = 0
+                    t._off_time_sec = int(t.cycle_min * 60)
+                    await self._async_save()
+                    return
+            # --- End Guard Cut ---
 
             # Calculate uses current temp, ext temp, etc.
             t.prop_algorithm.calculate(

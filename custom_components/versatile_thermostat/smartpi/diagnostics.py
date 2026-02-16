@@ -143,6 +143,9 @@ def build_diagnostics(algo: SmartPI, debug_mode: bool = False) -> Dict[str, Any]
         "near_band_below_deg": algo.deadband_mgr.near_band_below_deg,
         "near_band_above_deg": algo.deadband_mgr.near_band_above_deg,
         "near_band_source": algo.deadband_mgr.near_band_source,
+        # Guard Cut
+        "guard_cut_active": algo.guard_cut_active,
+        "guard_cut_count": algo.guard_cut_count,
         # Forced Calibration
         "calibration_state": algo.calibration_state,
         "last_calibration_time": (

@@ -251,6 +251,10 @@ class SmartPI(CycleManager):
         # Feature flag for integral freeze during deadtime (Default OFF)
         self.feature_integral_freeze: bool = False
 
+        # Guard Cut: cycle interruption on nearband exit above setpoint
+        self._guard_cut_active: bool = False
+        self._guard_cut_count: int = 0
+
         # Cycle tracking
         self._setpoint_changed_in_cycle: bool = False
 
@@ -329,6 +333,9 @@ class SmartPI(CycleManager):
         self._t_heat_episode_start = None
         self._deadtime_skip_count_a = 0
         self._deadtime_skip_count_b = 0
+
+        # Reset guard cut (keep count for diagnostics)
+        self._guard_cut_active = False
 
         # Reset Phase 2 - near-band state is managed by DeadbandManager component
 
@@ -909,6 +916,18 @@ class SmartPI(CycleManager):
         return self._sign_flip_active
 
     @property
+    def guard_cut_active(self) -> bool:
+        return self._guard_cut_active
+
+    @guard_cut_active.setter
+    def guard_cut_active(self, value: bool) -> None:
+        self._guard_cut_active = value
+
+    @property
+    def guard_cut_count(self) -> int:
+        return self._guard_cut_count
+
+    @property
     def cycles_since_reset(self) -> int:
         return self._cycles_since_reset
 
@@ -1180,6 +1199,8 @@ class SmartPI(CycleManager):
             "cal_state": self.calibration_mgr.save_state() if hasattr(self.calibration_mgr, "save_state") else {},
             "gs_state": self.gain_scheduler.save_state() if hasattr(self.gain_scheduler, "save_state") else {},
             "twin_state": self.twin.save_state(),
+            "guard_cut_active": self._guard_cut_active,
+            "guard_cut_count": self._guard_cut_count,
         }
         return state
 
@@ -1326,6 +1347,10 @@ class SmartPI(CycleManager):
         self.calibration_mgr.load_state(migrated.get("cal_state", {}))
         self.gain_scheduler.load_state(migrated.get("gs_state", {}))
         self.twin.load_state(migrated.get("twin_state", {}))
+
+        # Guard Cut state
+        self._guard_cut_active = bool(migrated.get("guard_cut_active", False))
+        self._guard_cut_count = int(migrated.get("guard_cut_count", 0))
 
     def _validate_and_handle_off(
         self,
