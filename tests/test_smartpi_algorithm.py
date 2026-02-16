@@ -76,7 +76,8 @@ def test_smartpi_calculation():
         cycle_min=10,
         minimal_activation_delay=0,
         minimal_deactivation_delay=0,
-        name="TestSmartPI"
+        name="TestSmartPI",
+        debug_mode=True
     )
 
     # Initial state
@@ -932,7 +933,8 @@ def test_skip_learning_cycles_in_diagnostics():
         cycle_min=10,
         minimal_activation_delay=0,
         minimal_deactivation_delay=0,
-        name="TestSmartPI_Diag"
+        name="TestSmartPI_Diag",
+        debug_mode=True
     )
 
     # Set skip counter
@@ -1094,7 +1096,8 @@ def test_anti_windup_tracking_diagnostics():
         cycle_min=10,
         minimal_activation_delay=0,
         minimal_deactivation_delay=0,
-        name="TestSmartPI_AWDiag"
+        name="TestSmartPI_AWDiag",
+        debug_mode=True
     )
 
     # Make a calculation to populate diagnostics
@@ -1293,6 +1296,7 @@ def test_bumpless_deadband_exit_integral_initialization():
         deadband_c=0.1,
         near_band_deg=0.0,
         setpoint_weight_b=1.0,
+        debug_mode=True
     )
     force_stable_mode(smartpi)
 
@@ -1363,7 +1367,8 @@ def test_in_deadband_in_diagnostics():
         minimal_activation_delay=0,
         minimal_deactivation_delay=0,
         name="TestSmartPI_DBDiag",
-        deadband_c=0.1
+        deadband_c=0.1,
+        debug_mode=True
     )
     force_stable_mode(smartpi)
 
@@ -1586,7 +1591,8 @@ def test_setpoint_boost_activates_on_setpoint_increase():
         cycle_min=10,
         minimal_activation_delay=0,
         minimal_deactivation_delay=0,
-        name="TestSmartPI_Boost"
+        name="TestSmartPI_Boost",
+        debug_mode=True
     )
     force_stable_mode(smartpi)
 
@@ -1952,6 +1958,7 @@ def test_forced_by_timing_false_when_not_forced():
         minimal_deactivation_delay=0,  # No timing constraints
         name="TestSmartPI_NoForce",
         near_band_deg=0.0,
+        debug_mode=True
     )
 
     smartpi.u_prev = 0.5
@@ -1982,7 +1989,8 @@ def test_forced_by_timing_in_diagnostics():
         cycle_min=10,
         minimal_activation_delay=0,
         minimal_deactivation_delay=0,
-        name="TestSmartPI_ForcedDiag"
+        name="TestSmartPI_ForcedDiag",
+        debug_mode=True
     )
 
     smartpi.calculate(

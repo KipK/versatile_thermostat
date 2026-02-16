@@ -66,6 +66,22 @@ class TestDeadTimeEstimatorNew:
         assert self.est.deadtime_cool_s == 360.0
         assert self.est.deadtime_cool_reliable is True
 
+    def test_cooling_persistence(self):
+        """Test that COOLING state persists even with subsequent updates at 0 power"""
+        now = 1000.0
+        self.est.state = "COOLING"
+        self.est.last_power = 0.0
+        
+        # Update with 0 power
+        now += 60
+        self.est.update(now, 20.0, 21.0, 0.0)
+        assert self.est.state == "COOLING"
+        
+        # Update again
+        now += 60
+        self.est.update(now, 19.9, 21.0, 0.0)
+        assert self.est.state == "COOLING"
+
     def test_power_threshold_check(self):
         now = 1000.0
         self.est.update(now, 20.0, 21.0, 0.0)

@@ -34,6 +34,7 @@ def make_smartpi(**kwargs):
         minimal_activation_delay=0,
         minimal_deactivation_delay=0,
         name="TestGov",
+        debug_mode=True,
     )
     defaults.update(kwargs)
     return SmartPI(**defaults)

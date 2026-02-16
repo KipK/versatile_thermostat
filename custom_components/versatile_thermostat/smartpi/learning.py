@@ -180,8 +180,9 @@ class DeadTimeEstimator:
         # Default states if running without detection
         elif u_applied > 0.01 and self.state == "OFF":
             self.state = "HEATING"
-        elif u_applied <= 0.01 and self.state != "OFF" and self.state != "WAITING_COOL_RESPONSE":
-            self.state = "OFF"
+        elif u_applied <= 0.01:
+            if self.state != "OFF" and self.state != "WAITING_COOL_RESPONSE" and self.state != "COOLING":
+                self.state = "OFF"
 
         self.last_power = u_applied
 

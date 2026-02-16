@@ -32,6 +32,7 @@ def create_smartpi():
         deadband_c=0.1,
 
         use_setpoint_filter=True,
+        debug_mode=True,
     )
     # Bypass initial learning by filling history
     # AB_HISTORY_SIZE is 31 in prop_algo_smartpi
