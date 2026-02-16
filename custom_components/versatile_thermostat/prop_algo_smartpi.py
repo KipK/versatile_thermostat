@@ -1682,6 +1682,8 @@ class SmartPI(CycleManager):
             self._output_initialized = True
             self._last_i_mode = "calibration"
             self._last_target_temp = target_temp
+            # Update Twin Diagnostics even in calibration
+            self._update_twin_diagnostics(current_temp, ext_current_temp, target_temp, hvac_mode)
             return
 
         # --- 5. Hysteresis Phase ---
@@ -1699,6 +1701,8 @@ class SmartPI(CycleManager):
                 max_on_percent=self._max_on_percent if self._max_on_percent is not None else 1.0,
                 is_hysteresis=True,
             )
+            # Update Twin Diagnostics even in hysteresis
+            self._update_twin_diagnostics(current_temp, ext_current_temp, target_temp, hvac_mode)
             return
 
         # --- 6. Control Context & Deadband ---
@@ -1813,6 +1817,17 @@ class SmartPI(CycleManager):
         self._cycles_since_reset += 1
 
         # --- 15. Thermal Twin & ETA (diagnostics-only) ---
+        self._update_twin_diagnostics(current_temp, ext_current_temp, target_temp, hvac_mode)
+
+
+    def _update_twin_diagnostics(
+        self,
+        current_temp: float,
+        ext_current_temp: float | None,
+        target_temp: float,
+        hvac_mode: VThermHvacMode,
+    ) -> None:
+        """Update thermal twin and compute ETA best-case (diagnostics-only)."""
         mode = "heat" if hvac_mode == VThermHvacMode_HEAT else "cool"
         self._last_twin_diag = self.twin.update_with_eta(
             tin=current_temp,
@@ -1828,8 +1843,6 @@ class SmartPI(CycleManager):
             deadtime_heat_reliable=self.dt_est.deadtime_heat_reliable,
             deadtime_cool_reliable=self.dt_est.deadtime_cool_reliable,
         )
-
-
 
     def _update_deadtime_episode_status(self, u_applied: float, hvac_mode: VThermHvacMode, now: float) -> None:
         """

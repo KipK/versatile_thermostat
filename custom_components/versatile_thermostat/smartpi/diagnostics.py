@@ -43,7 +43,7 @@ ESSENTIAL_KEYS = {
     "bootstrap_state",
     # Deadtimes (Always published)
     "deadtime_heat_s",
-    "deadtime_cool_s",
+    "deadtime_cool_s"
 }
 
 def build_diagnostics(algo: SmartPI, debug_mode: bool = False) -> Dict[str, Any]:
