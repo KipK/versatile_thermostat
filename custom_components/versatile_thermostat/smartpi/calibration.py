@@ -280,6 +280,7 @@ class CalibrationManager:
                 self._calibration_state = SmartPICalibrationPhase.IDLE
                 self._last_calibration_time = time.time()
                 self._calibration_start_time = None
+                self._calibration_retry_count = 0  # <--- Reset retry count on success
                 message = "completed"
                 
                 # Check success (logging)
