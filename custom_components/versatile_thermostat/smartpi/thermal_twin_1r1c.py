@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import logging
 from collections import deque
-from math import exp, isfinite, log
+from math import exp, isfinite, log, sqrt
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -60,6 +60,14 @@ class ThermalTwin1R1C:
         text_policy: str = "hold_last",
         u_clip: tuple[float, float] = (0.0, 1.0),
         max_deadtime_s: int = 4 * 3600,
+        # --- Advanced diagnostics (§15) ---
+        rmse_window: int = 30,
+        rmse_reliable_threshold: float = 0.5,
+        cusum_delta: float = 0.15,
+        cusum_threshold: float = 2.0,
+        N_sat: int = 20,
+        dT_sat_threshold: float = 0.005,
+        eps_sat: float = 0.3,
     ) -> None:
         self.dt_s: int = int(dt_s)
         self.dt_min: float = self.dt_s / 60.0
@@ -69,11 +77,29 @@ class ThermalTwin1R1C:
         self.u_max: float = float(u_clip[1])
         self.max_deadtime_s: int = int(max_deadtime_s)
 
-        # State
+        # Advanced diagnostics config
+        self.rmse_window: int = rmse_window
+        self.rmse_reliable_threshold: float = rmse_reliable_threshold
+        self.cusum_delta: float = cusum_delta
+        self.cusum_threshold: float = cusum_threshold
+        self.N_sat: int = N_sat
+        self.dT_sat_threshold: float = dT_sat_threshold
+        self.eps_sat: float = eps_sat
+
+        # Core state
         self.T_hat: float | None = None
+        self.T_pred: float | None = None
         self.last_text: float | None = None
         self.dead_steps: int = 0
         self.u_buffer: deque[float] = deque([0.0])
+
+        # Advanced diagnostics state
+        self.innovation_buffer: deque[float] = deque(maxlen=rmse_window)
+        self.cusum_pos: float = 0.0
+        self.cusum_neg: float = 0.0
+        self.sat_count: int = 0
+        self.last_tin_meas: float | None = None
+        self.perturbation_ema: float = 0.0
 
     # ------------------------------------------------------------------
     # Reset
@@ -87,11 +113,19 @@ class ThermalTwin1R1C:
     ) -> None:
         """Initialise or warm-restart the twin."""
         self.T_hat = float(tin_init)
+        self.T_pred = None
         if text_init is not None:
             self.last_text = float(text_init)
         u_val = _clamp(float(u_init), self.u_min, self.u_max)
         n = self.dead_steps + 1
         self.u_buffer = deque([u_val] * n, maxlen=n + 10)
+        # Reset advanced diagnostics state
+        self.innovation_buffer.clear()
+        self.cusum_pos = 0.0
+        self.cusum_neg = 0.0
+        self.sat_count = 0
+        self.last_tin_meas = None
+        self.perturbation_ema = 0.0
 
     # ------------------------------------------------------------------
     # Dead-time buffer management
@@ -134,6 +168,7 @@ class ThermalTwin1R1C:
         b: float,
         u_now: float,
         deadtime_s: float,
+        sp: float | None = None,
     ) -> dict:
         """Simulate one time-step and return diagnostics dict."""
         if self.T_hat is None:
@@ -193,7 +228,19 @@ class ThermalTwin1R1C:
         else:
             t_next = t_pred
 
+        # ---- Update state ----
         self.T_hat = t_next
+        self.T_pred = t_pred
+
+        # ---- Advanced diagnostics ----
+        adv = self._compute_advanced_diagnostics(
+            innovation=innovation,
+            a=a, b=b,
+            u_now=u,
+            tin_meas=float(tin_meas),
+            text_used=text_used,
+            sp=sp,
+        )
 
         return {
             "status": "ok",
@@ -211,6 +258,85 @@ class ThermalTwin1R1C:
             "u_eff": u_eff,
             "gamma": float(self.gamma),
             "innovation": innovation,
+            **adv,
+        }
+
+    # ------------------------------------------------------------------
+    # Advanced diagnostics (§15)
+    # ------------------------------------------------------------------
+
+    def _compute_advanced_diagnostics(
+        self,
+        innovation: float,
+        a: float,
+        b: float,
+        u_now: float,
+        tin_meas: float,
+        text_used: float,
+        sp: float | None = None,
+    ) -> dict:
+        """Compute advanced diagnostics from innovation signal."""
+        # ---- §15.1 Sliding RMSE (model quality) ----
+        self.innovation_buffer.append(innovation)
+        if len(self.innovation_buffer) >= 2:
+            rmse = sqrt(
+                sum(e ** 2 for e in self.innovation_buffer)
+                / len(self.innovation_buffer)
+            )
+        else:
+            rmse = None
+
+        model_reliable = rmse is not None and rmse < self.rmse_reliable_threshold
+
+        # ---- §15.2 CUSUM (external perturbation detection) ----
+        self.cusum_pos = max(0.0, self.cusum_pos + innovation - self.cusum_delta)
+        self.cusum_neg = max(0.0, self.cusum_neg - innovation - self.cusum_delta)
+        external_gain_detected = self.cusum_pos > self.cusum_threshold
+        external_loss_detected = self.cusum_neg > self.cusum_threshold
+
+        # ---- §15.3 Equivalent perturbation ----
+        perturbation_dTdt = b * innovation
+        ema_alpha = 0.1
+        self.perturbation_ema = (
+            ema_alpha * perturbation_dTdt
+            + (1.0 - ema_alpha) * self.perturbation_ema
+        )
+
+        # ---- §15.4 Steady-state temperature ----
+        T_steady = text_used + (a / b) * u_now
+        setpoint_reachable = (T_steady >= sp) if sp is not None else None
+
+        # ---- §15.5 Emitter saturation detection ----
+        if u_now >= 0.95:
+            self.sat_count += 1
+        else:
+            self.sat_count = 0
+
+        dTin_dt = None
+        if self.last_tin_meas is not None:
+            dTin_dt = (tin_meas - self.last_tin_meas) / self.dt_min
+        self.last_tin_meas = tin_meas
+
+        emitter_saturated = (
+            sp is not None
+            and self.sat_count >= self.N_sat
+            and dTin_dt is not None
+            and abs(dTin_dt) < self.dT_sat_threshold
+            and tin_meas < sp - self.eps_sat
+        )
+
+        return {
+            "rmse_30": round(rmse, 4) if rmse is not None else None,
+            "model_reliable": model_reliable,
+            "perturbation_dTdt": round(perturbation_dTdt, 6),
+            "perturbation_ema": round(self.perturbation_ema, 6),
+            "cusum_pos": round(self.cusum_pos, 4),
+            "cusum_neg": round(self.cusum_neg, 4),
+            "external_gain_detected": external_gain_detected,
+            "external_loss_detected": external_loss_detected,
+            "T_steady": round(T_steady, 2),
+            "setpoint_reachable": setpoint_reachable,
+            "emitter_saturated": emitter_saturated,
         }
 
     # ------------------------------------------------------------------
@@ -221,9 +347,16 @@ class ThermalTwin1R1C:
         """Save twin state for persistence across restarts."""
         return {
             "T_hat": self.T_hat,
+            "T_pred": self.T_pred,
             "last_text": self.last_text,
             "dead_steps": self.dead_steps,
             "u_buffer": list(self.u_buffer),
+            "cusum_pos": self.cusum_pos,
+            "cusum_neg": self.cusum_neg,
+            "innovation_buffer": list(self.innovation_buffer),
+            "sat_count": self.sat_count,
+            "last_tin_meas": self.last_tin_meas,
+            "perturbation_ema": self.perturbation_ema,
         }
 
     def load_state(self, state: dict) -> None:
@@ -231,6 +364,7 @@ class ThermalTwin1R1C:
         if not state:
             return
         self.T_hat = state.get("T_hat")
+        self.T_pred = state.get("T_pred")
         self.last_text = state.get("last_text")
         ds = state.get("dead_steps", 0)
         self.dead_steps = int(ds)
@@ -240,6 +374,13 @@ class ThermalTwin1R1C:
         else:
             n = self.dead_steps + 1
             self.u_buffer = deque([0.0] * n)
+        self.cusum_pos = state.get("cusum_pos", 0.0)
+        self.cusum_neg = state.get("cusum_neg", 0.0)
+        self.sat_count = state.get("sat_count", 0)
+        self.last_tin_meas = state.get("last_tin_meas")
+        self.perturbation_ema = state.get("perturbation_ema", 0.0)
+        inno_buf = state.get("innovation_buffer", [])
+        self.innovation_buffer = deque(inno_buf, maxlen=self.rmse_window)
 
     def update_with_eta(
         self,
@@ -257,14 +398,13 @@ class ThermalTwin1R1C:
         deadtime_cool_reliable: bool,
     ) -> dict:
         """Update thermal twin and compute ETA best-case (diagnostics-only)."""
-        if not tau_reliable:
-            return {"status": "not_reliable"}
-
         # Lazy init twin on first reliable tick
         if self.T_hat is None:
+            if not tau_reliable:
+                return {"status": "not_reliable"}
             self.reset(tin, text, u_init=on_percent)
 
-        # Step twin
+        # Step twin (runs even if tau not yet reliable, for diagnostics)
         deadtime_s = deadtime_heat_s or 0.0
         twin_result = self.step(
             tin_meas=tin,
@@ -273,22 +413,26 @@ class ThermalTwin1R1C:
             b=b,
             u_now=on_percent,
             deadtime_s=deadtime_s,
+            sp=target,
         )
 
-        # ETA best-case
-        eta_result = eta_best_case(
-            tin0=tin,
-            text=text,
-            target=target,
-            a=a,
-            b=b,
-            mode=mode,
-            deadtime_heat_s=deadtime_heat_s,
-            deadtime_cool_s=deadtime_cool_s,
-            deadtime_heat_ok=deadtime_heat_reliable,
-            deadtime_cool_ok=deadtime_cool_reliable,
-            last_text=self.last_text,
-        )
+        # ETA best-case (only if tau reliable)
+        if tau_reliable:
+            eta_result = eta_best_case(
+                tin0=tin,
+                text=text,
+                target=target,
+                a=a,
+                b=b,
+                mode=mode,
+                deadtime_heat_s=deadtime_heat_s,
+                deadtime_cool_s=deadtime_cool_s,
+                deadtime_heat_ok=deadtime_heat_reliable,
+                deadtime_cool_ok=deadtime_cool_reliable,
+                last_text=self.last_text,
+            )
+        else:
+            eta_result = {"eta_s": None, "reason": "not_reliable"}
 
         return {
             **twin_result,

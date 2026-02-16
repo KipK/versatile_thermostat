@@ -1719,6 +1719,8 @@ class SmartPI(CycleManager):
             self._output_initialized = True
             self._last_i_mode = "calibration"
             self._last_target_temp = target_temp
+            # Refresh tau_reliable for twin diagnostics
+            self._tau_reliable = self.est.tau_reliability().reliable
             # Update Twin Diagnostics even in calibration
             self._update_twin_diagnostics(current_temp, ext_current_temp, target_temp, hvac_mode)
             return
