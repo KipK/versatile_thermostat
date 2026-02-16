@@ -56,7 +56,9 @@ async def test_smartpi_hysteresis_forces_cycle():
     # CRITICAL: Set phase to HYSTERESIS
     algo.phase = SmartPIPhase.HYSTERESIS
     algo.guard_cut_active = False
+    algo.guard_kick_active = False
     algo.in_near_band = False
+    algo._near_band_below_deg = 0.5
 
     # helper for update_realized_power
     algo.update_realized_power = MagicMock()

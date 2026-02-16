@@ -255,6 +255,10 @@ class SmartPI(CycleManager):
         self._guard_cut_active: bool = False
         self._guard_cut_count: int = 0
 
+        # Guard Kick: cycle interruption on nearband exit below setpoint
+        self._guard_kick_active: bool = False
+        self._guard_kick_count: int = 0
+
         # Cycle tracking
         self._setpoint_changed_in_cycle: bool = False
 
@@ -336,6 +340,7 @@ class SmartPI(CycleManager):
 
         # Reset guard cut (keep count for diagnostics)
         self._guard_cut_active = False
+        self._guard_kick_active = False
 
         # Reset Phase 2 - near-band state is managed by DeadbandManager component
 
@@ -928,6 +933,18 @@ class SmartPI(CycleManager):
         return self._guard_cut_count
 
     @property
+    def guard_kick_active(self) -> bool:
+        return self._guard_kick_active
+
+    @guard_kick_active.setter
+    def guard_kick_active(self, value: bool) -> None:
+        self._guard_kick_active = value
+
+    @property
+    def guard_kick_count(self) -> int:
+        return self._guard_kick_count
+
+    @property
     def cycles_since_reset(self) -> int:
         return self._cycles_since_reset
 
@@ -1201,6 +1218,8 @@ class SmartPI(CycleManager):
             "twin_state": self.twin.save_state(),
             "guard_cut_active": self._guard_cut_active,
             "guard_cut_count": self._guard_cut_count,
+            "guard_kick_active": self._guard_kick_active,
+            "guard_kick_count": self._guard_kick_count,
         }
         return state
 
@@ -1348,9 +1367,9 @@ class SmartPI(CycleManager):
         self.gain_scheduler.load_state(migrated.get("gs_state", {}))
         self.twin.load_state(migrated.get("twin_state", {}))
 
-        # Guard Cut state
-        self._guard_cut_active = bool(migrated.get("guard_cut_active", False))
-        self._guard_cut_count = int(migrated.get("guard_cut_count", 0))
+        # Guard Kick state
+        self._guard_kick_active = bool(migrated.get("guard_kick_active", False))
+        self._guard_kick_count = int(migrated.get("guard_kick_count", 0))
 
     def _validate_and_handle_off(
         self,

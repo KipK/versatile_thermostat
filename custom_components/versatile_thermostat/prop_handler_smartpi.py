@@ -197,6 +197,46 @@ class SmartPIHandler:
                     return
             # --- End Guard Cut ---
 
+            # --- Guard Kick: interrupt cycle on nearband exit below setpoint ---
+            if (
+                current_temp is not None
+                and t.target_temperature is not None
+                and t.vtherm_hvac_mode == VThermHvacMode_HEAT
+                and algo.phase != SmartPIPhase.CALIBRATION
+            ):
+                threshold_below = t.target_temperature - algo._near_band_below_deg
+                reset_threshold_kick = threshold_below + NEAR_BAND_HYSTERESIS_C
+
+                if algo.guard_kick_active:
+                    if current_temp >= reset_threshold_kick:
+                        # Temperature back above threshold: reset guard kick
+                        algo.guard_kick_active = False
+                        _LOGGER.info(
+                            "%s - Guard kick reset: T=%.2f°C >= %.2f°C",
+                            t, current_temp, reset_threshold_kick,
+                        )
+                        # Fall through to normal calculate()
+                    else:
+                        # Maintain guard kick: just let the process_cycle continue (it was already forced when triggered)
+                        # We don't force it continuously, just the first time.
+                        pass
+
+                elif (
+                    algo.in_near_band
+                    and current_temp < threshold_below
+                    and algo.on_percent < 0.99
+                ):
+                    # Trigger guard kick: exit nearband below while not fully ON
+                    algo.guard_kick_active = True
+                    algo._guard_kick_count += 1
+                    # Force immediate calculation and cycle restart
+                    force = True
+                    _LOGGER.warning(
+                        "%s - Guard kick triggered (#%d): T=%.2f°C < %.2f°C (SP-NB). Forcing cycle restart.",
+                        t, algo._guard_kick_count, current_temp, threshold_below,
+                    )
+            # --- End Guard Kick ---
+
             # Calculate uses current temp, ext temp, etc.
             t.prop_algorithm.calculate(
                 target_temp=t.target_temperature,

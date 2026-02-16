@@ -146,6 +146,8 @@ def build_diagnostics(algo: SmartPI, debug_mode: bool = False) -> Dict[str, Any]
         # Guard Cut
         "guard_cut_active": algo.guard_cut_active,
         "guard_cut_count": algo.guard_cut_count,
+        "guard_kick_active": algo.guard_kick_active,
+        "guard_kick_count": algo.guard_kick_count,
         # Forced Calibration
         "calibration_state": algo.calibration_state,
         "last_calibration_time": (
