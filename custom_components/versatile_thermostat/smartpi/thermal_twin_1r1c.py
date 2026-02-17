@@ -225,35 +225,31 @@ class ThermalTwin1R1C:
         u_eff = self.u_buffer[0]
 
         # ---- Predict (exact discretisation, unconditionally stable) ----
-        # Model with perturbation: dT/dt = a·u_eff - b·(T - Text) + d_hat
+        # Pure model (no d_hat injection): dT/dt = a·u_eff - b·(T - Text)
+        # d_hat_ema is used ONLY for diagnostics (T_steady, ETA), not state.
         t_prev = self.T_hat
         alpha = exp(-b * self.dt_min)
 
-        # Corrected prediction (includes d_hat for better T_pred)
-        t_eq_corrected = text_used + (a * u_eff + self.d_hat_ema) / b
-        t_pred = t_eq_corrected + (t_prev - t_eq_corrected) * alpha
+        t_eq = text_used + (a / b) * u_eff
+        t_pred = t_eq + (t_prev - t_eq) * alpha
 
-        # ---- Update d_hat_ema BEFORE nudging ----
-        # Estimate d from raw model (without d_hat) to avoid feedback loop.
-        # Raw prediction: what the model predicts without any perturbation term
-        t_eq_raw = text_used + (a / b) * u_eff
-        t_pred_raw = t_eq_raw + (t_prev - t_eq_raw) * alpha
-        # The "missing" temperature is Tin_meas - t_pred_raw.
-        # For exact discretisation, the perturbation d contributes:
+        # ---- Innovation ----
+        innovation = float(tin_meas) - t_pred
+
+        # ---- Update d_hat_ema (diagnostics-only perturbation estimate) ----
+        # Estimate d from innovation on pure model.
+        # For exact discretisation, perturbation d contributes:
         #   delta_T_from_d = (d / b) * (1 - alpha)
-        # So: d = b * (Tin_meas - t_pred_raw) / (1 - alpha)
+        # So: d = b * innovation / (1 - alpha)
         one_minus_alpha = 1.0 - alpha
         if one_minus_alpha > 1e-12:
-            d_raw = b * (float(tin_meas) - t_pred_raw) / one_minus_alpha
+            d_raw = b * innovation / one_minus_alpha
         else:
             d_raw = 0.0
         self.d_hat_ema = (
             self.d_hat_alpha * d_raw
             + (1.0 - self.d_hat_alpha) * self.d_hat_ema
         )
-
-        # ---- Innovation for diagnostics (on corrected model) ----
-        innovation = float(tin_meas) - t_pred
 
         # ---- Nudge (simplified Luenberger, post-prediction) ----
         if self.gamma > 0:
