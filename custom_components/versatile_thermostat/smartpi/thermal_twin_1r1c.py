@@ -3,10 +3,17 @@ Thermal Twin 1R1C — Digital twin based on (a, b) model + deadtime.
 
 Diagnostics-only: does NOT modify the control command.
 
-Model: dT/dt = a·u(t-L) - b·(T - Text)
+Model: dT/dt = a·u(t-L) - b·(T - Text) + d(t)
   - a: heating efficacy (°C·min⁻¹ per unit of u)
   - b: loss coefficient (min⁻¹), tau = 1/b
   - L: dead time (seconds)
+  - d(t): external perturbation (solar, occupants, ...), estimated online
+
+The perturbation d(t) is estimated via the innovation signal (Tin_meas - T_pred)
+and smoothed with an EMA (d_hat_ema). This estimate is injected back into:
+  - the prediction (T_eq includes d_hat_ema)
+  - T_steady (equilibrium under current command + perturbation)
+  - ETA best-case (T_inf includes d_hat_ema)
 
 Discretisation: exact exponential (unconditionally stable).
 Observer: simplified Luenberger (post-prediction nudging).
@@ -68,6 +75,7 @@ class ThermalTwin1R1C:
         N_sat: int = 20,
         dT_sat_threshold: float = 0.005,
         eps_sat: float = 0.3,
+        d_hat_alpha: float = 0.05,  # EMA smoothing for perturbation (tau ≈ 20 steps)
     ) -> None:
         self.dt_s: int = int(dt_s)
         self.dt_min: float = self.dt_s / 60.0
@@ -85,6 +93,7 @@ class ThermalTwin1R1C:
         self.N_sat: int = N_sat
         self.dT_sat_threshold: float = dT_sat_threshold
         self.eps_sat: float = eps_sat
+        self.d_hat_alpha: float = d_hat_alpha
 
         # Core state
         self.T_hat: float | None = None
@@ -99,7 +108,7 @@ class ThermalTwin1R1C:
         self.cusum_neg: float = 0.0
         self.sat_count: int = 0
         self.last_tin_meas: float | None = None
-        self.perturbation_ema: float = 0.0
+        self.d_hat_ema: float = 0.0  # smoothed perturbation estimate (°C/min)
 
     # ------------------------------------------------------------------
     # Reset
@@ -125,7 +134,7 @@ class ThermalTwin1R1C:
         self.cusum_neg = 0.0
         self.sat_count = 0
         self.last_tin_meas = None
-        self.perturbation_ema = 0.0
+        self.d_hat_ema = 0.0
 
     # ------------------------------------------------------------------
     # Dead-time buffer management
@@ -216,13 +225,37 @@ class ThermalTwin1R1C:
         u_eff = self.u_buffer[0]
 
         # ---- Predict (exact discretisation, unconditionally stable) ----
+        # Model with perturbation: dT/dt = a·u_eff - b·(T - Text) + d_hat
         t_prev = self.T_hat
-        t_eq = text_used + (a / b) * u_eff
         alpha = exp(-b * self.dt_min)
-        t_pred = t_eq + (t_prev - t_eq) * alpha
+
+        # Corrected prediction (includes d_hat for better T_pred)
+        t_eq_corrected = text_used + (a * u_eff + self.d_hat_ema) / b
+        t_pred = t_eq_corrected + (t_prev - t_eq_corrected) * alpha
+
+        # ---- Update d_hat_ema BEFORE nudging ----
+        # Estimate d from raw model (without d_hat) to avoid feedback loop.
+        # Raw prediction: what the model predicts without any perturbation term
+        t_eq_raw = text_used + (a / b) * u_eff
+        t_pred_raw = t_eq_raw + (t_prev - t_eq_raw) * alpha
+        # The "missing" temperature is Tin_meas - t_pred_raw.
+        # For exact discretisation, the perturbation d contributes:
+        #   delta_T_from_d = (d / b) * (1 - alpha)
+        # So: d = b * (Tin_meas - t_pred_raw) / (1 - alpha)
+        one_minus_alpha = 1.0 - alpha
+        if one_minus_alpha > 1e-12:
+            d_raw = b * (float(tin_meas) - t_pred_raw) / one_minus_alpha
+        else:
+            d_raw = 0.0
+        self.d_hat_ema = (
+            self.d_hat_alpha * d_raw
+            + (1.0 - self.d_hat_alpha) * self.d_hat_ema
+        )
+
+        # ---- Innovation for diagnostics (on corrected model) ----
+        innovation = float(tin_meas) - t_pred
 
         # ---- Nudge (simplified Luenberger, post-prediction) ----
-        innovation = float(tin_meas) - t_pred
         if self.gamma > 0:
             t_next = t_pred + self.gamma * innovation
         else:
@@ -258,6 +291,7 @@ class ThermalTwin1R1C:
             "u_eff": u_eff,
             "gamma": float(self.gamma),
             "innovation": innovation,
+            "d_hat_ema": round(self.d_hat_ema, 6),
             **adv,
         }
 
@@ -295,15 +329,13 @@ class ThermalTwin1R1C:
         external_loss_detected = self.cusum_neg > self.cusum_threshold
 
         # ---- §15.3 Equivalent perturbation ----
+        # Raw instantaneous perturbation (for display)
         perturbation_dTdt = b * innovation
-        ema_alpha = 0.1
-        self.perturbation_ema = (
-            ema_alpha * perturbation_dTdt
-            + (1.0 - ema_alpha) * self.perturbation_ema
-        )
+        # d_hat_ema is already updated in step() before this call
 
-        # ---- §15.4 Steady-state temperature ----
-        T_steady = text_used + (a / b) * u_now
+        # ---- §15.4 Steady-state temperature (corrected for perturbation) ----
+        # T_steady = Text + (a·u + d_hat) / b
+        T_steady = text_used + (a * u_now + self.d_hat_ema) / b
         setpoint_reachable = (T_steady >= sp) if sp is not None else None
 
         # ---- §15.5 Emitter saturation detection ----
@@ -329,7 +361,6 @@ class ThermalTwin1R1C:
             "rmse_30": round(rmse, 4) if rmse is not None else None,
             "model_reliable": model_reliable,
             "perturbation_dTdt": round(perturbation_dTdt, 6),
-            "perturbation_ema": round(self.perturbation_ema, 6),
             "cusum_pos": round(self.cusum_pos, 4),
             "cusum_neg": round(self.cusum_neg, 4),
             "external_gain_detected": external_gain_detected,
@@ -356,7 +387,7 @@ class ThermalTwin1R1C:
             "innovation_buffer": list(self.innovation_buffer),
             "sat_count": self.sat_count,
             "last_tin_meas": self.last_tin_meas,
-            "perturbation_ema": self.perturbation_ema,
+            "d_hat_ema": self.d_hat_ema,
         }
 
     def load_state(self, state: dict) -> None:
@@ -378,7 +409,7 @@ class ThermalTwin1R1C:
         self.cusum_neg = state.get("cusum_neg", 0.0)
         self.sat_count = state.get("sat_count", 0)
         self.last_tin_meas = state.get("last_tin_meas")
-        self.perturbation_ema = state.get("perturbation_ema", 0.0)
+        self.d_hat_ema = state.get("d_hat_ema", 0.0)
         inno_buf = state.get("innovation_buffer", [])
         self.innovation_buffer = deque(inno_buf, maxlen=self.rmse_window)
 
@@ -430,6 +461,7 @@ class ThermalTwin1R1C:
                 deadtime_heat_ok=deadtime_heat_reliable,
                 deadtime_cool_ok=deadtime_cool_reliable,
                 last_text=self.last_text,
+                d_hat_ema=self.d_hat_ema,
             )
         else:
             eta_result = {"eta_s": None, "reason": "not_reliable"}
@@ -464,9 +496,13 @@ def eta_best_case(  # pylint: disable=too-many-arguments,too-many-return-stateme
     max_eta_s: float = MAX_ETA_S,
     text_policy: str = "hold_last",
     last_text: float | None = None,
+    d_hat_ema: float = 0.0,
 ) -> dict:
     """
     Compute best-case ETA to reach *target* from *tin0*.
+
+    d_hat_ema: smoothed external perturbation estimate (°C/min).
+    Injected into T_inf so solar gains / losses are accounted for.
 
     Returns dict with at least {eta_s, reason}.
     """
@@ -500,7 +536,9 @@ def eta_best_case(  # pylint: disable=too-many-arguments,too-many-return-stateme
         else:
             l_s = 0.0
 
-    t_inf = text_used + (a / b) * u
+    # T_inf with perturbation correction:
+    # dT/dt = a·u - b·(T - Text) + d_hat  →  T_inf = Text + (a·u + d_hat) / b
+    t_inf = text_used + (a * u + d_hat_ema) / b
 
     # Numerical protection
     denom = tin0 - t_inf

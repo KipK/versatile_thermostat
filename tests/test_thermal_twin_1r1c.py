@@ -73,16 +73,29 @@ def test_convergence():
     a, b, text = 0.05, 0.01, 5.0
     t_inf = text + a / b  # 10.0
 
-    prev_t = 15.0
+    # Analytical checking: feed EXACT physics to the twin.
+    # If the twin is perfect, d_hat should stay ~0 and T_hat should follow.
+    t_current_truth = 15.0
+    dt_min = 60.0 / 60.0  # 1 min
+
     for _ in range(600):
-        r = twin.step(tin_meas=prev_t, text_meas=text, a=a, b=b,
+        # 1. Update physical truth
+        # Exact solution step: T_next = T_inf + (T_prev - T_inf) * exp(-b*dt)
+        # Here u=1.0 is constant.
+        t_current_truth = t_inf + (t_current_truth - t_inf) * math.exp(-b * dt_min)
+
+        # 2. Feed truth to twin
+        r = twin.step(tin_meas=t_current_truth, text_meas=text, a=a, b=b,
                       u_now=1.0, deadtime_s=0)
         t_hat = r["T_hat_next"]
-        # Monotone decrease (T_hat < previous value since starting above T_inf)
-        assert t_hat < prev_t + 1e-12
-        prev_t = t_hat
 
-    assert abs(prev_t - t_inf) < 0.02
+        # 3. Check tracking
+        # The twin's T_hat should match the truth very closely (innovation ~ 0)
+        assert abs(t_hat - t_current_truth) < 1e-4
+
+    # Final convergence check
+    # Final convergence check
+    assert abs(t_hat - t_inf) < 0.02
 
 
 # -----------------------------------------------------------------------
@@ -195,11 +208,16 @@ def test_numerical_stability():
     twin.reset(tin_init=15.0, text_init=5.0, u_init=1.0)
 
     a, b, text = 0.5, 6.0, 5.0
+    t_current_truth = 15.0
+    dt_min = 60.0 / 60.0
+    t_inf = text + a / b * 1.0
     prev_t = 15.0
     deltas = []
 
     for _ in range(100):
-        r = twin.step(tin_meas=prev_t, text_meas=text, a=a, b=b,
+        t_current_truth = t_inf + (t_current_truth - t_inf) * math.exp(-b * dt_min)
+
+        r = twin.step(tin_meas=t_current_truth, text_meas=text, a=a, b=b,
                       u_now=1.0, deadtime_s=0)
         t_hat = r["T_hat_next"]
         delta = t_hat - prev_t
@@ -236,15 +254,16 @@ def test_realistic_tau():
     twin.set_deadtime(0)
     twin.reset(tin_init=tin0, text_init=text, u_init=1.0)
 
-    prev_t = tin0
-    for step in range(1, 601):
-        r = twin.step(tin_meas=prev_t, text_meas=text, a=a, b=b,
-                      u_now=1.0, deadtime_s=0)
-        t_hat = r["T_hat_next"]
 
+    for step in range(1, 601):
         # Analytical solution: T(t) = T_inf + (T0 - T_inf) * exp(-b * t)
         t_minutes = step * dt_min
         t_analytical = t_inf + (tin0 - t_inf) * math.exp(-b * t_minutes)
+
+        # Feed the analytical truth as measurement
+        r = twin.step(tin_meas=t_analytical, text_meas=text, a=a, b=b,
+                      u_now=1.0, deadtime_s=0)
+        t_hat = r["T_hat_next"]
 
         # Relative error < 0.1%
         if abs(t_analytical) > 1e-6:

@@ -194,6 +194,7 @@ def build_diagnostics(algo: SmartPI, debug_mode: bool = False) -> Dict[str, Any]
             "eta_heat_100_s": twin_diag.get("eta_eta_s"),
             "eta_cool_0_s": twin_diag.get("eta_eta_s") if twin_diag.get("eta_u") == 0.0 else None,
             "eta_reason": twin_diag.get("eta_reason"),
+            "twin_d_hat": twin_diag.get("d_hat_ema"),
         }
 
     if debug_mode:
