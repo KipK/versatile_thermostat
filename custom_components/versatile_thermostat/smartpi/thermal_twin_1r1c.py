@@ -1,5 +1,6 @@
 """
 Thermal Twin 1R1C — Digital twin based on (a, b) model + deadtime.
+Spec v4 compliant.
 
 Diagnostics-only: does NOT modify the control command.
 
@@ -9,14 +10,15 @@ Model: dT/dt = a·u(t-L) - b·(T - Text) + d(t)
   - L: dead time (seconds)
   - d(t): external perturbation (solar, occupants, ...), estimated online
 
-The perturbation d(t) is estimated via the innovation signal (Tin_meas - T_pred)
-and smoothed with an EMA (d_hat_ema). This estimate is injected back into:
-  - the prediction (T_eq includes d_hat_ema)
-  - T_steady (equilibrium under current command + perturbation)
-  - ETA best-case (T_inf includes d_hat_ema)
+Architecture v4 — two distinct predictions:
+  - T_pred_pure (pure model, no d_hat): drives T_hat state and d_raw estimation
+  - T_pred (corrected model, includes d_hat_ema): exposed diagnostics, RMSE, CUSUM
 
-Discretisation: exact exponential (unconditionally stable).
-Observer: simplified Luenberger (post-prediction nudging).
+This prevents the parasitic feedback loop where d_hat_ema would bias
+T_hat, which would amplify innovation, which would further bias d_hat_ema.
+
+Discretisation: exact exponential (ZOH, unconditionally stable).
+Observer: simplified Luenberger (post-prediction nudging on pure model).
 """
 
 from __future__ import annotations
@@ -30,6 +32,7 @@ _LOGGER = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _clamp(v: float, lo: float, hi: float) -> float:
     """Clamp v between lo and hi."""
@@ -54,11 +57,24 @@ def _resolve_text(
 
 
 # ---------------------------------------------------------------------------
+# Physical bounds for T_steady guard (§15.4.2)
+# ---------------------------------------------------------------------------
+T_STEADY_MIN = -50.0
+T_STEADY_MAX = 80.0
+
+
+# ---------------------------------------------------------------------------
 # ThermalTwin1R1C
 # ---------------------------------------------------------------------------
 
+
 class ThermalTwin1R1C:
-    """Digital twin 1R1C with dead-time buffer and Luenberger nudging."""
+    """Digital twin 1R1C with dead-time buffer and Luenberger nudging.
+
+    Spec v4 compliant — dual prediction architecture:
+      - Pure model for state estimation (T_hat) and d_raw extraction
+      - Corrected model (with d_hat_ema) for exposed diagnostics
+    """
 
     def __init__(
         self,
@@ -75,7 +91,8 @@ class ThermalTwin1R1C:
         N_sat: int = 20,
         dT_sat_threshold: float = 0.005,
         eps_sat: float = 0.3,
-        d_hat_alpha: float = 0.05,  # EMA smoothing for perturbation (tau ≈ 20 steps)
+        d_hat_alpha: float = 0.05,
+        d_hat_u_min: float = 0.05,  # v4 §15.6.4: freeze d_hat when u < this
     ) -> None:
         self.dt_s: int = int(dt_s)
         self.dt_min: float = self.dt_s / 60.0
@@ -94,6 +111,7 @@ class ThermalTwin1R1C:
         self.dT_sat_threshold: float = dT_sat_threshold
         self.eps_sat: float = eps_sat
         self.d_hat_alpha: float = d_hat_alpha
+        self.d_hat_u_min: float = d_hat_u_min  # v4 NEW
 
         # Core state
         self.T_hat: float | None = None
@@ -108,7 +126,7 @@ class ThermalTwin1R1C:
         self.cusum_neg: float = 0.0
         self.sat_count: int = 0
         self.last_tin_meas: float | None = None
-        self.d_hat_ema: float = 0.0  # smoothed perturbation estimate (°C/min)
+        self.d_hat_ema: float = 0.0
 
     # ------------------------------------------------------------------
     # Reset
@@ -166,7 +184,7 @@ class ThermalTwin1R1C:
         self.dead_steps = new_dead_steps
 
     # ------------------------------------------------------------------
-    # Step (one tick of simulation)
+    # Step (one tick of simulation) — v4 dual prediction architecture
     # ------------------------------------------------------------------
 
     def step(
@@ -179,7 +197,13 @@ class ThermalTwin1R1C:
         deadtime_s: float,
         sp: float | None = None,
     ) -> dict:
-        """Simulate one time-step and return diagnostics dict."""
+        """Simulate one time-step and return diagnostics dict.
+
+        v4 architecture:
+          1. Pure model prediction → innovation_pure → d_raw → d_hat_ema
+          2. Corrected model prediction → innovation → RMSE, CUSUM (diagnostics)
+          3. Nudging on pure model (Luenberger) → T_hat_next
+        """
         if self.T_hat is None:
             return {"status": "not_initialized"}
 
@@ -224,44 +248,40 @@ class ThermalTwin1R1C:
 
         u_eff = self.u_buffer[0]
 
-        # ---- Predict (exact discretisation, unconditionally stable) ----
-        # Pure model (no d_hat injection): dT/dt = a·u_eff - b·(T - Text)
-        # d_hat_ema is used ONLY for diagnostics (T_steady, ETA), not state.
+        # ---- Exact discretisation (ZOH, unconditionally stable) ----
         t_prev = self.T_hat
         alpha = exp(-b * self.dt_min)
+        one_minus_alpha = 1.0 - alpha
 
-        t_eq = text_used + (a / b) * u_eff
-        t_pred = t_eq + (t_prev - t_eq) * alpha
+        # ── PURE prediction (drives T_hat and d_raw) ──
+        # Model: dT/dt = a·u_eff - b·(T - Text)  (no d_hat)
+        t_eq_raw = text_used + (a / b) * u_eff
+        t_pred_pure = t_eq_raw + (t_prev - t_eq_raw) * alpha
 
-        # ---- Innovation ----
+        # ── Innovation on pure model ──
+        innovation_pure = float(tin_meas) - t_pred_pure
+
+        # ── d_hat estimation (§15.6) — freeze when u_eff < d_hat_u_min (§15.6.4) ──
+        if u_eff >= self.d_hat_u_min and one_minus_alpha > 1e-12:
+            d_raw = b * innovation_pure / one_minus_alpha
+            self.d_hat_ema = self.d_hat_alpha * d_raw + (1.0 - self.d_hat_alpha) * self.d_hat_ema
+        # else: d_hat_ema frozen (unchanged) — §15.6.4
+
+        # ── CORRECTED prediction (diagnostics only, includes d_hat_ema) ──
+        t_eq_corr = text_used + (a * u_eff + self.d_hat_ema) / b
+        t_pred = t_eq_corr + (t_prev - t_eq_corr) * alpha
+
+        # ── Innovation on corrected model (for RMSE, CUSUM) ──
         innovation = float(tin_meas) - t_pred
 
-        # ---- Update d_hat_ema (diagnostics-only perturbation estimate) ----
-        # Estimate d from innovation on pure model.
-        # For exact discretisation, perturbation d contributes:
-        #   delta_T_from_d = (d / b) * (1 - alpha)
-        # So: d = b * innovation / (1 - alpha)
-        one_minus_alpha = 1.0 - alpha
-        if one_minus_alpha > 1e-12:
-            d_raw = b * innovation / one_minus_alpha
-        else:
-            d_raw = 0.0
-        self.d_hat_ema = (
-            self.d_hat_alpha * d_raw
-            + (1.0 - self.d_hat_alpha) * self.d_hat_ema
-        )
-
-        # ---- Nudge (simplified Luenberger, post-prediction) ----
-        if self.gamma > 0:
-            t_next = t_pred + self.gamma * innovation
-        else:
-            t_next = t_pred
+        # ---- Nudge (simplified Luenberger, on PURE model — §4.2) ----
+        t_next = t_pred_pure + self.gamma * innovation_pure
 
         # ---- Update state ----
         self.T_hat = t_next
-        self.T_pred = t_pred
+        self.T_pred = t_pred  # Corrected prediction exposed (§7)
 
-        # ---- Advanced diagnostics ----
+        # ---- Advanced diagnostics (§15) — uses corrected innovation ----
         adv = self._compute_advanced_diagnostics(
             innovation=innovation,
             a=a, b=b,
@@ -292,7 +312,7 @@ class ThermalTwin1R1C:
         }
 
     # ------------------------------------------------------------------
-    # Advanced diagnostics (§15)
+    # Advanced diagnostics (§15) — v4 compliant
     # ------------------------------------------------------------------
 
     def _compute_advanced_diagnostics(
@@ -305,7 +325,8 @@ class ThermalTwin1R1C:
         text_used: float,
         sp: float | None = None,
     ) -> dict:
-        """Compute advanced diagnostics from innovation signal."""
+        """Compute advanced diagnostics from corrected innovation signal."""
+
         # ---- §15.1 Sliding RMSE (model quality) ----
         self.innovation_buffer.append(innovation)
         if len(self.innovation_buffer) >= 2:
@@ -324,15 +345,20 @@ class ThermalTwin1R1C:
         external_gain_detected = self.cusum_pos > self.cusum_threshold
         external_loss_detected = self.cusum_neg > self.cusum_threshold
 
-        # ---- §15.3 Equivalent perturbation ----
-        # Raw instantaneous perturbation (for display)
+        # ---- §15.3 Equivalent perturbation (instantaneous, for display) ----
         perturbation_dTdt = b * innovation
-        # d_hat_ema is already updated in step() before this call
 
         # ---- §15.4 Steady-state temperature (corrected for perturbation) ----
-        # T_steady = Text + (a·u + d_hat) / b
+        # T_steady uses u_now (current regulator decision), not u_eff (delayed)
         T_steady = text_used + (a * u_now + self.d_hat_ema) / b
-        setpoint_reachable = (T_steady >= sp) if sp is not None else None
+
+        # §15.4.2 Guard: physical bounds on T_steady (v4 NEW)
+        T_steady_valid = T_STEADY_MIN <= T_steady <= T_STEADY_MAX
+        if not T_steady_valid:
+            model_reliable = False  # Absurd T_steady → model not reliable
+
+        # §15.4.1 setpoint_reachable — conditioned on T_steady_valid
+        setpoint_reachable = (T_steady >= sp) if (sp is not None and T_steady_valid) else None
 
         # ---- §15.5 Emitter saturation detection ----
         if u_now >= 0.95:
@@ -362,6 +388,7 @@ class ThermalTwin1R1C:
             "external_gain_detected": external_gain_detected,
             "external_loss_detected": external_loss_detected,
             "T_steady": round(T_steady, 2),
+            "T_steady_valid": T_steady_valid,
             "setpoint_reachable": setpoint_reachable,
             "emitter_saturated": emitter_saturated,
         }
@@ -408,6 +435,10 @@ class ThermalTwin1R1C:
         self.d_hat_ema = state.get("d_hat_ema", 0.0)
         inno_buf = state.get("innovation_buffer", [])
         self.innovation_buffer = deque(inno_buf, maxlen=self.rmse_window)
+
+    # ------------------------------------------------------------------
+    # Convenience: update twin + compute ETA in one call
+    # ------------------------------------------------------------------
 
     def update_with_eta(
         self,
