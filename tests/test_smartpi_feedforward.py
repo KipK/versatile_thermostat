@@ -13,21 +13,33 @@ from custom_components.versatile_thermostat.smartpi.feedforward import (
 
 
 class TestHardGate:
-    """Step 1: error < 0 => u_ff_eff = 0."""
+    """Step 1: error < -near_band_above_deg => u_ff_eff = 0."""
 
     def test_above_setpoint_cuts_ff(self):
         result = apply_ff_gate(
             u_ff_raw=0.15,
             error=-0.5,
+            near_band_above_deg=0.3,
         )
         assert result.u_ff_eff == 0.0
         assert result.ff_reason == "ff_cut_above_setpoint"
 
     def test_at_setpoint_exact_no_cut(self):
-        """error == 0 should NOT trigger hard gate (error < 0 only)."""
+        """error == 0 should NOT trigger hard gate."""
         result = apply_ff_gate(
             u_ff_raw=0.10,
             error=0.0,
+            near_band_above_deg=0.3,
+        )
+        assert result.u_ff_eff == 0.10
+        assert result.ff_reason == "ff_none"
+
+    def test_in_near_band_above_no_cut(self):
+        """error in (-near_band_above_deg, 0) should NOT trigger hard gate."""
+        result = apply_ff_gate(
+            u_ff_raw=0.10,
+            error=-0.1,
+            near_band_above_deg=0.3,
         )
         assert result.u_ff_eff == 0.10
         assert result.ff_reason == "ff_none"
@@ -37,6 +49,7 @@ class TestHardGate:
         result = apply_ff_gate(
             u_ff_raw=0.0,
             error=-1.0,
+            near_band_above_deg=0.3,
         )
         assert result.u_ff_eff == 0.0
         assert result.ff_reason == "ff_cut_above_setpoint"
@@ -54,6 +67,7 @@ class TestFallback:
         result = apply_ff_gate(
             u_ff_raw=0.20,
             error=1.0,
+            near_band_above_deg=0.3,
         )
         assert result.u_ff_eff == 0.20
         assert result.ff_reason == "ff_none"
@@ -62,6 +76,7 @@ class TestFallback:
         result = apply_ff_gate(
             u_ff_raw=0.20,
             error=0.05,
+            near_band_above_deg=0.3,
         )
         assert result.u_ff_eff == 0.20
         assert result.ff_reason == "ff_none"
@@ -81,5 +96,6 @@ class TestInvariantI1:
         result = apply_ff_gate(
             u_ff_raw=u_ff_raw,
             error=error,
+            near_band_above_deg=0.3,
         )
         assert 0.0 <= result.u_ff_eff <= u_ff_raw

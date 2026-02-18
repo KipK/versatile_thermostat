@@ -341,11 +341,11 @@ async def test_smartpi_power_stability_abort():
     # Here dT=0 so it extends.
     assert "extending" in algo.est.learn_last_reason or "window" in algo.est.learn_last_reason
     
-    # 3. Next update with DIFFERENT power (0.6)
-    # This should ABORT the window due to power instability
+    # 3. Next update with DIFFERENT power (0.6), same temp (dT=0 < MIN_ABS_DT)
+    # This should ABORT the window due to power instability (early submit not possible)
     algo.update_learning(
         dt_min=10.0,
-        current_temp=20.2,
+        current_temp=20.0,
         ext_temp=10.0,
         u_active=0.6,
         setpoint_changed=False

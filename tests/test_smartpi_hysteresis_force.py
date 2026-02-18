@@ -6,6 +6,7 @@ from custom_components.versatile_thermostat.prop_handler_smartpi import SmartPIH
 from custom_components.versatile_thermostat.prop_algo_smartpi import SmartPI
 from custom_components.versatile_thermostat.smartpi.const import SmartPIPhase
 from custom_components.versatile_thermostat.vtherm_hvac_mode import VThermHvacMode_HEAT
+from custom_components.versatile_thermostat.smartpi.guards import GuardAction
 
 @pytest.mark.asyncio
 async def test_smartpi_hysteresis_forces_cycle():
@@ -59,6 +60,10 @@ async def test_smartpi_hysteresis_forces_cycle():
     algo.guard_kick_active = False
     algo.in_near_band = False
     algo._near_band_below_deg = 0.5
+    algo._near_band_above_deg = 0.5
+    algo.guards = MagicMock()
+    algo.guards.check_guard_cut.return_value = GuardAction.NONE
+    algo.guards.check_guard_kick.return_value = GuardAction.NONE
 
     # helper for update_realized_power
     algo.update_realized_power = MagicMock()
