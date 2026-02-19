@@ -8,7 +8,9 @@ import logging
 import statistics
 from collections import deque
 from dataclasses import dataclass
-from typing import Deque, Optional, Tuple
+from typing import Deque, List, Optional, Tuple
+
+from .timestamp_utils import convert_monotonic_to_wall_ts, convert_wall_to_monotonic_ts
 
 from .const import (
     AB_HISTORY_SIZE,
@@ -196,8 +198,6 @@ class DeadTimeEstimator:
         self.deadtime_cool_s = statistics.mean(self._history_cool)
         self.deadtime_cool_reliable = len(self._history_cool) >= 1
 
-    def save_state(self) -> dict:
-        """Save state for persistence."""
         return {
             "deadtime_heat_s": self.deadtime_heat_s,
             "deadtime_cool_s": self.deadtime_cool_s,
@@ -205,6 +205,13 @@ class DeadTimeEstimator:
             "deadtime_cool_reliable": self.deadtime_cool_reliable,
             "history_heat": list(self._history_heat),
             "history_cool": list(self._history_cool),
+            "state": self.state,
+            "last_stop_time": convert_monotonic_to_wall_ts(self.last_stop_time),
+            "heat_start_time": convert_monotonic_to_wall_ts(self.heat_start_time),
+            "heat_start_temp": self.heat_start_temp,
+            "cool_start_time": convert_monotonic_to_wall_ts(self.cool_start_time),
+            "cool_peak_temp": self.cool_peak_temp,
+            "tin_history": [(convert_monotonic_to_wall_ts(t), v) for t, v in self._tin_history],
         }
 
     def load_state(self, state: dict) -> None:
@@ -220,6 +227,22 @@ class DeadTimeEstimator:
         self._history_heat = deque(hh, maxlen=6)
         hc = state.get("history_cool", [])
         self._history_cool = deque(hc, maxlen=6)
+
+        # Restore detection state
+        self.state = state.get("state", "OFF")
+        self.last_stop_time = convert_wall_to_monotonic_ts(state.get("last_stop_time"))
+        self.heat_start_time = convert_wall_to_monotonic_ts(state.get("heat_start_time"))
+        self.heat_start_temp = state.get("heat_start_temp")
+        self.cool_start_time = convert_wall_to_monotonic_ts(state.get("cool_start_time"))
+        self.cool_peak_temp = state.get("cool_peak_temp")
+
+        # Restore tin_history
+        th = state.get("tin_history", [])
+        self._tin_history.clear()
+        for t_wall, v in th:
+            t_mono = convert_wall_to_monotonic_ts(t_wall)
+            if t_mono is not None:
+                self._tin_history.append((t_mono, v))
 
 
 class ABEstimator:
@@ -577,6 +600,10 @@ class ABEstimator:
             "b_meas_hist": list(self.b_meas_hist),
             "a_hat_hist": list(self._a_hat_hist),
             "b_hat_hist": list(self._b_hat_hist),
+            "diag_a_mad_over_med": self.diag_a_mad_over_med,
+            "diag_b_mad_over_med": self.diag_b_mad_over_med,
+            "learn_last_reason": self.learn_last_reason,
+            "diag_dTdt_method": self.diag_dTdt_method,
         }
 
     def load_state(self, state: dict) -> None:
@@ -600,3 +627,9 @@ class ABEstimator:
         self._a_hat_hist = deque(a_hat, maxlen=20)
         b_hat = state.get("b_hat_hist", [])
         self._b_hat_hist = deque(b_hat, maxlen=20)
+
+        # Restore diagnostics
+        self.diag_a_mad_over_med = state.get("diag_a_mad_over_med")
+        self.diag_b_mad_over_med = state.get("diag_b_mad_over_med")
+        self.learn_last_reason = state.get("learn_last_reason", "init")
+        self.diag_dTdt_method = state.get("diag_dTdt_method", "init")

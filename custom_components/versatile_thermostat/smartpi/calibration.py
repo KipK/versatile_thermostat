@@ -12,6 +12,8 @@ import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from .timestamp_utils import convert_monotonic_to_wall_ts, convert_wall_to_monotonic_ts
+
 from .const import (
     HYST_LOWER_C,
     HYST_UPPER_C,
@@ -329,7 +331,7 @@ class CalibrationManager:
         else:
             self._calibration_state = SmartPICalibrationPhase.IDLE
             
-        self._calibration_start_time = state.get("calibration_start_time")
+        self._calibration_start_time = convert_wall_to_monotonic_ts(state.get("calibration_start_time"))
         self._force_calibration_requested = state.get("force_calibration_requested", False)
         self._calibration_retry_count = state.get("calibration_retry_count", 0)
 
@@ -343,7 +345,7 @@ class CalibrationManager:
         return {
             "last_calibration_time": self._last_calibration_time,
             "calibration_state": self._calibration_state.value if self._calibration_state else None,
-            "calibration_start_time": self._calibration_start_time,
+            "calibration_start_time": convert_monotonic_to_wall_ts(self._calibration_start_time),
             "force_calibration_requested": self._force_calibration_requested,
             "calibration_retry_count": self._calibration_retry_count,
         }

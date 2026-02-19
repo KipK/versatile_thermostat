@@ -9,6 +9,8 @@ import logging
 from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 
+from .timestamp_utils import convert_monotonic_to_wall_ts, convert_wall_to_monotonic_ts
+
 from .const import (
     DELTA_MIN,
     DT_MAX_MIN,
@@ -149,7 +151,7 @@ class LearningWindowManager:
             return
 
         self._active = state.get("learn_win_active", False)
-        self._start_ts = state.get("learn_win_start_ts")
+        self._start_ts = convert_wall_to_monotonic_ts(state.get("learn_win_start_ts"))
         self._T_int_start = state.get("learn_T_int_start", 0.0)
         self._T_ext_start = state.get("learn_T_ext_start", 0.0)
         self._u_int = state.get("learn_u_int", 0.0)
@@ -166,7 +168,7 @@ class LearningWindowManager:
         else:
             self._learning_start_date = datetime.now()
             
-        self._learning_resume_ts = state.get("learning_resume_ts")
+        self._learning_resume_ts = convert_wall_to_monotonic_ts(state.get("learning_resume_ts"))
 
     def save_state(self) -> dict:
         """Save state to persistence dict.
@@ -176,7 +178,7 @@ class LearningWindowManager:
         """
         return {
             "learn_win_active": self._active,
-            "learn_win_start_ts": self._start_ts,
+            "learn_win_start_ts": convert_monotonic_to_wall_ts(self._start_ts),
             "learn_T_int_start": self._T_int_start,
             "learn_T_ext_start": self._T_ext_start,
             "learn_u_int": self._u_int,
@@ -186,7 +188,7 @@ class LearningWindowManager:
                 self._learning_start_date.isoformat() 
                 if self._learning_start_date else None
             ),
-            "learning_resume_ts": self._learning_resume_ts,
+            "learning_resume_ts": convert_monotonic_to_wall_ts(self._learning_resume_ts),
         }
 
     # --------------------------------------------------------------------------

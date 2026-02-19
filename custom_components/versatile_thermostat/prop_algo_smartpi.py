@@ -1213,9 +1213,10 @@ class SmartPI(CycleManager):
             "last_target_temp": self._last_target_temp,
             "last_calibration_time": self.calibration_mgr.last_calibration_time,
             "cycles_since_reset": self._cycles_since_reset,
+            "accumulated_dt": self._accumulated_dt,
+            "deadtime_skip_count_a": self._deadtime_skip_count_a,
+            "deadtime_skip_count_b": self._deadtime_skip_count_b,
             "learning_start_date": self._learning_start_date.isoformat() if self._learning_start_date else None,
-            # Convert monotonic timestamp to wall clock time for persistence
-            "learning_resume_ts": convert_monotonic_to_wall_ts(self._learning_resume_ts),
             "est_state": self.est.save_state(),
             "dt_est_state": self.dt_est.save_state(),
             "gov_state": self.gov.save_state(),
@@ -1375,6 +1376,11 @@ class SmartPI(CycleManager):
         self.gain_scheduler.load_state(migrated.get("gs_state", {}))
         self.twin.load_state(migrated.get("twin_state", {}))
         
+        # Load main algorithm scalars
+        self._deadtime_skip_count_a = int(migrated.get("deadtime_skip_count_a", 0))
+        self._deadtime_skip_count_b = int(migrated.get("deadtime_skip_count_b", 0))
+        self._accumulated_dt = float(migrated.get("accumulated_dt", 0.0))
+
         # Load Guard State
         self.guards.load_state(migrated.get("guards_state", {}))
 
