@@ -140,12 +140,12 @@ class AutoCalibTrigger:
         return datetime.fromtimestamp(self._next_check_ts, tz=timezone.utc).isoformat()
 
     @property
-    def snapshot_age_h(self) -> float | None:
-        """Age of current snapshot in hours, or None."""
+    def snapshot_age_h(self) -> int | None:
+        """Age of current snapshot in hours (rounded), or None."""
         if self._snapshot_ts is None:
             return None
         now_wall = time.time()
-        return (now_wall - self._snapshot_ts) / 3600.0
+        return int((now_wall - self._snapshot_ts) / 3600.0)
 
     @property
     def snap_dt_cool_unavailable(self) -> bool:
