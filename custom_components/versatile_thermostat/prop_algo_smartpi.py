@@ -75,11 +75,10 @@ from .smartpi.const import (
     DEFAULT_NEAR_BAND_DEG,
     DEFAULT_KP_NEAR_FACTOR,
     DEFAULT_KI_NEAR_FACTOR,
-    FORCE_CALIBRATION_INTERVAL_HOURS,
-    CALIBRATION_RETRY_MAX,
     CALIBRATION_TIMEOUT_MIN,
     clamp,
 )
+from .smartpi.autocalib import AutoCalibTrigger
 from .smartpi.learning import DeadTimeEstimator, ABEstimator
 from .smartpi.thermal_twin_1r1c import ThermalTwin1R1C, eta_best_case
 from .smartpi.diagnostics import build_diagnostics
@@ -262,6 +261,9 @@ class SmartPI(CycleManager):
 
         # --- Forced Calibration State ---
         # Calibration state is now managed by CalibrationManager component
+
+        # --- AutoCalibTrigger (supervision) ---
+        self.autocalib = AutoCalibTrigger(name)
 
         # --- Safety-First Governance (Delegated to self.gov) ---
         if saved_state:
@@ -591,8 +593,7 @@ class SmartPI(CycleManager):
 
     def force_calibration(self) -> None:
         """Force a calibration cycle to refresh Dead Time estimation."""
-        # Delegate to CalibrationManager component
-        self.calibration_mgr.request_calibration()
+        self.calibration_mgr.request_calibration(phase=self.phase)
 
     def notify_resume_after_interruption(self, skip_cycles: int = None) -> None:
         """Notify SmartPI that the thermostat is resuming after an interruption.
@@ -1229,6 +1230,7 @@ class SmartPI(CycleManager):
             "gs_state": self.gain_scheduler.save_state() if hasattr(self.gain_scheduler, "save_state") else {},
             "twin_state": self.twin.save_state(),
             "guards_state": self.guards.save_state(),
+            "ac_state": self.autocalib.save_state(),
         }
         return state
 
@@ -1350,6 +1352,8 @@ class SmartPI(CycleManager):
                     "ki_source": state.get("ki_source"),
                 }.items() if v is not None
             },
+            # AutoCalibTrigger state — not present in old format, start fresh
+            "ac_state": {},
         }
 
     def load_state(self, state: dict) -> None:
@@ -1383,6 +1387,7 @@ class SmartPI(CycleManager):
 
         # Load Guard State
         self.guards.load_state(migrated.get("guards_state", {}))
+        self.autocalib.load_state(migrated.get("ac_state", {}))
 
     def _validate_and_handle_off(
         self,
@@ -1705,15 +1710,9 @@ class SmartPI(CycleManager):
                 _LOGGER.warning("%s - Calibration timeout after %.1f minutes", self._name, elapsed)
                 self.calibration_mgr.handle_timeout()
 
-        deadtime_ok = self.dt_est.deadtime_heat_reliable and self.dt_est.deadtime_cool_reliable
         self.calibration_mgr.check_and_start(
             now=now,
-            now_wall=time.time(),
-            governance_regime=self.gov.regime,
             phase=self.phase,
-            deadtime_reliable=deadtime_ok,
-            force_calibration_interval_hours=FORCE_CALIBRATION_INTERVAL_HOURS,
-            calibration_retry_max=CALIBRATION_RETRY_MAX,
         )
 
         if self.calibration_mgr.is_calibrating:

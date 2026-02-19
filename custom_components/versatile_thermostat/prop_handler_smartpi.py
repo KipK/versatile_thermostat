@@ -2,6 +2,7 @@
 """Smart PI algorithm handler for ThermostatProp."""
 
 import logging
+import time
 from typing import TYPE_CHECKING
 from homeassistant.util import slugify
 from homeassistant.helpers.storage import Store
@@ -44,6 +45,8 @@ class SmartPIHandler:
         self._last_ext_temp = None
         self._last_time = None
         self._last_on_percent = 0.0
+        # Track calibration state for completion detection
+        self._prev_is_calibrating: bool = False
 
     def init_algorithm(self):
         """Initialize SmartPI algorithm."""
@@ -279,6 +282,45 @@ class SmartPIHandler:
         # Save state after cycle to persist learning data
         await self._async_save()
 
+        # --- AutoCalibTrigger: hourly check ---
+        if t.prop_algorithm and isinstance(t.prop_algorithm, SmartPI):
+            algo = t.prop_algorithm
+            now_wall = time.time()
+
+            # Detect calibration completion (CALIBRATING -> IDLE transition)
+            currently_calibrating = algo.calibration_mgr.is_calibrating
+            if self._prev_is_calibrating and not currently_calibrating:
+                # Calibration just ended
+                ac_event = algo.autocalib.on_calibration_complete(
+                    now_wall=now_wall,
+                    algo=algo,
+                )
+                if ac_event is not None:
+                    t.hass.bus.async_fire(ac_event.event_type, ac_event.payload)
+                    _LOGGER.info(
+                        "%s - AutoCalib event fired: %s", t.name, ac_event.event_type
+                    )
+            self._prev_is_calibrating = currently_calibrating
+
+            # Hourly stagnation check
+            ac_event = algo.autocalib.check_hourly(
+                now_wall=now_wall,
+                algo=algo,
+                ext_temp=t.current_outdoor_temperature,
+                current_temp=t.current_temperature,
+            )
+            if ac_event is not None:
+                t.hass.bus.async_fire(ac_event.event_type, ac_event.payload)
+                _LOGGER.info(
+                    "%s - AutoCalib event fired: %s", t.name, ac_event.event_type
+                )
+                if ac_event.should_trigger_calibration:
+                    # AutoCalibTrigger decided to start a calibration
+                    algo.calibration_mgr.request_calibration(phase=algo.phase)
+                    _LOGGER.warning(
+                        "%s - AutoCalib: calibration requested by supervisor", t.name
+                    )
+
     async def on_state_changed(self):
         """Handle state changes."""
         t = self._thermostat
@@ -383,3 +425,7 @@ class SmartPIHandler:
             self.update_attributes()
             t.async_write_ha_state()
             await self._async_save()
+
+            # Notify AutoCalibTrigger of manual calibration success after completion
+            # (will be detected on next cycle via _prev_is_calibrating tracking)
+            _LOGGER.debug("%s - AutoCalib: manual calibration triggered, will check exit on completion", t.name)

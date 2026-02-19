@@ -258,10 +258,37 @@ DEFAULT_KP_NEAR_FACTOR = 0.80
 DEFAULT_KI_NEAR_FACTOR = 0.9
 
 
-# --- Forcé Calibration Constants ---
-FORCE_CALIBRATION_INTERVAL_HOURS = 72
-CALIBRATION_RETRY_MAX = 1
+# --- Forced Calibration Constants ---
 CALIBRATION_TIMEOUT_MIN = 600  # 10 hours timeout
+
+# --- AutoCalibTrigger Enums ---
+
+class AutoCalibState(str, Enum):
+    """State machine states for AutoCalibTrigger."""
+    IDLE = "idle"
+    WAITING_SNAPSHOT = "waiting_snapshot"
+    MONITORING = "monitoring"
+    TRIGGERED = "triggered"
+    POST_CALIB_CHECK = "post_calib_check"
+
+
+class AutoCalibWaitingReason(str, Enum):
+    """Reason for remaining in waiting_snapshot state."""
+    NONE = "none"
+    DEADTIME_COOL_PENDING = "deadtime_cool_pending"
+    FALLBACK_7D_COUNTDOWN = "fallback_7d_countdown"
+
+
+# --- AutoCalibTrigger Constants ---
+AUTOCALIB_SNAPSHOT_PERIOD_H = 120          # Rolling snapshot period: 5 days
+AUTOCALIB_DT_COOL_FALLBACK_DAYS = 7       # Days before fallback if cool deadtime never reliable
+AUTOCALIB_COOLDOWN_H = 24                  # Minimum hours between calibrations
+AUTOCALIB_A_MAD_THRESHOLD = 0.25          # MAD/med threshold for 'a' stagnation
+AUTOCALIB_B_MAD_THRESHOLD = 0.30          # MAD/med threshold for 'b' stagnation
+AUTOCALIB_TEXT_GRADIENT_C = 5.0           # Min Tin-Text gradient to check deadtime_cool stagnation
+AUTOCALIB_MAX_RETRIES = 3                  # Max retries before declaring model degraded
+AUTOCALIB_RETRY_DELAY_H = 6               # Hours between retries
+AUTOCALIB_EXIT_NEW_OBS_MIN = 1            # Minimum new observations (a/b) for positive exit
 
 # --- Feed-Forward Gate Constants ---
 # Soft gate (Step 2) has been removed.

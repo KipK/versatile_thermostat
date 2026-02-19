@@ -18,6 +18,7 @@ from .const import (
     HYST_LOWER_C,
     HYST_UPPER_C,
     SmartPICalibrationPhase,
+    SmartPIPhase,
 )
 
 if TYPE_CHECKING:
@@ -70,8 +71,18 @@ class CalibrationManager:
         self._calibration_retry_count = 0
         # Note: _last_calibration_time is NOT reset to preserve history
 
-    def request_calibration(self) -> None:
-        """Request a forced calibration cycle."""
+    def request_calibration(self, phase=None) -> None:
+        """Request a forced calibration cycle.
+
+        Args:
+            phase: Current SmartPI phase. If HYSTERESIS, the request is rejected.
+        """
+        if phase == SmartPIPhase.HYSTERESIS:
+            _LOGGER.warning(
+                "%s - Calibration request rejected: system is in bootstrap/hysteresis phase",
+                self._name,
+            )
+            return
         _LOGGER.info("%s - Manual force calibration requested", self._name)
         self._force_calibration_requested = True
         self._calibration_retry_count = 0  # Reset retries on manual request
@@ -100,110 +111,42 @@ class CalibrationManager:
     def check_and_start(
         self,
         now: float,
-        now_wall: float,
-        governance_regime,
         phase,
-        deadtime_reliable: bool,
-        force_calibration_interval_hours: float,
-        calibration_retry_max: int,
     ) -> tuple[bool, str]:
         """
-        Check if calibration should start and start it if needed.
-        
-        This consolidates the calibration trigger logic from SmartPI.calculate().
-        
+        Check if a manually requested calibration should start and start it if needed.
+
+        Automatic calibration scheduling is handled by AutoCalibTrigger.
+        This method only handles manual requests.
+
         Args:
             now: Current monotonic timestamp
-            now_wall: Current wall clock timestamp
-            governance_regime: Current governance regime
-            phase: Current SmartPI phase
-            deadtime_reliable: Whether both heat and cool deadtime are reliable
-            force_calibration_interval_hours: Hours between periodic calibrations
-            calibration_retry_max: Maximum retry count for auto-triggered calibrations
-            
+            phase: Current SmartPI phase (HYSTERESIS blocks calibration)
+
         Returns:
-            Tuple of (started, reason) where reason is "manual", "periodic", "missing_deadtime", or "not_started"
+            Tuple of (started, reason): reason is "manual" or "not_started"
         """
         # Already calibrating?
         if self._calibration_state != SmartPICalibrationPhase.IDLE:
             return (False, "already_calibrating")
-        
+
+        # Block calibration during bootstrap phase
+        if phase == SmartPIPhase.HYSTERESIS:
+            if self._force_calibration_requested:
+                _LOGGER.warning(
+                    "%s - Calibration request ignored: system is in bootstrap/hysteresis phase",
+                    self._name,
+                )
+                self._force_calibration_requested = False
+            return (False, "hysteresis_phase")
+
         # Check for manual request
         if self._force_calibration_requested:
-            reason = "manual"
-            _LOGGER.info("%s - Starting forced calibration (reason=%s)", self._name, reason)
+            _LOGGER.info("%s - Starting forced calibration (reason=manual)", self._name)
             self.start_calibration(now, is_manual=True)
-            return (True, reason)
-        
-        # Check for periodic calibration
-        periodic_due = (
-            self._last_calibration_time is not None and
-            (now_wall - self._last_calibration_time) > (force_calibration_interval_hours * 3600)
-        )
-        
-        # Check if in stable mode (accept both governance regime and phase)
-        # Also accept HYSTERESIS for periodic calibration since system may not have enough samples yet
-        # Use string comparison for enums to handle both enum objects and string values
-        regime_str = str(governance_regime).upper() if governance_regime is not None else ""
-        phase_str = str(phase).upper() if phase is not None else ""
-        # For periodic calibration, accept HYSTERESIS as system may be in early learning
-        in_stable_for_periodic = "EXCITED_STABLE" in regime_str or "STABLE" in phase_str or "HYSTERESIS" in phase_str
-        # For missing_deadtime calibration, only trigger in STABLE phase (not HYSTERESIS)
-        # HYSTERESIS is the expected phase during initial learning when deadtime is not yet reliable
-        in_stable_for_missing_deadtime = "EXCITED_STABLE" in regime_str or "STABLE" in phase_str
-        
-        if periodic_due and in_stable_for_periodic:
-            reason = "periodic"
-            _LOGGER.info("%s - Starting forced calibration (reason=%s)", self._name, reason)
-            self.start_calibration(now, is_manual=False)
-            return (True, reason)
-        
-        # Check for missing deadtime - only in STABLE phase, not HYSTERESIS
-        if not deadtime_reliable and self._calibration_retry_count < calibration_retry_max and in_stable_for_missing_deadtime:
-            reason = "missing_deadtime"
-            _LOGGER.info("%s - Starting forced calibration (reason=%s)", self._name, reason)
-            self.start_calibration(now, is_manual=False)
-            return (True, reason)
-        
-        return (False, "not_started")
+            return (True, "manual")
 
-    def should_start_calibration(
-        self,
-        now: float,
-        _governance_regime,  # GovernanceRegime
-        _phase,  # SmartPIPhase
-        deadtime_reliable: bool,
-    ) -> tuple[bool, str]:
-        """
-        Check if calibration should start.
-        
-        Args:
-            now: Current timestamp
-            governance_regime: Current governance regime
-            phase: Current SmartPI phase
-            deadtime_reliable: Whether deadtime is already reliable
-            
-        Returns:
-            Tuple of (should_start, reason)
-        """
-        # Check if calibration was requested
-        if not self._force_calibration_requested:
-            return (False, "not_requested")
-        
-        # Already calibrating?
-        if self._calibration_state != SmartPICalibrationPhase.IDLE:
-            return (False, "already_calibrating")
-        
-        # Start calibration
-        _LOGGER.info(
-            "%s - Starting forced calibration cycle (deadtime_reliable=%s)",
-            self._name,
-            deadtime_reliable,
-        )
-        self._calibration_state = SmartPICalibrationPhase.COOL_DOWN
-        self._calibration_start_time = now
-        self._force_calibration_requested = False
-        return (True, "calibration_requested")
+        return (False, "not_started")
 
     def calculate(
         self,

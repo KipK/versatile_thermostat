@@ -155,6 +155,16 @@ def build_diagnostics(algo: SmartPI, debug_mode: bool = False) -> Dict[str, Any]
             if algo.calibration_mgr.last_calibration_time else None
         ),
         "calibration_retry_count": algo.calibration_mgr.retry_count,
+        # AutoCalibTrigger §6.1
+        "autocalib_state": algo.autocalib.state.value,
+        "autocalib_waiting_reason": algo.autocalib.waiting_reason.value,
+        "autocalib_model_degraded": algo.autocalib.model_degraded,
+        "autocalib_triggered_params": algo.autocalib.triggered_params,
+        "autocalib_retry_count": algo.autocalib.retry_count,
+        "autocalib_last_trigger_ts": algo.autocalib.last_trigger_ts_iso,
+        "autocalib_next_check_ts": algo.autocalib.next_check_ts_iso,
+        "autocalib_snapshot_age_h": algo.autocalib.snapshot_age_h,
+        "autocalib_dt_cool_unavailable": algo.autocalib.snap_dt_cool_unavailable,
         # Safety-First Governance
         "governance_regime": algo.gov._current_regime.value,
         "governance_cycle_regimes": [r.value for r in algo.gov._cycle_regimes],
