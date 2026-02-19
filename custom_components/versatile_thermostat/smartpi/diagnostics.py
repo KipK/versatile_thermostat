@@ -43,7 +43,11 @@ ESSENTIAL_KEYS = {
     "bootstrap_state",
     # Deadtimes (Always published)
     "deadtime_heat_s",
-    "deadtime_cool_s"
+    "deadtime_cool_s",
+    # AutoCalibTrigger §6.1
+    "autocalib_last_trigger_ts",
+    "autocalib_next_check_ts",
+    "autocalib_snapshot_age_h",
 }
 
 def build_diagnostics(algo: SmartPI, debug_mode: bool = False) -> Dict[str, Any]:

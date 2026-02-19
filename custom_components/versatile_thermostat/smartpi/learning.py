@@ -198,6 +198,8 @@ class DeadTimeEstimator:
         self.deadtime_cool_s = statistics.mean(self._history_cool)
         self.deadtime_cool_reliable = len(self._history_cool) >= 1
 
+    def save_state(self) -> dict:
+        """Save state for persistence."""
         return {
             "deadtime_heat_s": self.deadtime_heat_s,
             "deadtime_cool_s": self.deadtime_cool_s,
