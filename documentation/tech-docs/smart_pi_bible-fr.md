@@ -136,12 +136,11 @@ $$ K_i = \frac{K_p}{\max(\tau, 10)} $$
 Des bornes de sécurité ($K_{p,min}, K_{p,max}$) sont toujours appliquées.
 
 #### Cas 3 : Phase de Calibration Forcée
-Si les données de modèle sont absentes ou jugées obsolètes (72h), Smart-PI force un cycle d'apprentissage en mode hystérésis. La FSM de calibration suit les étapes suivantes :
-1.  **COOL_DOWN** : Puissance à 0% jusqu'à descendre sous `Consigne - 0.3°C`.
-2.  **HEAT_UP** : Puissance à 100% jusqu'à dépasser `Consigne + 0.5°C`. Cette phase permet de capturer $L_{heat}$.
-3.  **COOL_DOWN_FINAL** : Puissance à 0% jusqu'à redescendre sous le seuil bas. Cette phase permet de capturer $L_{cool}$.
-
-Une fois ce cycle terminé, l'algorithme repasse en mode **STABLE**.
+Si le modèle dérive ou si les délais de réaction (temps morts) deviennent peu fiables, le superviseur **AutoCalibTrigger** initie une calibration forcée. Le système bascule temporairement en mode **Hystérésis** et suit un cycle en 3 étapes :
+1.  **COOL_DOWN** : Coupure de la chauffe jusqu'à ce que la température chute à $sp - 0.3°C$.
+2.  **HEAT_UP** : Chauffe forcée à 100% jusqu'à $sp + 0.5°C$ (mesure du Temps Mort de Chauffe).
+3.  **COOL_DOWN_FINAL** : Coupure de la chauffe jusqu'à $sp - 0.3°C$ (mesure du Temps Mort de Refroidissement).
+Une fois validé, l'algorithme retourne en **Mode Stable**.
 
 ### 4.2 Mécanismes Avancés de Contrôle
 
@@ -262,8 +261,35 @@ Chaque composant expose `save_state() → dict` et `load_state(dict)`. La classe
     "db_state": {...},       # DeadbandManager
     "cal_state": {...},      # CalibrationManager
     "gs_state": {...},       # GainScheduler
+    "ac_state": {...},       # AutoCalibTrigger
 }
 ```
+
+### 5.5 Supervision de l'Auto-Calibration (AutoCalibTrigger)
+
+La classe `AutoCalibTrigger` agit comme un chien de garde (watchdog) externe pour l'algorithme. Elle veille à ce que le modèle reste de haute qualité au fil du temps sans intervention de l'utilisateur.
+
+#### 1. Le Mécanisme de Snapshot (Instantané)
+Smart-PI mémorise une version "mieux connue" de ses paramètres ($a, b, dt\_heat, dt\_cool$).
+- **Snapshot Initial** : Pris dès que tous les estimateurs sont marqués comme fiables.
+- **Snapshot Glissant** : Tous les 5 jours ($T_{snapshot}$) si le système est stable.
+- **Repli (Hiver)** : Dans les systèmes sans climatisation, si aucun temps mort de refroidissement n'est trouvé après 7 jours, un snapshot est pris en utilisant uniquement les données de chauffe.
+
+#### 2. Critères de Stagnation
+Toutes les heures, le superviseur surveille :
+- **Progrès de l'estimation** : Écart entre les observations réussies actuelles et les compteurs du snapshot.
+- **Qualité statistique** : Seuils de dispersion $MAD_{a}/Med_{a}$ et $MAD_{b}/Med_{b}$.
+- **Drapeaux de fiabilité** : Perte de fiabilité sur les estimateurs de temps mort.
+
+#### 3. Cycle d'Exécution (CalibrationManager)
+Le cycle réel est une FSM asynchrone :
+- `IDLE` $\rightarrow$ `COOL_DOWN` $\rightarrow$ `HEAT_UP` $\rightarrow$ `COOL_DOWN_FINAL` $\rightarrow$ `IDLE`.
+
+#### 4. Vérification et Tentatives
+Après un cycle, le superviseur valide les résultats :
+- **Critères de succès** : Au moins 5 nouvelles observations pour $a$ et $b$, plus des temps morts fiables.
+- **Logique de Retry** : Si l'amélioration est insuffisante, un nouvel essai est planifié avec un délai ($T_{retry} = 24h$).
+- **Modèle Dégradé** : Après 3 échecs consécutifs, le drapeau `model_degraded` est activé pour alerter l'utilisateur.
 
 Une couche de migration (`_migrate_old_state_format`) assure la compatibilité avec l'ancien format à clés plates.
 
@@ -319,6 +345,13 @@ Les paramètres clés sont définis dans `smartpi/const.py` :
 | `MAX_STEP_PER_MINUTE` | 0.25 | Limitation de vitesse de la commande (/min) |
 | `SETPOINT_BOOST_RATE` | 0.50 | Limitation de vitesse en mode Boost (/min) |
 | `AW_TRACK_TAU_S` | 120.0 | Constante de temps de l'anti-windup tracking (secondes) |
+| $T_{check}$ | `_HOURLY_CHECK_INTERVAL_S` | 3600 | Intervalle de vérification du superviseur (s) |
+| $T_{snapshot}$ | `AUTOCALIB_SNAPSHOT_PERIOD_H` | 120 | Période de snapshot glissant (5 jours) |
+| $T_{cooldown}$ | `AUTOCALIB_COOLDOWN_H` | 24 | Repos minimum entre deux calibrations |
+| $T_{retry}$ | `AUTOCALIB_RETRY_DELAY_H` | 24 | Délai avant nouvel essai après échec |
+| $Max_{retries}$ | `AUTOCALIB_MAX_RETRIES` | 3 | Nombre maximum de tentatives en échec |
+| $Thr_{mad\_a}$ | `AUTOCALIB_A_MAD_THRESHOLD` | 0.40 | Seuil de stagnation pour $a$ |
+| $Thr_{mad\_b}$ | `AUTOCALIB_B_MAD_THRESHOLD` | 0.50 | Seuil de stagnation pour $b$ |
 | `SMARTPI_RECALC_INTERVAL_SEC` | 60 | Intervalle de recalcul forcé du PI (Heartbeat) |
 
 #### Apprentissage et identification

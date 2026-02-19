@@ -137,10 +137,11 @@ $$ K_i = \frac{K_p}{\max(\tau, 10)} $$
 Safety bounds ($K_{p,min}, K_{p,max}$) are always applied.
 
 #### Case 3: Forced Calibration Phase
-If model data is missing or deemed obsolete (72h), Smart-PI forces a learning cycle in hysteresis mode. The calibration FSM follows these steps:
-1.  **COOL_DOWN**: Power at 0% until temperature drops below `Setpoint - 0.3°C`.
-2.  **HEAT_UP**: Power at 100% until temperature rises above `Setpoint + 0.5°C`. This phase captures $L_{heat}$.
-3.  **COOL_DOWN_FINAL**: Power at 0% until temperature drops below the lower threshold. This phase captures $L_{cool}$.
+If the model drifts or if reaction delays (dead times) become unreliable, the **AutoCalibTrigger** supervisor initiates a forced calibration. The system temporarily switches to **Hysteresis** mode and follows a 3-step cycle:
+1.  **COOL_DOWN**: Cut power until temperature drops to $sp - 0.3°C$.
+2.  **HEAT_UP**: Force 100% power until $sp + 0.5°C$ (Heating Dead Time measurement).
+3.  **COOL_DOWN_FINAL**: Cut power until $sp - 0.3°C$ (Cooling Dead Time measurement).
+Once validated, the algorithm returns to **Stable Mode**.
 
 Once this cycle is complete, the algorithm returns to **STABLE** mode.
 
@@ -263,8 +264,35 @@ Each component exposes `save_state() → dict` and `load_state(dict)`. The `Smar
     "db_state": {...},       # DeadbandManager
     "cal_state": {...},      # CalibrationManager
     "gs_state": {...},       # GainScheduler
+    "ac_state": {...},       # AutoCalibTrigger
 }
 ```
+
+### 5.5 Auto-Calibration Supervision (AutoCalibTrigger)
+
+The `AutoCalibTrigger` class acts as an external watchdog for the algorithm. It ensures that the model remains high-quality over time without requiring user intervention.
+
+#### 1. The Snapshot Mechanism
+Smart-PI stores a "best-known" version of its parameters ($a, b, dt\_heat, dt\_cool$).
+- **Initial Snapshot**: Taken as soon as all estimators are marked as reliable.
+- **Rolling Snapshot**: Every 5 days ($T_{snapshot}$) if the system is stable.
+- **Fallback (Winter)**: In heating-only systems, if no cooling dead time is found after 7 days, a snapshot is taken using only heating data.
+
+#### 2. Stagnation Criteria
+Every hour, the supervisor monitors:
+- **Estimation Progress**: Difference between current successful observations and snapshot counts.
+- **Statistical Quality**: $MAD_{a}/Med_{a}$ and $MAD_{b}/Med_{b}$ thresholds.
+- **Reliability Flags**: Loss of reliability on dead time estimators.
+
+#### 3. Execution Cycle (CalibrationManager)
+The actual cycle is an asynchronous FSM:
+- `IDLE` $\rightarrow$ `COOL_DOWN` $\rightarrow$ `HEAT_UP` $\rightarrow$ `COOL_DOWN_FINAL` $\rightarrow$ `IDLE`.
+
+#### 4. Verification and Retries
+After a cycle, the supervisor validates the results:
+- **Success Criteria**: At least 5 new observations for $a$ and $b$, plus reliable dead times.
+- **Retry Logic**: If improvement is insufficient, a retry is scheduled with a delay ($T_{retry} = 24h$).
+- **Model Degraded**: After 3 failed retries, the `model_degraded` flag is set to alert the user.
 
 A migration layer (`_migrate_old_state_format`) ensures compatibility with the old flat-key format.
 
@@ -320,6 +348,13 @@ Key parameters are defined in `smartpi/const.py`:
 | `MAX_STEP_PER_MINUTE` | 0.25 | Command rate limit (/min) |
 | `SETPOINT_BOOST_RATE` | 0.50 | Rate limit in Boost mode (/min) |
 | `AW_TRACK_TAU_S` | 120.0 | Anti-windup tracking time constant (seconds) |
+| $T_{check}$ | `_HOURLY_CHECK_INTERVAL_S` | 3600 | Supervision check interval (s) |
+| $T_{snapshot}$ | `AUTOCALIB_SNAPSHOT_PERIOD_H` | 120 | Rolling snapshot period (5 days) |
+| $T_{cooldown}$ | `AUTOCALIB_COOLDOWN_H` | 24 | Minimum rest between two calibrations |
+| $T_{retry}$ | `AUTOCALIB_RETRY_DELAY_H` | 24 | Delay before retrying after failure |
+| $Max_{retries}$ | `AUTOCALIB_MAX_RETRIES` | 3 | Maximum number of failed attempts |
+| $Thr_{mad\_a}$ | `AUTOCALIB_A_MAD_THRESHOLD` | 0.40 | Stagnation threshold for $a$ |
+| $Thr_{mad\_b}$ | `AUTOCALIB_B_MAD_THRESHOLD` | 0.50 | Stagnation threshold for $b$ |
 | `SMARTPI_RECALC_INTERVAL_SEC` | 60 | Forced PI recalculation interval (Heartbeat) |
 
 #### Learning and Identification

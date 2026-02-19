@@ -44,13 +44,31 @@ Une fois le modèle fiable, SmartPI active son régulateur PI avancé :
 *   **PI (Correction)** : Ajoute ou retire de la puissance pour corriger l'écart exact avec la consigne.
 *   **Raffinage continu** : L'algorithme continue d'affiner son modèle en permanence pour s'adapter aux changements de saison ou d'isolation (via estimation robuste Médiane/MAD).
 
-### Phase 3 : Calibration Forcée (Maintenance du modèle)
+### Phase 3 : Calibration Automatisée (Maintenance)
 
-Si l'algorithme détecte que ses données de **Temps Mort** ne sont plus fiables ou si aucune calibration n'a eu lieu depuis plus de 72h, il peut déclencher une phase de **Calibration Forcée**.
+SmartPI ne se contente pas d'apprendre une fois ; il surveille en permanence la qualité de son propre modèle. S'il détecte que l'apprentissage stagne ou que les paramètres (délais de chauffe/refroidissement) ne sont plus cohérents avec la réalité, il déclenche une **Calibration Automatisée**.
 
-*   Le thermostat repasse temporairement en mode hystérésis pour effectuer un cycle complet (Refroidissement -> Chauffe -> Refroidissement).
-*   Cela permet de recalibrer précisément les délais de réaction du système.
-*   Cette phase peut aussi être déclenchée manuellement via un service.
+#### 1. Le Système de Snapshot (Instantané)
+Dès que l'algorithme devient stable pour la première fois, il prend un "Snapshot" de ses paramètres de référence. Cette ligne de base sert de point de comparaison pour détecter toute dérive future.
+
+#### 2. Surveillance Continue (Supervision)
+Toutes les heures, le superviseur **AutoCalibTrigger** évalue plusieurs critères :
+*   **Stagnation** : L'algorithme ne parvient plus à acquérir de nouvelles données fiables ?
+*   **Qualité** : Les estimations (a, b) présentent-elles une trop forte dispersion statistique ?
+*   **Fiabilité** : Les temps morts (délais de réaction) sont-ils toujours marqués comme fiables ?
+*   **Minuteur** : Un snapshot "tournant" est pris tous les 5 jours pour garder la base de référence à jour.
+
+#### 3. Le Cycle de Calibration
+Si un problème est détecté, ou si une calibration manuelle est demandée, le système entre dans un cycle de 3 étapes en mode **Hystérésis** :
+1.  **Refroidissement** : La chauffe est coupée jusqu'à atteindre `Consigne - 0.3°C`.
+2.  **Chauffe** : La chauffe est forcée à 100% jusqu'à `Consigne + 0.5°C`. Cela permet de capturer le **Temps Mort de Chauffe**.
+3.  **Refroidissement Final** : La chauffe est à nouveau coupée jusqu'au seuil bas. Cela permet de capturer le **Temps Mort de Refroidissement**.
+
+#### 4. Validation Post-Calibration
+Une fois le cycle terminé, le superviseur vérifie si le modèle s'est amélioré.
+*   **Succès** : Un nouveau snapshot est pris, et le système repasse en mode **STABLE**.
+*   **Nouvel essai** : Si les résultats sont médiocres, une nouvelle tentative est planifiée après quelques heures de repos.
+*   **Mode Dégradé** : Après 3 échecs consécutifs, le système continue de fonctionner mais signale un état "modèle dégradé" dans ses diagnostics.
 
 ## Fonctionnalités Avancées
 
@@ -141,6 +159,9 @@ Pour les utilisateurs avancés, l'entité climate expose des attributs détaill�
 | `calibration_state` | État actuel de la calibration : `Idle`, `CoolDown`, `HeatUp`, `CoolDownFinal` |
 | `last_calibration_time` | Horodatage de la dernière calibration réussie |
 | `calibration_retry_count` | Nombre de tentatives de calibration |
+| `autocalib_last_trigger_ts` | Dernière fois qu'une calibration automatique a été déclenchée |
+| `autocalib_next_check_ts` | Prochaine vérification prévue de la constante de temps (tau) |
+| `autocalib_snapshot_age_h` | Âge du snapshot de référence en heures |
 
 
 ## Services

@@ -44,13 +44,31 @@ Once the model is reliable, SmartPI activates its advanced PI controller:
 *   **PI (Correction)**: Adds or removes power to correct the precise deviation from the setpoint.
 *   **Continuous refinement**: The algorithm continues to refine its model continuously to adapt to seasonal changes or insulation (via robust Median/MAD estimation).
 
-### Phase 3: Forced Calibration (Model Maintenance)
+### Phase 3: Automated Calibration (Maintenance)
 
-If the algorithm detects that its **Dead Time** data is no longer reliable or if no calibration has taken place for more than 72 hours, it can trigger a **Forced Calibration** phase.
+SmartPI doesn't just learn once; it constantly monitors the quality of its own model. If it detects that the learning has stagnated or that the parameters (heating/cooling delays) are no longer consistent with reality, it triggers an **Automated Calibration**.
 
-*   The thermostat temporarily switches back to hysteresis mode to perform a full cycle (Cooling -> Heating -> Cooling).
-*   This allows for precise recalibration of the system's reaction delays.
-*   This phase can also be triggered manually via a service.
+#### 1. The Snapshot System
+As soon as the algorithm becomes stable for the first time, it takes a "Snapshot" of its reference parameters. This baseline is used as a point of comparison to detect any future drift.
+
+#### 2. Continuous Monitoring (Supervision)
+Every hour, the **AutoCalibTrigger** supervisor evaluates several criteria:
+*   **Stagnation**: Is the algorithm failing to acquire new reliable data?
+*   **Quality**: Are the estimates (a, b) showing high statistical dispersion?
+*   **Reliability**: Are the dead times (reaction delays) still marked as reliable?
+*   **Timer**: A rolling snapshot is taken every 5 days to keep the baseline up to date.
+
+#### 3. The Calibration Cycle
+If a problem is detected, or if a manual calibration is requested, the system enters a 3-step cycle in **Hysteresis** mode:
+1.  **Cool Down**: The heating is cut until the temperature drops to `Setpoint - 0.3°C`.
+2.  **Heat Up**: Heating is forced at 100% until `Setpoint + 0.5°C`. This captures the **Heating Dead Time**.
+3.  **Cool Down Final**: Heating is cut again until the lower threshold. This captures the **Cooling Dead Time**.
+
+#### 4. Post-Calibration Validation
+Once the cycle is complete, the supervisor checks if the model has improved.
+*   **Success**: A new snapshot is taken, and the system returns to **STABLE** mode.
+*   **Retry**: If the results are poor, a new attempt is scheduled after a few hours of rest.
+*   **Degraded Mode**: After 3 failed attempts, the system continues to operate but signals a "degraded model" state in its diagnostics.
 
 ## Advanced Features
 
@@ -141,6 +159,9 @@ For advanced users, the climate entity exposes detailed attributes:
 | `calibration_state` | Current calibration state: `Idle`, `CoolDown`, `HeatUp`, `CoolDownFinal` |
 | `last_calibration_time` | Timestamp of last successful calibration |
 | `calibration_retry_count` | Number of calibration retries |
+| `autocalib_last_trigger_ts` | Last time an automatic calibration was triggered |
+| `autocalib_next_check_ts` | Next scheduled verification of the time constant (tau) |
+| `autocalib_snapshot_age_h` | Age of the reference baseline snapshot in hours |
 
 
 ## Services
