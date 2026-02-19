@@ -220,7 +220,7 @@ class CalibrationManager:
         # 3. COOL_DOWN_FINAL: Drive back to Low (triggers Cool Deadtime)
         elif self._calibration_state == SmartPICalibrationPhase.COOL_DOWN_FINAL:
             on_percent = on_low
-            if current_temp <= target_temp - HYST_LOWER_C:
+            if current_temp <= target_temp:
                 _LOGGER.info("%s - Calibration: Cycle Completed -> IDLE", self._name)
                 self._calibration_state = SmartPICalibrationPhase.IDLE
                 self._last_calibration_time = time.time()

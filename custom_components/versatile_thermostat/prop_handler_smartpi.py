@@ -10,7 +10,7 @@ from homeassistant.helpers.event import async_track_time_interval
 from datetime import timedelta, datetime
 
 from .prop_algo_smartpi import SmartPI
-from .smartpi.const import SMARTPI_RECALC_INTERVAL_SEC, SmartPIPhase, NEAR_BAND_HYSTERESIS_C
+from .smartpi.const import SMARTPI_RECALC_INTERVAL_SEC, SmartPIPhase, SmartPICalibrationPhase, NEAR_BAND_HYSTERESIS_C
 from .const import (
     CONF_MINIMAL_ACTIVATION_DELAY,
     CONF_MINIMAL_DEACTIVATION_DELAY,
@@ -288,7 +288,7 @@ class SmartPIHandler:
             now_wall = time.time()
 
             # Detect calibration completion (CALIBRATING -> IDLE transition)
-            currently_calibrating = algo.calibration_mgr.is_calibrating
+            currently_calibrating = algo.calibration_state != SmartPICalibrationPhase.IDLE
             if self._prev_is_calibrating and not currently_calibrating:
                 # Calibration just ended
                 ac_event = algo.autocalib.on_calibration_complete(
@@ -414,11 +414,14 @@ class SmartPIHandler:
         """Force calibration."""
         t = self._thermostat
         if t.prop_algorithm and isinstance(t.prop_algorithm, SmartPI):
-            t.prop_algorithm.force_calibration()
+            event = t.prop_algorithm.force_calibration()
             t.hass.bus.fire(EventType.SMART_PI_EVENT.value, {
                  "entity_id": t.entity_id,
                  "type": "force_calibration"
              })
+            if event is not None:
+                t.hass.bus.fire(event.event_type, event.payload)
+
             write_event_log(_LOGGER, t, "SmartPI forced calibration triggered")
             # Force immediate recalculation to update state
             await self.control_heating(force=True)
@@ -426,6 +429,4 @@ class SmartPIHandler:
             t.async_write_ha_state()
             await self._async_save()
 
-            # Notify AutoCalibTrigger of manual calibration success after completion
-            # (will be detected on next cycle via _prev_is_calibrating tracking)
             _LOGGER.debug("%s - AutoCalib: manual calibration triggered, will check exit on completion", t.name)

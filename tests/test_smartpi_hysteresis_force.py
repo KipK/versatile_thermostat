@@ -1,10 +1,10 @@
 """Test SmartPI Hysteresis Force Logic."""
 import pytest
 from datetime import datetime
-from unittest.mock import MagicMock, AsyncMock, patch
+from unittest.mock import MagicMock, AsyncMock, patch, PropertyMock
 from custom_components.versatile_thermostat.prop_handler_smartpi import SmartPIHandler
 from custom_components.versatile_thermostat.prop_algo_smartpi import SmartPI
-from custom_components.versatile_thermostat.smartpi.const import SmartPIPhase
+from custom_components.versatile_thermostat.smartpi.const import SmartPIPhase, SmartPICalibrationPhase
 from custom_components.versatile_thermostat.vtherm_hvac_mode import VThermHvacMode_HEAT
 from custom_components.versatile_thermostat.smartpi.guards import GuardAction
 
@@ -44,6 +44,9 @@ async def test_smartpi_hysteresis_forces_cycle():
 
     # Mock Algorithm
     algo = MagicMock(spec=SmartPI)
+    algo.autocalib = MagicMock()
+    algo.calibration_mgr = MagicMock()
+    type(algo).calibration_state = PropertyMock(return_value=SmartPICalibrationPhase.IDLE)
     # Simulate hysteresis toggling to 100% (changed from default 0%)
     algo.on_percent = 1.0
     algo.calculate = MagicMock()

@@ -553,11 +553,18 @@ class AutoCalibTrigger:
     # §5 — Called when calibration FSM exits (complete or timeout)
     # -------------------------------------------------------------------------
 
+    def force_manual_trigger(self, now_wall: float, algo: "SmartPI") -> AutoCalibEvent:
+        """
+        §5.4 — Called when a manual calibration (%force_smart_pi_calibration%) is explicitly triggered via service.
+        Resets retry counters and triggers the calibration cycle properly using AutoCalib Trigger mechanism.
+        """
+        self._retry_count = 0 
+        return self._do_trigger(now_wall, algo, ["manual_request"])
+
     def on_calibration_complete(
         self,
         now_wall: float,
         algo: "SmartPI",
-        is_manual: bool = False,
     ) -> AutoCalibEvent | None:
         """
         Called by the handler when the CalibrationManager exits IDLE.
@@ -567,28 +574,16 @@ class AutoCalibTrigger:
         Args:
             now_wall: Current wall-clock timestamp
             algo: SmartPI algorithm instance
-            is_manual: True if calibration was manually triggered
 
         Returns:
             AutoCalibEvent describing the result, or None if not in expected state.
         """
-        if (
-            self._state not in (AutoCalibState.TRIGGERED, AutoCalibState.POST_CALIB_CHECK)
-            and not is_manual
-        ):
+        if self._state not in (AutoCalibState.TRIGGERED, AutoCalibState.POST_CALIB_CHECK):
             # Not triggered by us — ignore (no-op for unrelated calibrations)
             return None
 
         self._state = AutoCalibState.POST_CALIB_CHECK
         return self._check_post_calib(now_wall, algo)
-
-    def on_manual_calibration_success(self, now_wall: float, algo: "SmartPI") -> AutoCalibEvent | None:
-        """
-        §5.4 — Called when a manual calibration (%force_smart_pi_calibration%) succeeds.
-
-        Applies the same exit criteria. On positive result, resets snapshot and counters.
-        """
-        return self.on_calibration_complete(now_wall, algo, is_manual=True)
 
     def _check_post_calib(self, now_wall: float, algo: "SmartPI") -> AutoCalibEvent | None:
         """§5 — Evaluate exit criteria after calibration."""

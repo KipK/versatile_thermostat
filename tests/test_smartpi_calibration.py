@@ -369,7 +369,16 @@ def test_autocalib_manual_calibration_success():
     mock_algo.dt_est.deadtime_cool_reliable = True
 
     now = time.time()
-    event = ac.on_manual_calibration_success(now, mock_algo)
+    
+    # Simulate force trigger
+    ac.force_manual_trigger(now, mock_algo)
+    assert ac.retry_count == 0
+
+    # Simulate success
+    mock_algo.est.learn_ok_count_a = 25
+    mock_algo.est.learn_ok_count_b = 25
+
+    event = ac.on_calibration_complete(now, mock_algo)
 
     # Should process and take new snapshot
     assert event is not None

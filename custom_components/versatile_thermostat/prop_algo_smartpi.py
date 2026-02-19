@@ -91,7 +91,7 @@ from .smartpi.deadband import DeadbandManager
 from .smartpi.calibration import CalibrationManager
 from .smartpi.gains import GainScheduler
 from .smartpi.feedforward import apply_ff_gate
-from .smartpi.timestamp_utils import convert_monotonic_to_wall_ts
+from .smartpi.timestamp_utils import convert_monotonic_to_wall_ts, convert_wall_to_monotonic_ts
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -591,9 +591,12 @@ class SmartPI(CycleManager):
     def _force_calibration_requested(self, value: bool):
         self.calibration_mgr.calibration_requested = value
 
-    def force_calibration(self) -> None:
+    def force_calibration(self) -> "AutoCalibEvent" | None:
         """Force a calibration cycle to refresh Dead Time estimation."""
         self.calibration_mgr.request_calibration(phase=self.phase)
+        if self.phase != SmartPIPhase.HYSTERESIS:
+            return self.autocalib.force_manual_trigger(time.time(), self)
+        return None
 
     def notify_resume_after_interruption(self, skip_cycles: int = None) -> None:
         """Notify SmartPI that the thermostat is resuming after an interruption.
@@ -1217,6 +1220,7 @@ class SmartPI(CycleManager):
             "accumulated_dt": self._accumulated_dt,
             "deadtime_skip_count_a": self._deadtime_skip_count_a,
             "deadtime_skip_count_b": self._deadtime_skip_count_b,
+            "learning_resume_ts": convert_monotonic_to_wall_ts(self._learning_resume_ts),
             "learning_start_date": self._learning_start_date.isoformat() if self._learning_start_date else None,
             "est_state": self.est.save_state(),
             "dt_est_state": self.dt_est.save_state(),
@@ -1269,6 +1273,7 @@ class SmartPI(CycleManager):
             "last_target_temp": state.get("last_target_temp", self._last_target_temp),
             "cycles_since_reset": int(state.get("cycles_since_reset") or self._cycles_since_reset),
             "accumulated_dt": float(state.get("accumulated_dt") or self._accumulated_dt),
+            "learning_resume_ts": state.get("learning_resume_ts"),
             "est_state": {
                 k: v for k, v in {
                     "a": state.get("a"),
@@ -1384,6 +1389,7 @@ class SmartPI(CycleManager):
         self._deadtime_skip_count_a = int(migrated.get("deadtime_skip_count_a", 0))
         self._deadtime_skip_count_b = int(migrated.get("deadtime_skip_count_b", 0))
         self._accumulated_dt = float(migrated.get("accumulated_dt", 0.0))
+        self._learning_resume_ts = convert_wall_to_monotonic_ts(migrated.get("learning_resume_ts"))
 
         # Load Guard State
         self.guards.load_state(migrated.get("guards_state", {}))

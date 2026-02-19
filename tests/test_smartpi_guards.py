@@ -1,10 +1,11 @@
 """Test SmartPI Guard Kick and Guard Cut Logic."""
 import pytest
 from datetime import datetime
-from unittest.mock import MagicMock, AsyncMock
+from unittest.mock import MagicMock, AsyncMock, PropertyMock
 from custom_components.versatile_thermostat.prop_handler_smartpi import SmartPIHandler
 from custom_components.versatile_thermostat.vtherm_hvac_mode import VThermHvacMode_HEAT
 from custom_components.versatile_thermostat.prop_algo_smartpi import SmartPI, SmartPIPhase
+from custom_components.versatile_thermostat.smartpi.const import SmartPICalibrationPhase
 from custom_components.versatile_thermostat.smartpi.guards import GuardAction
 
 @pytest.mark.asyncio
@@ -27,6 +28,9 @@ async def test_smartpi_guard_kick_trigger():
     # Mock Algorithm and Guards
     algo = MagicMock(spec=SmartPI)
     algo.guards = MagicMock()
+    algo.autocalib = MagicMock()
+    algo.calibration_mgr = MagicMock()
+    type(algo).calibration_state = PropertyMock(return_value=SmartPICalibrationPhase.IDLE)
     
     # Case 1: Trigger Kick
     algo.guards.check_guard_kick.return_value = GuardAction.KICK_TRIGGER
@@ -67,6 +71,9 @@ async def test_smartpi_guard_kick_reset():
     # Mock Algorithm and Guards
     algo = MagicMock(spec=SmartPI)
     algo.guards = MagicMock()
+    algo.autocalib = MagicMock()
+    algo.calibration_mgr = MagicMock()
+    type(algo).calibration_state = PropertyMock(return_value=SmartPICalibrationPhase.IDLE)
     
     # Case 2: Reset Kick
     algo.guards.check_guard_kick.return_value = GuardAction.KICK_RESET
@@ -105,6 +112,9 @@ async def test_smartpi_guard_kick_antiloop():
     # Mock Algorithm
     algo = MagicMock(spec=SmartPI)
     algo.guards = MagicMock()
+    algo.autocalib = MagicMock()
+    algo.calibration_mgr = MagicMock()
+    type(algo).calibration_state = PropertyMock(return_value=SmartPICalibrationPhase.IDLE)
     
     # Case 3: Maintain (Anti-loop)
     algo.guards.check_guard_kick.return_value = GuardAction.KICK_MAINTAIN
@@ -154,6 +164,9 @@ async def test_smartpi_guard_cut_trigger():
     # Mock Algorithm
     algo = MagicMock(spec=SmartPI)
     algo.guards = MagicMock()
+    algo.autocalib = MagicMock()
+    algo.calibration_mgr = MagicMock()
+    type(algo).calibration_state = PropertyMock(return_value=SmartPICalibrationPhase.IDLE)
     
     # Case 4: Trigger Cut
     algo.guards.check_guard_cut.return_value = GuardAction.CUT_TRIGGER
@@ -201,6 +214,9 @@ async def test_smartpi_guard_cut_maintain():
     # Mock Algorithm
     algo = MagicMock(spec=SmartPI)
     algo.guards = MagicMock()
+    algo.autocalib = MagicMock()
+    algo.calibration_mgr = MagicMock()
+    type(algo).calibration_state = PropertyMock(return_value=SmartPICalibrationPhase.IDLE)
     
     # Case 6: Maintain Cut
     algo.guards.check_guard_cut.return_value = GuardAction.CUT_MAINTAIN
