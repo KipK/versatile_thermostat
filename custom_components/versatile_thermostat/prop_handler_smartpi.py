@@ -10,7 +10,13 @@ from homeassistant.helpers.event import async_track_time_interval
 from datetime import timedelta, datetime
 
 from .prop_algo_smartpi import SmartPI
-from .smartpi.const import SMARTPI_RECALC_INTERVAL_SEC, SmartPIPhase, SmartPICalibrationPhase, NEAR_BAND_HYSTERESIS_C
+from .smartpi.const import (
+    SMARTPI_RECALC_INTERVAL_SEC,
+    SmartPIPhase,
+    SmartPICalibrationPhase,
+    SmartPICalibrationResult,
+    NEAR_BAND_HYSTERESIS_C,
+)
 from .const import (
     CONF_MINIMAL_ACTIVATION_DELAY,
     CONF_MINIMAL_DEACTIVATION_DELAY,
@@ -197,7 +203,7 @@ class SmartPIHandler:
                 async def _data_provider():
                     # 1. Get requested percentage from algorithm
                     requested_on_percent = t.prop_algorithm.on_percent
-                    
+
                     # 2. Calculate timing with constraints
                     on_time_sec, off_time_sec, forced_by_timing = calculate_cycle_times(
                         requested_on_percent,
@@ -205,10 +211,10 @@ class SmartPIHandler:
                         t.minimal_activation_delay,
                         t.minimal_deactivation_delay
                     )
-                    
+
                     # 3. Derive realized percentage
                     realized_on_percent = on_time_sec / (t.cycle_min * 60)
-                    
+
                     # 4. Notify algorithm of realized result for closed-loop anti-windup/tracking
                     # We calculate dt_min here as it's needed for anti-windup
                     dt_min = 0.0
@@ -216,7 +222,7 @@ class SmartPIHandler:
                         ts = timestamp.timestamp() if isinstance(timestamp, datetime) else timestamp
                         if t.prop_algorithm._last_calculate_time:
                             dt_min = (ts - t.prop_algorithm._last_calculate_time) / 60.0
-                    
+
                     if hasattr(t.prop_algorithm, "update_realized_power"):
                         t.prop_algorithm.update_realized_power(realized_on_percent, forced_by_timing, dt_min)
 
@@ -257,7 +263,7 @@ class SmartPIHandler:
                 on_time_sec = None
                 off_time_sec = None
                 on_percent = None
-            
+
             # Check if on_percent has changed
             new_on_percent = t.prop_algorithm.on_percent
             on_percent_changed = abs(new_on_percent - self._last_on_percent) > 0.001
@@ -273,10 +279,7 @@ class SmartPIHandler:
                     on_time_sec,
                     off_time_sec,
                     on_percent,
-
-                    force 
-                    or (t.prop_algorithm.phase == SmartPIPhase.CALIBRATION)
-                    or (t.prop_algorithm.phase == SmartPIPhase.HYSTERESIS and on_percent_changed),
+                    force or (t.prop_algorithm.phase == SmartPIPhase.CALIBRATION) or (t.prop_algorithm.phase == SmartPIPhase.HYSTERESIS and on_percent_changed),
                 )
 
         # Save state after cycle to persist learning data
@@ -341,6 +344,8 @@ class SmartPIHandler:
                 _LOGGER.debug("%s - SmartPI resumed from OFF: cycle and learning window reset", t.name)
         else:
             self._stop_recalc_timer()
+            # Cancel any ongoing calibration when switching to OFF/SLEEP mode
+            await self._cancel_calibration_if_active()
 
     def _start_recalc_timer(self):
         """Start the periodic recalculation timer."""
@@ -370,6 +375,37 @@ class SmartPIHandler:
             remove_callback()
             t._smartpi_recalc_timer_remove = None
             _LOGGER.debug("%s - SmartPI calc timer stopped", t)
+
+    async def _cancel_calibration_if_active(self):
+        """Cancel any ongoing calibration (manual or auto) when HVAC is turned off."""
+        t = self._thermostat
+        algo = t.prop_algorithm
+        if not algo or not isinstance(algo, SmartPI):
+            return
+
+        if not algo.calibration_mgr.is_calibrating:
+            return
+
+        _LOGGER.info("%s - HVAC OFF: canceling ongoing calibration", t.name)
+
+        # Reset the calibration manager
+        algo.calibration_mgr.reset()
+
+        # Notify autocalib trigger about the cancellation
+        now_wall = time.time()
+        event = algo.autocalib.on_calibration_complete(now_wall, algo, SmartPICalibrationResult.CANCELLED)
+
+        # Fire event if autocalib returns one
+        if event:
+            t.hass.bus.fire(EventType.SMART_PI_EVENT.value, {"entity_id": t.entity_id, "type": event.event_type, "data": event.data or {}})
+
+        # Reset tracking state
+        self._prev_is_calibrating = False
+
+        # Update attributes and save state
+        self.update_attributes()
+        t.async_write_ha_state()
+        await self._async_save()
 
     def update_attributes(self):
         """Add SmartPI-specific attributes."""
