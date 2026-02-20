@@ -294,6 +294,7 @@ class SmartPIHandler:
                 ac_event = algo.autocalib.on_calibration_complete(
                     now_wall=now_wall,
                     algo=algo,
+                    result=algo.calibration_mgr.calibration_result,
                 )
                 if ac_event is not None:
                     t.hass.bus.async_fire(ac_event.event_type, ac_event.payload)

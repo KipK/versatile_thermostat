@@ -18,6 +18,7 @@ from .const import (
     HYST_LOWER_C,
     HYST_UPPER_C,
     SmartPICalibrationPhase,
+    SmartPICalibrationResult,
     SmartPIPhase,
 )
 
@@ -32,6 +33,7 @@ class CalibrationResult:
     """Result of calibration calculation."""
     on_percent: float | None  # None if not calibrating
     phase: SmartPICalibrationPhase
+    result: SmartPICalibrationResult = SmartPICalibrationResult.PENDING
     message: str = ""
 
 
@@ -62,6 +64,7 @@ class CalibrationManager:
         self._calibration_start_time: float | None = None
         self._force_calibration_requested: bool = False
         self._calibration_retry_count: int = 0
+        self._calibration_result: SmartPICalibrationResult = SmartPICalibrationResult.PENDING
 
     def reset(self) -> None:
         """Reset calibration state to initial values."""
@@ -69,6 +72,7 @@ class CalibrationManager:
         self._calibration_start_time = None
         self._force_calibration_requested = False
         self._calibration_retry_count = 0
+        self._calibration_result = SmartPICalibrationResult.PENDING
         # Note: _last_calibration_time is NOT reset to preserve history
 
     def request_calibration(self, phase=None) -> None:
@@ -98,6 +102,7 @@ class CalibrationManager:
         self._calibration_state = SmartPICalibrationPhase.COOL_DOWN
         self._calibration_start_time = now
         self._force_calibration_requested = False
+        self._calibration_result = SmartPICalibrationResult.PENDING
         if is_manual:
             self._calibration_retry_count = 0
         else:
@@ -107,6 +112,7 @@ class CalibrationManager:
         """Handle calibration timeout."""
         self._calibration_state = SmartPICalibrationPhase.IDLE
         self._calibration_start_time = None
+        self._calibration_result = SmartPICalibrationResult.CANCELLED
 
     def check_and_start(
         self,
@@ -174,15 +180,18 @@ class CalibrationManager:
             return CalibrationResult(
                 on_percent=None,
                 phase=self._calibration_state,
+                result=self._calibration_result,
                 message="idle",
             )
         
         # Safety/Exit conditions - HVAC OFF
         if hvac_mode == VThermHvacMode_OFF:
             self._calibration_state = SmartPICalibrationPhase.IDLE
+            self._calibration_result = SmartPICalibrationResult.CANCELLED
             return CalibrationResult(
                 on_percent=0.0,
                 phase=SmartPICalibrationPhase.IDLE,
+                result=self._calibration_result,
                 message="hvac_off",
             )
 
@@ -226,6 +235,7 @@ class CalibrationManager:
                 self._last_calibration_time = time.time()
                 self._calibration_start_time = None
                 self._calibration_retry_count = 0  # <--- Reset retry count on success
+                self._calibration_result = SmartPICalibrationResult.SUCCESS
                 message = "completed"
                 
                 # Check success (logging)
@@ -252,6 +262,7 @@ class CalibrationManager:
         return CalibrationResult(
             on_percent=on_percent,
             phase=self._calibration_state,
+            result=self._calibration_result if message != "completed" else SmartPICalibrationResult.SUCCESS,
             message=message,
         )
 
@@ -277,6 +288,15 @@ class CalibrationManager:
         self._calibration_start_time = convert_wall_to_monotonic_ts(state.get("calibration_start_time"))
         self._force_calibration_requested = state.get("force_calibration_requested", False)
         self._calibration_retry_count = state.get("calibration_retry_count", 0)
+        
+        calibration_result_str = state.get("calibration_result")
+        if calibration_result_str:
+            try:
+                self._calibration_result = SmartPICalibrationResult(calibration_result_str)
+            except ValueError:
+                self._calibration_result = SmartPICalibrationResult.PENDING
+        else:
+            self._calibration_result = SmartPICalibrationResult.PENDING
 
     def save_state(self) -> dict:
         """
@@ -291,6 +311,7 @@ class CalibrationManager:
             "calibration_start_time": convert_monotonic_to_wall_ts(self._calibration_start_time),
             "force_calibration_requested": self._force_calibration_requested,
             "calibration_retry_count": self._calibration_retry_count,
+            "calibration_result": self._calibration_result.value if self._calibration_result else None,
         }
 
     # -------------------------------------------------------------------------
@@ -306,6 +327,11 @@ class CalibrationManager:
     def is_calibrating(self) -> bool:
         """Check if calibration is in progress."""
         return self._calibration_state != SmartPICalibrationPhase.IDLE
+
+    @property
+    def calibration_result(self) -> SmartPICalibrationResult:
+        """Get the result of the current or last calibration."""
+        return self._calibration_result
 
     @property
     def last_calibration_time(self) -> float | None:

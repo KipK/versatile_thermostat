@@ -27,6 +27,7 @@ from .const import (
     GovernanceRegime,
     SmartPIPhase,
     SmartPICalibrationPhase,
+    SmartPICalibrationResult,
 )
 
 if TYPE_CHECKING:
@@ -565,6 +566,7 @@ class AutoCalibTrigger:
         self,
         now_wall: float,
         algo: "SmartPI",
+        result: SmartPICalibrationResult = SmartPICalibrationResult.SUCCESS,
     ) -> AutoCalibEvent | None:
         """
         Called by the handler when the CalibrationManager exits IDLE.
@@ -574,12 +576,24 @@ class AutoCalibTrigger:
         Args:
             now_wall: Current wall-clock timestamp
             algo: SmartPI algorithm instance
+            result: The result of the calibration cycle
 
         Returns:
             AutoCalibEvent describing the result, or None if not in expected state.
         """
         if self._state not in (AutoCalibState.TRIGGERED, AutoCalibState.POST_CALIB_CHECK):
             # Not triggered by us — ignore (no-op for unrelated calibrations)
+            return None
+
+        if result == SmartPICalibrationResult.CANCELLED:
+            _LOGGER.info(
+                "%s - AutoCalib: explicit calibration cancellation detected. "
+                "Going back to IDLE/WAITING_SNAPSHOT without consuming a retry.",
+                self._name,
+            )
+            # Revert to waiting/idle to not penalize the model for an external interrupt (HVAC OFF, manual cancellation...)
+            self._state = AutoCalibState.WAITING_SNAPSHOT
+            self._triggered_params = []
             return None
 
         self._state = AutoCalibState.POST_CALIB_CHECK

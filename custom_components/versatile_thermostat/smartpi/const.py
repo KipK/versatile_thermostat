@@ -27,6 +27,12 @@ class SmartPICalibrationPhase(str, Enum):
     HEAT_UP = "HeatUp"
     COOL_DOWN_FINAL = "CoolDownFinal"
 
+class SmartPICalibrationResult(str, Enum):
+    """Resolution status of a Smart-PI forced calibration cycle."""
+    PENDING = "Pending"
+    SUCCESS = "Success"
+    CANCELLED = "Cancelled"
+
 # ########################################################################
 #                      SAFETY-FIRST GOVERNANCE ENUMS                   #
 # ########################################################################
