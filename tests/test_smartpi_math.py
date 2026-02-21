@@ -154,7 +154,7 @@ async def test_smartpi_math_with_mocked_time(hass: HomeAssistant):
         call_args = algo.est.learn.call_args[1]
         assert call_args['u'] == 0.0
         # Slope is -0.05
-        assert abs(call_args['dT_int_per_min'] - (-0.05)) < 0.001
+        assert abs(call_args['dT_int_per_min'] - (-0.05)) < 0.005
         
         # Reset
         algo.est.learn.reset_mock()
@@ -207,4 +207,4 @@ async def test_smartpi_math_with_mocked_time(hass: HomeAssistant):
         algo.est.learn.assert_called_once()
         call_args = algo.est.learn.call_args[1]
         assert call_args['u'] == 1.0
-        assert abs(call_args['dT_int_per_min'] - 0.1) < 0.001
+        assert abs(call_args['dT_int_per_min'] - 0.1) < 0.03

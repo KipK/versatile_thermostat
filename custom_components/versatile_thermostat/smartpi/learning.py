@@ -402,7 +402,16 @@ class ABEstimator:
             samples_sorted = samples_trimmed
 
         x = [p[0] for p in samples_sorted]
-        y = [p[1] for p in samples_sorted]
+        y_raw = [p[1] for p in samples_sorted]
+        
+        # 0. Light EMA Smoothing to counter sensor quantization (staircase effect)
+        # alpha=0.3 provides a gentle smoothing without adding too much phase lag
+        alpha = 0.3
+        y = []
+        current_ema = y_raw[0]
+        for val in y_raw:
+            current_ema = alpha * val + (1 - alpha) * current_ema
+            y.append(current_ema)
         
         # 1. Amplitude check
         amp = max(y) - min(y)
@@ -419,18 +428,6 @@ class ABEstimator:
             return None, "theil_sen_fail", len(samples_sorted)
              
         slope_min = slope_sec * 60.0
-        
-        # Check against minimum physical slope if we are in a learning context (implied by amplitude check)
-        # If we passed amplitude check but slope is very close to 0, it means it oscillates?
-        # A simple check:
-        if dt_min_window > 0.5:
-            min_abs_slope = DT_DERIVATIVE_MIN_ABS / dt_min_window
-            if abs(slope_min) < min_abs_slope:
-                # Fallback for quantized data: Theil-Sen fails on step functions (median slope 0).
-                # If we have significant amplitude (checked above), trust the simple slope.
-                # using the sorted (and potentially trimmed) samples.
-                simple_slope_sec = (y[-1] - y[0]) / (x[-1] - x[0]) if (x[-1] - x[0]) > 0 else 0
-                return simple_slope_sec * 60.0, "low_slope_fallback", len(samples_sorted)
         
         # Clamp result to physically reasonable values for HVAC (-0.35 to +0.35 C/min)
         # This prevents wild values from exploding the estimator
