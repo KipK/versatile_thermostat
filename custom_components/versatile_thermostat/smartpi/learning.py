@@ -142,12 +142,15 @@ class DeadTimeEstimator:
 
         # --- State Logic ---
         
-        # Abort condition (3.B): if waiting but power drops to near zero
+        # Abort condition (3.B): if power state reverses while waiting
         # This means the setpoint changed and we shouldn't wait for a response anymore
-        if self.state in ["WAITING_HEAT_RESPONSE", "WAITING_COOL_RESPONSE"] and u_applied <= 0.01:
-            _LOGGER.debug(f"DeadTime: Aborting {self.state} because power dropped to %.2f", u_applied)
+        if self.state == "WAITING_HEAT_RESPONSE" and u_applied <= 0.01:
+            _LOGGER.debug("DeadTime: Aborting %s because power dropped to %.2f", self.state, u_applied)
             self.state = "OFF"
             self.heat_start_time = None
+        elif self.state == "WAITING_COOL_RESPONSE" and u_applied > 0.01:
+            _LOGGER.debug("DeadTime: Aborting %s because power rose to %.2f", self.state, u_applied)
+            self.state = "HEATING"
             self.cool_start_time = None
         
         if self.state == "WAITING_HEAT_RESPONSE":
