@@ -142,6 +142,14 @@ class DeadTimeEstimator:
 
         # --- State Logic ---
         
+        # Abort condition (3.B): if waiting but power drops to near zero
+        # This means the setpoint changed and we shouldn't wait for a response anymore
+        if self.state in ["WAITING_HEAT_RESPONSE", "WAITING_COOL_RESPONSE"] and u_applied <= 0.01:
+            _LOGGER.debug(f"DeadTime: Aborting {self.state} because power dropped to %.2f", u_applied)
+            self.state = "OFF"
+            self.heat_start_time = None
+            self.cool_start_time = None
+        
         if self.state == "WAITING_HEAT_RESPONSE":
             if self.heat_start_time is not None:
                 elapsed = now - self.heat_start_time
@@ -153,10 +161,22 @@ class DeadTimeEstimator:
                 else:
                     delta = tin - self.heat_start_temp
                     if delta >= self.detection_threshold:
-                        dt = elapsed
+                        # 3.A Look back for inflection point
+                        inflection_time = now
+                        for t_hist, v_hist in reversed(self._tin_history):
+                            if t_hist < self.heat_start_time:
+                                break
+                            # The temperature started rising here
+                            if v_hist <= self.heat_start_temp + 0.01:
+                                inflection_time = t_hist
+                                break
+                            
+                        # True deadtime is from heat_start_time to inflection_time
+                        dt = max(0.0, inflection_time - self.heat_start_time)
+                        
                         self._add_sample_heat(dt)
                         self.state = "HEATING"
-                        _LOGGER.info("SmartPI: Heat Deadtime detected = %.1fs", dt)
+                        _LOGGER.info("SmartPI: Heat Deadtime detected = %.1fs (ascension delayed by %.1fs)", dt, now - inflection_time)
         
         elif self.state == "WAITING_COOL_RESPONSE":
             if self.cool_start_time is not None:
@@ -174,10 +194,21 @@ class DeadTimeEstimator:
                     # Drop detection
                     delta = self.cool_peak_temp - tin
                     if delta >= self.detection_threshold:
-                        dt = elapsed
+                        # 3.A Look back for inflection point
+                        inflection_time = now
+                        for t_hist, v_hist in reversed(self._tin_history):
+                            if t_hist < self.cool_start_time:
+                                break
+                            # The temperature started dropping here
+                            if v_hist >= self.cool_peak_temp - 0.01:
+                                inflection_time = t_hist
+                                break
+                                
+                        dt = max(0.0, inflection_time - self.cool_start_time)
+
                         self._add_sample_cool(dt)
                         self.state = "COOLING"
-                        _LOGGER.info("SmartPI: Cool Deadtime detected = %.1fs", dt)
+                        _LOGGER.info("SmartPI: Cool Deadtime detected = %.1fs (drop delayed by %.1fs)", dt, now - inflection_time)
                         
         # Default states if running without detection
         elif u_applied > 0.01 and self.state == "OFF":

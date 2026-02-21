@@ -41,14 +41,20 @@ class TestSmartPiHysteresisLearning:
         # Pulse ON for 10 mins, temp rises
         for i in range(1, 11):
             now += 60.0
-            # Temp rises 0.01 per min. At i=5, delta=0.05 -> Trigger!
-            tin = 19.0 + i * 0.01
+            # Temp stays flat for 3 mins, then rises 0.02 per min. 
+            # At i=6 (now=360), delta=0.06 -> Trigger!
+            if i <= 3:
+                tin = 19.0
+            else:
+                tin = 19.0 + (i - 3) * 0.02
+                
             self.est.update(now=now, tin=tin, sp=21.0, u_applied=1.0, is_hysteresis=True)
             
-        # At i=5 (5 mins), dt detected = 300s.
+        # At i=6 (6 mins), trigger is hit.
+        # Inflection point was at i=3 (3 mins = 180s).
         # Check current state
         assert self.est.state == "HEATING"
-        assert self.est.deadtime_heat_s == 300.0
+        assert self.est.deadtime_heat_s == 180.0
         assert self.est.deadtime_heat_reliable is True
 
 
