@@ -473,16 +473,18 @@ class ABEstimator:
                 self.learn_last_reason = "skip: b_meas <= 0"
                 return
 
-            # Add to history
-            self.b_meas_hist.append(b_meas)
+            # Simulate adding to see the window
+            temp_history = list(self.b_meas_hist)
+            temp_history.append(b_meas)
 
-            if len(self.b_meas_hist) < AB_MIN_SAMPLES:
+            if len(temp_history) < AB_MIN_SAMPLES:
+                self.b_meas_hist.append(b_meas)
                 self.learn_skip_count += 1
                 self.learn_last_reason = f"skip: collecting b meas ({len(self.b_meas_hist)}/{AB_MIN_SAMPLES})"
                 return
 
-            # Step logic: Select window
-            b_window = self._get_window(self.b_meas_hist)
+            # Step logic: Select temporary window
+            b_window = temp_history[-AB_HISTORY_SIZE:] if len(temp_history) > AB_HISTORY_SIZE else temp_history
 
             # Median + MAD outlier rejection
             med_b = statistics.median(b_window)
@@ -497,6 +499,9 @@ class ABEstimator:
                     return
             else:
                 self.diag_b_mad_over_med = 0.0
+
+            # It's an acceptable value, add it permanently
+            self.b_meas_hist.append(b_meas)
 
             new_b = med_b  # Use median directly
             new_b = clamp(new_b, self.B_MIN, self.B_MAX)
@@ -517,16 +522,18 @@ class ABEstimator:
                 self.learn_last_reason = "skip: a_meas <= 0"
                 return
 
-            # Add to history
-            self.a_meas_hist.append(a_meas)
+            # Simulate adding to see the window
+            temp_history = list(self.a_meas_hist)
+            temp_history.append(a_meas)
 
-            if len(self.a_meas_hist) < AB_MIN_SAMPLES:
+            if len(temp_history) < AB_MIN_SAMPLES:
+                self.a_meas_hist.append(a_meas)
                 self.learn_skip_count += 1
                 self.learn_last_reason = f"skip: collecting a meas ({len(self.a_meas_hist)}/{AB_MIN_SAMPLES})"
                 return
 
-            # Step logic: Select window
-            a_window = self._get_window(self.a_meas_hist)
+            # Step logic: Select temporary window
+            a_window = temp_history[-AB_HISTORY_SIZE:] if len(temp_history) > AB_HISTORY_SIZE else temp_history
 
             # Median + MAD outlier rejection
             med_a = statistics.median(a_window)
@@ -541,6 +548,9 @@ class ABEstimator:
                     return
             else:
                 self.diag_a_mad_over_med = 0.0
+
+            # It's an acceptable value, add it permanently
+            self.a_meas_hist.append(a_meas)
 
             new_a = med_a  # Use median directly
             new_a = clamp(new_a, self.A_MIN, self.A_MAX)
