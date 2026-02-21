@@ -324,14 +324,9 @@ class ABEstimator:
     def _get_window(self, history: Deque[float]):
         """
         Get the learning window subset according to step logic.
-        - If accumulating (11 <= len < 31): Use last 11 samples.
-        - If full (len == 31): Use all 31 samples.
+        - The window size grows progressively up to the max size.
         """
-        if len(history) < AB_HISTORY_SIZE:
-            # Logic: From 11 to 30, we stay in "mode 11" (rolling 11)
-            return list(history)[-AB_MIN_SAMPLES:]
-        # Mode 31
-        return history
+        return list(history)
 
     @staticmethod
     def _theil_sen_slope(x: list[float], y: list[float]) -> float | None:
