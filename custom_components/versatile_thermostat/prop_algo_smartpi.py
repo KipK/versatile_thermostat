@@ -1484,7 +1484,9 @@ class SmartPI(CycleManager):
         # Filter setpoint — only apply EMA in STABLE phase.
         # During HYSTERESIS and CALIBRATION the raw setpoint must be used directly
         # to avoid disrupting bang-bang control and model identification.
-        self._last_raw_setpoint = target_temp
+        # NOTE: do NOT pre-assign last_raw_setpoint here; filter_setpoint owns that
+        # state and uses it to detect setpoint changes. Pre-assigning would always
+        # make the change delta zero, masking every setpoint transition.
         if self.phase == SmartPIPhase.STABLE:
             target_temp_filt = self.sp_mgr.filter_setpoint(target_temp, current_temp, hvac_mode, dt_min, advance_ema=True)
         else:
