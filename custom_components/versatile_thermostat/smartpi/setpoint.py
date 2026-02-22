@@ -165,11 +165,20 @@ class SmartPISetpointManager:
              # Use band to interpolate between fast and slow time constants
             w = min(gap / SP_BAND, 1.0)
             tau = SP_TAU_SLOW + (SP_TAU_FAST - SP_TAU_SLOW) * w
-            
+
             # Robust alpha calculation
             alpha = 1.0 - math.exp(-max(dt_min, 0.001) / max(tau, 1.0))
-            
+
             self.filtered_setpoint = alpha * target_temp + (1 - alpha) * self.filtered_setpoint
+
+        # Prevent filtered setpoint from falling behind current temperature.
+        # If the temperature rises faster than the EMA converges, the error
+        # (filtered - current) would go negative while still below the real target.
+        # Clamp to keep the error non-negative.
+        if hvac_mode == VThermHvacMode_HEAT:
+            self.filtered_setpoint = max(self.filtered_setpoint, current_temp)
+        elif hvac_mode == VThermHvacMode_COOL:
+            self.filtered_setpoint = min(self.filtered_setpoint, current_temp)
 
         return self.filtered_setpoint
 
