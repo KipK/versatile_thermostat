@@ -1525,7 +1525,10 @@ class SmartPI(CycleManager):
         if self._setpoint_boost_active or not self._tau_reliable:
             e_p = error
         else:
-            e_p = self.setpoint_weight_b * error
+            # TODO: 2DOF logic completely removed from e_p calculation. 
+            # To be thoroughly cleaned up later. 
+            # e_p = self.setpoint_weight_b * error
+            e_p = error
 
         self._last_error = error
         self._last_error_p = e_p
