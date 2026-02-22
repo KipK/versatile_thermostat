@@ -27,8 +27,8 @@ class TestDeadTimeEstimatorNew:
         self.est.update(now, 20.06, 21.0, 1.0)
         # 20.06 - 20.0 = 0.06 >= 0.05
         assert self.est.state == "HEATING"
-        # start at 1060. End at 1420. Diff = 360.
-        assert self.est.deadtime_heat_s == 360.0
+        # start at 1060. Inflection at 1360. Diff = 300.
+        assert self.est.deadtime_heat_s == 300.0
         assert self.est.deadtime_heat_reliable is True
 
     def test_nominal_cool_detection(self):
@@ -62,8 +62,8 @@ class TestDeadTimeEstimatorNew:
         now += 300
         self.est.update(now, 22.04, 21.0, 0.0)
         assert self.est.state == "COOLING"
-        # dt = now - stop_time = (stop+360) - stop = 360
-        assert self.est.deadtime_cool_s == 360.0
+        # start at 2060. Peak/inflection at 2120. Diff = 60.
+        assert self.est.deadtime_cool_s == 60.0
         assert self.est.deadtime_cool_reliable is True
 
     def test_cooling_persistence(self):
