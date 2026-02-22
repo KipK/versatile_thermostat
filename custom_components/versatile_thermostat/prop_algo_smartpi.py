@@ -247,9 +247,6 @@ class SmartPI(CycleManager):
         self._deadtime_skip_count_a: int = 0
         self._deadtime_skip_count_b: int = 0
 
-        # Feature flag for integral freeze during deadtime (Default OFF)
-        self.feature_integral_freeze: bool = False
-
         # --- Guard Manager (Phase 2.5 refactoring) ---
         self.guards = SmartPIGuards()
 
@@ -1781,6 +1778,10 @@ class SmartPI(CycleManager):
             error, hvac_mode, current_temp, ext_current_temp
         )
         in_deadband_now = self.deadband_mgr.in_deadband
+
+        # --- 6b. Integral freeze during deadtime window ---
+        if self.in_deadtime_window:
+            integrator_hold = True
 
         # --- 7. Governance Decision ---
         regime = self.gov.determine_regime(
