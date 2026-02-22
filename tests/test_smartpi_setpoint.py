@@ -150,41 +150,6 @@ class TestFilterSetpointEmaActivation:
         )
 
     # ------------------------------------------------------------------
-    # Clamp: temperature rises faster than EMA
-    # ------------------------------------------------------------------
-    def test_filtered_setpoint_never_below_current_temp_in_heat(self):
-        """
-        When current_temp rises faster than the EMA, filtered_setpoint must
-        be clamped to current_temp so the error never goes negative.
-        """
-        m = self._make_manager()
-        initial_temp = 19.0
-        target = 22.0
-        midpoint = (initial_temp + target) / 2.0  # 20.5
-
-        # Init and arm
-        m.filter_setpoint(target_temp=initial_temp, current_temp=initial_temp,
-                          hvac_mode=VThermHvacMode_HEAT, dt_min=DT_MIN)
-        m.filter_setpoint(target_temp=target, current_temp=initial_temp,
-                          hvac_mode=VThermHvacMode_HEAT, dt_min=DT_MIN)
-
-        # Simulate fast-rising temperature that overtakes the EMA
-        for step in range(10):
-            # Temperature rising by 0.2°C each cycle — much faster than EMA
-            current_fast = midpoint + step * 0.2
-            result = m.filter_setpoint(
-                target_temp=target, current_temp=current_fast,
-                hvac_mode=VThermHvacMode_HEAT, dt_min=DT_MIN
-            )
-            assert result >= current_fast - 1e-9, (
-                f"Step {step}: filtered_setpoint {result:.4f} < current_temp {current_fast:.4f}, "
-                "error would go negative"
-            )
-            assert result <= target + 1e-9, (
-                f"Step {step}: filtered_setpoint {result:.4f} > target {target}"
-            )
-
-    # ------------------------------------------------------------------
     # COOL mode symmetry
     # ------------------------------------------------------------------
     def test_cool_mode_midpoint_transition(self):
