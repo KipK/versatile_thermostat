@@ -1481,9 +1481,18 @@ class SmartPI(CycleManager):
         Returns:
             Tuple of (target_temp_filt, setpoint_changed, error, old_target_temp).
         """
-        # Filter setpoint
+        # Filter setpoint — only apply EMA in STABLE phase.
+        # During HYSTERESIS and CALIBRATION the raw setpoint must be used directly
+        # to avoid disrupting bang-bang control and model identification.
         self._last_raw_setpoint = target_temp
-        target_temp_filt = self.sp_mgr.filter_setpoint(target_temp, current_temp, hvac_mode, dt_min, advance_ema=True)
+        if self.phase == SmartPIPhase.STABLE:
+            target_temp_filt = self.sp_mgr.filter_setpoint(target_temp, current_temp, hvac_mode, dt_min, advance_ema=True)
+        else:
+            # Bypass filter and keep its state clean so it is ready when STABLE starts.
+            self.sp_mgr.filtered_setpoint = target_temp
+            self.sp_mgr.last_raw_setpoint = target_temp
+            self.sp_mgr.initial_temp_for_filter = None
+            target_temp_filt = target_temp
         self._filtered_setpoint = target_temp_filt
 
         setpoint_changed = False

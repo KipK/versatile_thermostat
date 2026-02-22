@@ -149,6 +149,11 @@ class SmartPISetpointManager:
             self.filtered_setpoint = target_temp
             return target_temp
 
+        # On first midpoint arrival, filtered_setpoint was held at target_temp.
+        # Initialize it to current_temp so the EMA sees the actual remaining gap.
+        if abs(self.filtered_setpoint - target_temp) < 0.01:
+            self.filtered_setpoint = current_temp
+
         # Apply EMA
         gap = abs(target_temp - self.filtered_setpoint)
         if gap <= 0.02:
