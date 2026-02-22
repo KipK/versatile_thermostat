@@ -1435,6 +1435,7 @@ class SmartPI(CycleManager):
             _, reason = self.gov.decide_update("thermal")
             self._last_i_mode = f"I:RESET({reason.value})"
             self._output_initialized = True
+            self._last_calculate_time = None
             return True
 
         return False
@@ -1557,12 +1558,19 @@ class SmartPI(CycleManager):
         hvac_mode: VThermHvacMode,
         error: float,
         current_temp: float,
+        e_p: float,
+        is_first_run: bool = False,
     ) -> tuple[float, bool]:
         """Calculate gains and feedforward, and handles integrator hold.
 
         Returns:
             Tuple of (u_ff, integrator_hold).
         """
+        # Store the value before the update for bumpless transfer.
+        kp_old = self.Kp
+        ki_old = self.Ki
+        u_pi_old = kp_old * e_p + ki_old * self.ctl.integral
+
         # Delegate gain calculation to GainScheduler component
         tau_info = self.est.tau_reliability()
         self.gain_scheduler.calculate(
@@ -1575,6 +1583,11 @@ class SmartPI(CycleManager):
             ki_near_factor=self.ki_near_factor,
             governance_decision=gov_decision_g,
         )
+
+        # Condition for bumpless transfer on significant gain change.
+        # Skip if this is the first run after resume/startup.
+        if not is_first_run and (abs(self.Kp - kp_old) > 1e-6 or abs(self.Ki - ki_old) > 1e-9):
+            self.ctl.adjust_integral_for_bumpless_transfer(u_pi_old, self.Kp, self.Ki, e_p)
 
         # Gains updated within GainScheduler component
 
@@ -1601,8 +1614,17 @@ class SmartPI(CycleManager):
             error=error,
             near_band_above_deg=self.deadband_mgr.near_band_above_deg,
         )
-        u_ff = ff_result.u_ff_eff
+        u_ff_eff = ff_result.u_ff_eff
         self._last_ff_reason = ff_result.ff_reason
+
+        # asymetric bumpless on ff
+        # Skip if this is the first run after resume/startup.
+        d_uff = u_ff_eff - self.ctl.u_ff
+        if not is_first_run and d_uff > 0.05 and self.Ki > KI_MIN and not self.deadband_mgr.in_deadband:
+            target_u_pi = self.ctl.u_pi - d_uff
+            self.ctl.adjust_integral_for_bumpless_transfer(target_u_pi, self.Kp, self.Ki, e_p)
+
+        u_ff = u_ff_eff
 
         if ff_result.ff_reason == "ff_cut_above_setpoint":
             _LOGGER.debug("%s - FF disabled (above setpoint)", self._name)
@@ -1683,7 +1705,7 @@ class SmartPI(CycleManager):
         self._last_hvac_mode = hvac_mode
 
         # --- 2. Update Time Tracking ---
-        dt_min, _ = self._update_time_tracking(now)
+        dt_min, is_resume = self._update_time_tracking(now)
 
         # --- 3. Setpoint Management ---
         target_temp_filt, setpoint_changed, error, old_target_temp = self._manage_setpoint(
@@ -1777,7 +1799,7 @@ class SmartPI(CycleManager):
 
         # --- 8. Gains & FF ---
         u_ff, gov_hold = self._apply_gains_and_ff(
-            gov_decision_g, target_temp_filt, ext_current_temp, hvac_mode, error, current_temp
+            gov_decision_g, target_temp_filt, ext_current_temp, hvac_mode, error, current_temp, e_p, is_resume
         )
         # Apply explicit hold (parameter) or governance hold
         integrator_hold = integrator_hold or gov_hold

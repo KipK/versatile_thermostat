@@ -76,6 +76,18 @@ class SmartPIController:
             i_max = 2.0 / ki
             self.integral = clamp(self.integral, -i_max, i_max)
 
+    def adjust_integral_for_bumpless_transfer(self, target_u_pi: float, kp_new: float, ki_new: float, error_p: float) -> None:
+        """Adapt the integral I so that the new calculation of u_pi matches target_u_pi."""
+        if ki_new <= KI_MIN:
+            return
+            
+        # Calculation of the new theoretical integral.
+        i_req = (target_u_pi - (kp_new * error_p)) / ki_new
+        
+        # Delta to apply using the existing clamp.
+        dI = i_req - self.integral
+        self.bumpless_transfer(dI, ki_new)
+
     def bump_integral_for_setpoint_change(
         self,
         t_set_old: float,
