@@ -7,7 +7,9 @@ from typing import Optional
 from .const import (
     SETPOINT_BOOST_THRESHOLD,
     SETPOINT_BOOST_ERROR_MIN,
+    SP_TAU_SLOW,
     SP_TAU_FAST,
+    SP_BAND
 )
 from ..vtherm_hvac_mode import VThermHvacMode, VThermHvacMode_HEAT, VThermHvacMode_COOL
 
@@ -160,11 +162,13 @@ class SmartPISetpointManager:
             return target_temp
 
         if advance_ema:
-            # Use SP_TAU_FAST throughout so the EMA converges faster than
-            # typical heating rates, keeping filtered_setpoint ahead of
-            # current_temp during the approach and avoiding negative error.
-            alpha = 1.0 - math.exp(-max(dt_min, 0.001) / max(SP_TAU_FAST, 1.0))
-
+             # Use band to interpolate between fast and slow time constants
+            w = min(gap / SP_BAND, 1.0)
+            tau = SP_TAU_SLOW + (SP_TAU_FAST - SP_TAU_SLOW) * w
+            
+            # Robust alpha calculation
+            alpha = 1.0 - math.exp(-max(dt_min, 0.001) / max(tau, 1.0))
+            
             self.filtered_setpoint = alpha * target_temp + (1 - alpha) * self.filtered_setpoint
 
         return self.filtered_setpoint
