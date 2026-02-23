@@ -30,6 +30,8 @@ async def test_smartpi_guard_kick_trigger():
     algo.guards = MagicMock()
     algo.autocalib = MagicMock()
     algo.calibration_mgr = MagicMock()
+    algo.deadband_mgr = MagicMock()
+    algo.deadband_mgr.near_band_changed = False
     type(algo).calibration_state = PropertyMock(return_value=SmartPICalibrationPhase.IDLE)
     
     # Case 1: Trigger Kick
@@ -73,6 +75,8 @@ async def test_smartpi_guard_kick_reset():
     algo.guards = MagicMock()
     algo.autocalib = MagicMock()
     algo.calibration_mgr = MagicMock()
+    algo.deadband_mgr = MagicMock()
+    algo.deadband_mgr.near_band_changed = False
     type(algo).calibration_state = PropertyMock(return_value=SmartPICalibrationPhase.IDLE)
     
     # Case 2: Reset Kick
@@ -114,6 +118,8 @@ async def test_smartpi_guard_kick_antiloop():
     algo.guards = MagicMock()
     algo.autocalib = MagicMock()
     algo.calibration_mgr = MagicMock()
+    algo.deadband_mgr = MagicMock()
+    algo.deadband_mgr.near_band_changed = False
     type(algo).calibration_state = PropertyMock(return_value=SmartPICalibrationPhase.IDLE)
     
     # Case 3: Maintain (Anti-loop)
@@ -166,6 +172,8 @@ async def test_smartpi_guard_cut_trigger():
     algo.guards = MagicMock()
     algo.autocalib = MagicMock()
     algo.calibration_mgr = MagicMock()
+    algo.deadband_mgr = MagicMock()
+    algo.deadband_mgr.near_band_changed = False
     type(algo).calibration_state = PropertyMock(return_value=SmartPICalibrationPhase.IDLE)
     
     # Case 4: Trigger Cut
@@ -216,6 +224,8 @@ async def test_smartpi_guard_cut_maintain():
     algo.guards = MagicMock()
     algo.autocalib = MagicMock()
     algo.calibration_mgr = MagicMock()
+    algo.deadband_mgr = MagicMock()
+    algo.deadband_mgr.near_band_changed = False
     type(algo).calibration_state = PropertyMock(return_value=SmartPICalibrationPhase.IDLE)
     
     # Case 6: Maintain Cut

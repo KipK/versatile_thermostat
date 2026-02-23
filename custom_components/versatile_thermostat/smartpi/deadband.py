@@ -31,7 +31,8 @@ class DeadbandResult:
     """Result of deadband detection."""
     in_deadband: bool
     in_near_band: bool
-    deadband_changed: bool  # For bumpless transfer trigger
+    deadband_changed: bool  # True when exiting deadband (for bumpless transfer trigger)
+    near_band_changed: bool  # True when entering or exiting near-band (for cycle interrupt)
 
 
 class DeadbandManager:
@@ -59,6 +60,7 @@ class DeadbandManager:
         # State
         self._in_deadband: bool = False
         self._in_near_band: bool = False
+        self._last_near_band_changed: bool = False
 
         # Near-band thresholds (auto-calculated or fallback)
         self._near_band_below_deg: float = near_band_deg
@@ -69,6 +71,7 @@ class DeadbandManager:
         """Reset deadband state to initial values."""
         self._in_deadband = False
         self._in_near_band = False
+        self._last_near_band_changed = False
         self._near_band_below_deg = self._near_band_deg
         self._near_band_above_deg = self._near_band_deg * NEAR_BAND_ABOVE_FACTOR
         self._near_band_source = "reset"
@@ -104,6 +107,7 @@ class DeadbandManager:
         """
         abs_e = abs(error)
         was_in_deadband = self._in_deadband
+        was_in_near_band = self._in_near_band
 
         # --- Deadband Detection ---
         if not tau_reliable:
@@ -168,11 +172,14 @@ class DeadbandManager:
                 in_near_band_now = (self._near_band_deg > 0.0) and (abs_e <= self._near_band_deg)
 
         self._in_near_band = in_near_band_now
+        near_band_changed = was_in_near_band != in_near_band_now
+        self._last_near_band_changed = near_band_changed
 
         return DeadbandResult(
             in_deadband=in_deadband_now,
             in_near_band=in_near_band_now,
             deadband_changed=deadband_changed,
+            near_band_changed=near_band_changed,
         )
 
     def update_near_band_auto(  # pylint: disable=unused-argument
@@ -357,6 +364,11 @@ class DeadbandManager:
     def near_band_source(self) -> str:
         """Source of near-band thresholds (e.g., 'auto_model_aware', 'fallback_deadtime')."""
         return self._near_band_source
+
+    @property
+    def near_band_changed(self) -> bool:
+        """Whether near-band state changed on the last update() call."""
+        return self._last_near_band_changed
 
     @property
     def near_band_deg(self) -> float:

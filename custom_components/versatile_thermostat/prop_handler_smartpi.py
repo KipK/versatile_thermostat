@@ -197,6 +197,14 @@ class SmartPIHandler:
                 power_shedding=t.power_manager.is_overpowering_detected if t.power_manager else False,
             )
 
+            # Force cycle restart on near-band mode transitions
+            if algo.deadband_mgr.near_band_changed:
+                _LOGGER.debug(
+                    "%s - Near-band state transition detected, forcing cycle restart",
+                    t,
+                )
+                force = True
+
             # Trigger learning only on cycle timer (timestamp is not None)
             # And do not learn if we are OFF (window open, etc.)
             if timestamp is not None and current_temp is not None and t.vtherm_hvac_mode != VThermHvacMode_OFF:

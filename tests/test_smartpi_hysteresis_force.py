@@ -46,6 +46,8 @@ async def test_smartpi_hysteresis_forces_cycle():
     algo = MagicMock(spec=SmartPI)
     algo.autocalib = MagicMock()
     algo.calibration_mgr = MagicMock()
+    algo.deadband_mgr = MagicMock()
+    algo.deadband_mgr.near_band_changed = False
     type(algo).calibration_state = PropertyMock(return_value=SmartPICalibrationPhase.IDLE)
     # Simulate hysteresis toggling to 100% (changed from default 0%)
     algo.on_percent = 1.0
