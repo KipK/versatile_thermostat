@@ -154,6 +154,8 @@ def test_conditional_integration_normal():
         minimal_activation_delay=0,
         minimal_deactivation_delay=0,
         name="TestSmartPI",
+        # Keep proportional error equal to raw setpoint error for this test.
+        use_setpoint_filter=False,
     )
     force_stable_mode(smartpi)
 

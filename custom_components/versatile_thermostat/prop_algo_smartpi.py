@@ -549,22 +549,6 @@ class SmartPI(CycleManager):
         self.sp_mgr.filtered_setpoint = value
 
     @property
-    def _last_raw_setpoint(self) -> float | None:
-        return self.sp_mgr.last_raw_setpoint
-
-    @_last_raw_setpoint.setter
-    def _last_raw_setpoint(self, value: float | None):
-        self.sp_mgr.last_raw_setpoint = value
-
-    @property
-    def _initial_temp_for_filter(self) -> float | None:
-        return self.sp_mgr.initial_temp_for_filter
-
-    @_initial_temp_for_filter.setter
-    def _initial_temp_for_filter(self, value: float | None):
-        self.sp_mgr.initial_temp_for_filter = value
-
-    @property
     def _setpoint_boost_active(self) -> bool:
         return self.sp_mgr.boost_active
 
@@ -1311,7 +1295,6 @@ class SmartPI(CycleManager):
             },
             "sp_mgr_state": {
                 k: v for k, v in {
-                    "last_raw_setpoint": state.get("last_raw_setpoint"),
                     "filtered_setpoint": state.get("filtered_setpoint"),
                     "setpoint_boost_active": state.get("setpoint_boost_active"),
                 }.items() if v is not None
@@ -1475,25 +1458,22 @@ class SmartPI(CycleManager):
         current_temp: float,
         hvac_mode: VThermHvacMode,
         dt_min: float
-    ) -> tuple[float, bool, float, float | None]:
+    ) -> tuple[float, bool, float, float, float | None]:
         """Setpoint filtering and boost logic.
 
         Returns:
-            Tuple of (target_temp_filt, setpoint_changed, error, old_target_temp).
+            Tuple of (target_temp_filt, setpoint_changed, error_i, error_p, old_target_temp).
+            error_i: raw setpoint error (SP_brut - y), signed by hvac_mode — for integral.
+            error_p: filtered setpoint error (SP_for_P - y), signed by hvac_mode — for P term.
         """
-        # Filter setpoint — only apply EMA in STABLE phase.
+        # Filter setpoint — only apply in STABLE phase.
         # During HYSTERESIS and CALIBRATION the raw setpoint must be used directly
         # to avoid disrupting bang-bang control and model identification.
-        # NOTE: do NOT pre-assign last_raw_setpoint here; filter_setpoint owns that
-        # state and uses it to detect setpoint changes. Pre-assigning would always
-        # make the change delta zero, masking every setpoint transition.
         if self.phase == SmartPIPhase.STABLE:
-            target_temp_filt = self.sp_mgr.filter_setpoint(target_temp, current_temp, hvac_mode, dt_min, advance_ema=True)
+            target_temp_filt = self.sp_mgr.filter_setpoint(target_temp, current_temp, dt_min)
         else:
             # Bypass filter and keep its state clean so it is ready when STABLE starts.
             self.sp_mgr.filtered_setpoint = target_temp
-            self.sp_mgr.last_raw_setpoint = target_temp
-            self.sp_mgr.initial_temp_for_filter = None
             target_temp_filt = target_temp
         self._filtered_setpoint = target_temp_filt
 
@@ -1508,22 +1488,31 @@ class SmartPI(CycleManager):
                 )
         self._last_target_temp = target_temp
 
-        error = target_temp_filt - current_temp
+        # error_i: integral error — always uses raw setpoint (Åström rule)
+        # error_p: proportional error — uses filtered setpoint
+        error_i = target_temp - current_temp
+        error_p = target_temp_filt - current_temp
         if hvac_mode == VThermHvacMode_COOL:
-            error = -error
+            error_i = -error_i
+            error_p = -error_p
 
-        self._setpoint_boost_active = self.sp_mgr.update_boost_state(target_temp, error, hvac_mode)
+        self._setpoint_boost_active = self.sp_mgr.update_boost_state(target_temp, error_i, hvac_mode)
 
-        return target_temp_filt, setpoint_changed, error, old_target_temp
+        return target_temp_filt, setpoint_changed, error_i, error_p, old_target_temp
 
     def _update_control_context(
         self,
-        error: float,
+        error_i: float,
         hvac_mode: VThermHvacMode,
         current_temp: float,
         ext_current_temp: float | None,
+        error_p: float,
     ) -> tuple[float, bool]:
         """Update tau reliability, error weighting, and deadband state.
+
+        Args:
+            error_i: Raw setpoint error (SP_brut - y) — used for deadband and stored state.
+            error_p: Filtered setpoint error (SP_for_P - y) — returned as e_p for P term.
 
         Returns:
             Tuple of (e_p, was_in_deadband).
@@ -1531,21 +1520,15 @@ class SmartPI(CycleManager):
         tau_info = self.est.tau_reliability()
         self._tau_reliable = tau_info.reliable
 
-        if self._setpoint_boost_active or not self._tau_reliable:
-            e_p = error
-        else:
-            # TODO: 2DOF logic completely removed from e_p calculation. 
-            # To be thoroughly cleaned up later. 
-            # e_p = self.setpoint_weight_b * error
-            e_p = error
+        e_p = error_p
 
-        self._last_error = error
+        self._last_error = error_i
         self._last_error_p = e_p
 
-        # Deadband update
+        # Deadband update uses raw setpoint error (physical distance from target)
         was_in_deadband = self.deadband_mgr.in_deadband
         self.deadband_mgr.update(
-            error=error,
+            error=error_i,
             hvac_mode=hvac_mode,
             tau_reliable=self._tau_reliable,
             dt_est=self.dt_est,
@@ -1639,7 +1622,7 @@ class SmartPI(CycleManager):
         if ff_result.ff_reason == "ff_cut_above_setpoint":
             _LOGGER.debug("%s - FF disabled (above setpoint)", self._name)
 
-        integrator_hold = gov_decision_g in (GovernanceDecision.HARD_FREEZE, GovernanceDecision.FREEZE)
+        integrator_hold = gov_decision_g == GovernanceDecision.HARD_FREEZE
 
         return u_ff, integrator_hold
 
@@ -1718,7 +1701,7 @@ class SmartPI(CycleManager):
         dt_min, is_resume = self._update_time_tracking(now)
 
         # --- 3. Setpoint Management ---
-        target_temp_filt, setpoint_changed, error, old_target_temp = self._manage_setpoint(
+        target_temp_filt, setpoint_changed, error_i, error_p, old_target_temp = self._manage_setpoint(
             target_temp, current_temp, hvac_mode, dt_min
         )
 
@@ -1788,7 +1771,7 @@ class SmartPI(CycleManager):
 
         # --- 6. Control Context & Deadband ---
         e_p, was_in_deadband = self._update_control_context(
-            error, hvac_mode, current_temp, ext_current_temp
+            error_i, hvac_mode, current_temp, ext_current_temp, error_p
         )
         in_deadband_now = self.deadband_mgr.in_deadband
 
@@ -1813,7 +1796,7 @@ class SmartPI(CycleManager):
 
         # --- 8. Gains & FF ---
         u_ff, gov_hold = self._apply_gains_and_ff(
-            gov_decision_g, target_temp_filt, ext_current_temp, hvac_mode, error, current_temp, e_p, is_resume,
+            gov_decision_g, target_temp_filt, ext_current_temp, hvac_mode, error_i, current_temp, e_p, is_resume,
             setpoint_changed=setpoint_changed
         )
         # Apply explicit hold (parameter) or governance hold
@@ -1838,7 +1821,7 @@ class SmartPI(CycleManager):
 
         # --- 11. PID Compute ---
         u_cmd = self.ctl.compute_pwm(
-            error,
+            error_i,
             e_p,
             self.Kp,
             self.Ki,

@@ -198,13 +198,12 @@ INTEGRAL_DEADBAND_MICROLEAK = 0.999
 NEAR_BAND_ABOVE_FACTOR = 0.40
 NEAR_BAND_HYSTERESIS_C = 0.05
 
-# Asymmetric setpoint EMA filter parameters
-# Alpha = 1 - exp(-dt / Tau)
-# Old alphas: 0.05 (slow), 0.40 (fast) for ~10-15 min cycles
-SP_TAU_SLOW = 200.0    # Minutes
-SP_TAU_FAST = 20.0     # Minutes
-SP_BAND = 1.0          # Band for alpha interpolation (°C)
-SP_BYPASS_ERROR_THRESHOLD = 0.8  # Bypass filter when error > this (°C)
+# Asymmetric setpoint EMA filter parameters (Saturation Guard + first-order low-pass)
+# alpha = dt_s / (tau_f + dt_s)  [Euler explicit discretisation]
+SP_TAU_SLOW = 900.0              # seconds — filter time constant on setpoint rise
+SP_TAU_FAST = 300.0              # seconds — filter time constant on setpoint drop
+SP_SATURATION_THRESHOLD = 1.0   # °C — bypass filter when |SP_brut - y| >= this
+SP_HYST = 0.1                   # °C — direction hysteresis (UP/DOWN switching)
 
 # Error filter time constant
 ERROR_FILTER_TAU = 25.0 # Minutes (matches alpha ~0.35 at 10min)
