@@ -10,6 +10,7 @@ from .const import (
     SP_TAU_SLOW,
     SP_TAU_FAST,
     SP_SATURATION_THRESHOLD,
+    SP_SETPOINT_JUMP_THRESHOLD,
     SP_HYST,
 )
 from ..vtherm_hvac_mode import VThermHvacMode
@@ -123,8 +124,12 @@ class SmartPISetpointManager:
         # ── Step 1: True error ──
         delta_sp = target_temp - current_temp
 
-        if abs(delta_sp) >= SP_SATURATION_THRESHOLD:
-            # ── BYPASS mode: filter state tracks SP_brut (guarantees C⁰ continuity) ──
+        # ── BYPASS mode: large physical error OR filter state lags behind new setpoint ──
+        # The second condition catches setpoint steps (e.g. +0.5 °C from a converged state)
+        # where filter_state ≈ old_setpoint < current_temp: without bypass, error_p would
+        # be near-zero or negative, making the proportional term unable to drive the system.
+        if (abs(delta_sp) >= SP_SATURATION_THRESHOLD or
+                abs(target_temp - self.filtered_setpoint) >= SP_SETPOINT_JUMP_THRESHOLD):
             self.filtered_setpoint = target_temp
             return target_temp
 

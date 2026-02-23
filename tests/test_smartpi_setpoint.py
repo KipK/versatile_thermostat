@@ -6,6 +6,7 @@ from custom_components.versatile_thermostat.smartpi.const import (
     SP_TAU_SLOW,
     SP_TAU_FAST,
     SP_SATURATION_THRESHOLD,
+    SP_SETPOINT_JUMP_THRESHOLD,
     SP_HYST,
 )
 
@@ -33,8 +34,8 @@ class TestBumplessTransfer:
     def test_init_from_current_temp(self):
         """On first call (FILTER mode), filter_state must start from current_temp, not target_temp."""
         m = _make_manager()
-        # Small delta stays in FILTER mode (|18.5 - 18.0| = 0.5 < SP_SATURATION_THRESHOLD)
-        target = 18.5
+        # delta 0.3 < SP_SETPOINT_JUMP_THRESHOLD (0.5) and < SP_SATURATION_THRESHOLD (1.0)
+        target = 18.3
         current = 18.0
         result = m.filter_setpoint(target_temp=target, current_temp=current, dt_min=DT_MIN)
         # filter_state is initialised to current_temp=18.0 (bumpless transfer), then
@@ -120,9 +121,12 @@ class TestBypassMode:
         assert result == 19.0 + SP_SATURATION_THRESHOLD
 
     def test_just_below_threshold_uses_filter(self):
+        """Just below BOTH bypass thresholds → FILTER mode applies.
+        Effective threshold is min(SP_SATURATION_THRESHOLD, SP_SETPOINT_JUMP_THRESHOLD)."""
         m = _make_manager()
         m.filter_setpoint(target_temp=19.0, current_temp=19.0, dt_min=DT_MIN)
-        target = 19.0 + SP_SATURATION_THRESHOLD - 0.01
+        # Stay below the tighter threshold (SP_SETPOINT_JUMP_THRESHOLD = 0.5)
+        target = 19.0 + SP_SETPOINT_JUMP_THRESHOLD - 0.01
         result = m.filter_setpoint(target_temp=target, current_temp=19.0, dt_min=DT_MIN)
         alpha = _alpha(SP_TAU_SLOW)
         expected = alpha * target + (1.0 - alpha) * 19.0
@@ -138,7 +142,8 @@ class TestFilterMode:
     def test_ema_direction_up_uses_tau_slow(self):
         m = _make_manager()
         m.filter_setpoint(target_temp=19.0, current_temp=19.0, dt_min=DT_MIN)
-        target = 19.5
+        # +0.3 °C: below SP_SETPOINT_JUMP_THRESHOLD (0.5) → FILTER mode, UP direction
+        target = 19.3
         result = m.filter_setpoint(target_temp=target, current_temp=19.0, dt_min=DT_MIN)
         alpha = _alpha(SP_TAU_SLOW)
         expected = alpha * target + (1.0 - alpha) * 19.0
@@ -149,7 +154,8 @@ class TestFilterMode:
     def test_ema_direction_down_uses_tau_fast(self):
         m = _make_manager()
         m.filter_setpoint(target_temp=19.5, current_temp=19.5, dt_min=DT_MIN)
-        target = 19.0
+        # -0.3 °C: below SP_SETPOINT_JUMP_THRESHOLD (0.5) → FILTER mode, DOWN direction
+        target = 19.2
         result = m.filter_setpoint(target_temp=target, current_temp=19.5, dt_min=DT_MIN)
         alpha = _alpha(SP_TAU_FAST)
         expected = alpha * target + (1.0 - alpha) * 19.5
@@ -167,7 +173,8 @@ class TestFilterMode:
     def test_ema_progresses_over_multiple_cycles(self):
         m = _make_manager()
         m.filter_setpoint(target_temp=19.0, current_temp=19.0, dt_min=DT_MIN)
-        target = 19.5
+        # +0.3 °C step: below SP_SETPOINT_JUMP_THRESHOLD → stays in FILTER mode every cycle
+        target = 19.3
         current = 19.2
         state = 19.0
         for _ in range(10):
@@ -302,3 +309,76 @@ class TestReset:
         assert m._direction == "UP"
         assert m._tau_f_prev == SP_TAU_SLOW
         assert m.boost_active is False
+
+
+# ---------------------------------------------------------------------------
+# Setpoint step bypass — filter-state lag (SP_SETPOINT_JUMP_THRESHOLD)
+# ---------------------------------------------------------------------------
+
+class TestSetpointJumpBypass:
+    """When the new setpoint is >= SP_SETPOINT_JUMP_THRESHOLD away from filter_state,
+    bypass immediately so error_p = error_i (full proportional response).
+
+    Scenario: room at 19.08 °C, old setpoint 19 °C (filter converged to ≈ 19.0),
+    user raises setpoint to 19.5 °C.  Without bypass, error_p would be near-zero
+    or negative and the P-term could not drive the system.
+    """
+
+    def test_setpoint_step_from_converged_state_bypasses(self):
+        """A 0.5 °C step from a fully-converged filter state triggers bypass."""
+        m = _make_manager()
+        # Simulate filter converged at old setpoint 19.0 °C
+        m.filtered_setpoint = 19.0
+        m._direction = "UP"
+        m._tau_f_prev = SP_TAU_SLOW
+
+        # New setpoint: +0.5 °C  →  |19.5 - 19.0| = 0.5 >= SP_SETPOINT_JUMP_THRESHOLD → BYPASS
+        result = m.filter_setpoint(target_temp=19.5, current_temp=19.08, dt_min=DT_MIN)
+        assert result == 19.5
+        assert m.filtered_setpoint == 19.5
+
+    def test_setpoint_step_error_p_is_positive(self):
+        """After bypass, error_p = target - current > 0 (P-term drives heating)."""
+        m = _make_manager()
+        m.filtered_setpoint = 19.0
+        m._direction = "UP"
+
+        result = m.filter_setpoint(target_temp=19.5, current_temp=19.08, dt_min=DT_MIN)
+        error_p = result - 19.08
+        assert error_p > 0, f"error_p must be positive to drive heating, got {error_p}"
+
+    def test_just_below_jump_threshold_uses_filter(self):
+        """A step smaller than SP_SETPOINT_JUMP_THRESHOLD stays in FILTER mode."""
+        m = _make_manager()
+        m.filtered_setpoint = 19.0
+        m._direction = "UP"
+        target = 19.0 + SP_SETPOINT_JUMP_THRESHOLD - 0.01  # just below threshold
+        result = m.filter_setpoint(target_temp=target, current_temp=19.0, dt_min=DT_MIN)
+        # FILTER mode: result must be < target (EMA, not bypass)
+        assert result < target
+
+    def test_exactly_at_jump_threshold_triggers_bypass(self):
+        """A step exactly equal to SP_SETPOINT_JUMP_THRESHOLD triggers bypass."""
+        m = _make_manager()
+        m.filtered_setpoint = 19.0
+        m._direction = "UP"
+        target = 19.0 + SP_SETPOINT_JUMP_THRESHOLD
+        result = m.filter_setpoint(target_temp=target, current_temp=19.0, dt_min=DT_MIN)
+        assert result == target
+
+    def test_bypass_closes_after_one_cycle(self):
+        """After bypass, filter_state = target_temp, so next cycle |target - state| = 0
+        and the jump condition no longer fires (FILTER mode resumes)."""
+        m = _make_manager()
+        m.filtered_setpoint = 19.0
+        m._direction = "UP"
+
+        # First cycle: bypass
+        m.filter_setpoint(target_temp=19.5, current_temp=19.08, dt_min=DT_MIN)
+        assert m.filtered_setpoint == 19.5
+
+        # Second cycle: filter_state == target_temp → |target - state| = 0 < threshold → FILTER
+        # EMA(19.5 → 19.5) = 19.5 exactly: filter is converged, no bypass re-fires.
+        result2 = m.filter_setpoint(target_temp=19.5, current_temp=19.1, dt_min=DT_MIN)
+        assert result2 == 19.5           # still at target (converged)
+        assert m.filtered_setpoint == 19.5  # no second bypass

@@ -203,6 +203,7 @@ NEAR_BAND_HYSTERESIS_C = 0.05
 SP_TAU_SLOW = 900.0              # seconds — filter time constant on setpoint rise
 SP_TAU_FAST = 300.0              # seconds — filter time constant on setpoint drop
 SP_SATURATION_THRESHOLD = 1.0   # °C — bypass filter when |SP_brut - y| >= this
+SP_SETPOINT_JUMP_THRESHOLD = 0.5  # °C — bypass when new setpoint is far from filter state (setpoint step)
 SP_HYST = 0.1                   # °C — direction hysteresis (UP/DOWN switching)
 
 # Error filter time constant
