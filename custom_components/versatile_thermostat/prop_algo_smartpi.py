@@ -1568,6 +1568,7 @@ class SmartPI(CycleManager):
         current_temp: float,
         e_p: float,
         is_first_run: bool = False,
+        setpoint_changed: bool = False,
     ) -> tuple[float, bool]:
         """Calculate gains and feedforward, and handles integrator hold.
 
@@ -1626,9 +1627,10 @@ class SmartPI(CycleManager):
         self._last_ff_reason = ff_result.ff_reason
 
         # asymetric bumpless on ff
-        # Skip if this is the first run after resume/startup.
+        # Skip if this is the first run after resume/startup, or if setpoint changed
+        # (integral was just reset; applying bumpless here would undo that reset).
         d_uff = u_ff_eff - self.ctl.u_ff
-        if not is_first_run and d_uff > 0.05 and self.Ki > KI_MIN and not self.deadband_mgr.in_deadband:
+        if not is_first_run and not setpoint_changed and d_uff > 0.05 and self.Ki > KI_MIN and not self.deadband_mgr.in_deadband:
             target_u_pi = self.ctl.u_pi - d_uff
             self.ctl.adjust_integral_for_bumpless_transfer(target_u_pi, self.Kp, self.Ki, e_p)
 
@@ -1811,7 +1813,8 @@ class SmartPI(CycleManager):
 
         # --- 8. Gains & FF ---
         u_ff, gov_hold = self._apply_gains_and_ff(
-            gov_decision_g, target_temp_filt, ext_current_temp, hvac_mode, error, current_temp, e_p, is_resume
+            gov_decision_g, target_temp_filt, ext_current_temp, hvac_mode, error, current_temp, e_p, is_resume,
+            setpoint_changed=setpoint_changed
         )
         # Apply explicit hold (parameter) or governance hold
         integrator_hold = integrator_hold or gov_hold
