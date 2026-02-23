@@ -216,6 +216,9 @@ class SmartPI(CycleManager):
         # Track last target temp for learning invalidation
         self._last_target_temp = None
 
+        # Track last sensor temperature (unrounded) used in calculations
+        self._last_current_temp: float | None = None
+
         # Track last HVAC mode for integral reset on HEAT/COOL transitions
         self._last_hvac_mode: VThermHvacMode | None = None
 
@@ -314,6 +317,7 @@ class SmartPI(CycleManager):
         self._last_calculate_time = None
         self._learn_last_ts = None
         self._last_target_temp = None
+        self._last_current_temp = None
         self._last_hvac_mode = None
         self._learning_start_date = datetime.now()
 
@@ -1869,6 +1873,7 @@ class SmartPI(CycleManager):
         self._last_u_ff = self.ctl.u_ff
         self._last_u_cmd = self.ctl.u_cmd
         self._last_aw_du = self.ctl.last_aw_du
+        self._last_current_temp = current_temp
         # self._last_i_mode and self._last_sat are now properties delegating to self.ctl
 
         # Dead Time Update

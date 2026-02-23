@@ -48,6 +48,8 @@ ESSENTIAL_KEYS = {
     "autocalib_last_trigger_ts",
     "autocalib_next_check_ts",
     "autocalib_snapshot_age_h",
+    # Sensor temperature
+    "sensor_temperature",
 }
 
 def build_diagnostics(algo: SmartPI, debug_mode: bool = False) -> Dict[str, Any]:
@@ -153,10 +155,7 @@ def build_diagnostics(algo: SmartPI, debug_mode: bool = False) -> Dict[str, Any]
         "guard_kick_count": algo.guard_kick_count,
         # Forced Calibration
         "calibration_state": algo.calibration_state,
-        "last_calibration_time": (
-            datetime.fromtimestamp(algo.calibration_mgr.last_calibration_time).isoformat()
-            if algo.calibration_mgr.last_calibration_time else None
-        ),
+        "last_calibration_time": (datetime.fromtimestamp(algo.calibration_mgr.last_calibration_time).isoformat() if algo.calibration_mgr.last_calibration_time else None),
         "calibration_retry_count": algo.calibration_mgr.retry_count,
         # AutoCalibTrigger §6.1
         "autocalib_state": algo.autocalib.state.value,
@@ -178,6 +177,8 @@ def build_diagnostics(algo: SmartPI, debug_mode: bool = False) -> Dict[str, Any]
         "last_decision_gains": algo.gov.last_decision_gains.value,
         # Setpoint boost aliases
         "boost_active": algo.sp_mgr.boost_active,
+        # Sensor temperature (unrounded) used in last calculation cycle
+        "sensor_temperature": algo._last_current_temp,
     }
 
     # --- Bootstrap / Learning Diagnostics ---
