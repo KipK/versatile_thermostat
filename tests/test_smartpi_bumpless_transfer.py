@@ -178,6 +178,9 @@ async def test_smartpi_bumpless_ff_asymmetric(hass):
     
     assert algo.u_ff > 0.1 # FF restored
     integral_after_resume = algo.ctl.integral
-    
-    # Integral MUST drop sharply to compensate for the sudden increase from FF
-    assert integral_after_resume < integral_after_cut
+
+    # The FF gate opening from ff_cut_above_setpoint is an artificial event, not a physical
+    # change in feedforward force. With small Ki the resulting delta-I = delta_u_ff / Ki would
+    # be enormous. The bumpless transfer must therefore be skipped in this case.
+    # The integral should remain stable (no large spike downward).
+    assert abs(integral_after_resume - integral_after_cut) < 0.5

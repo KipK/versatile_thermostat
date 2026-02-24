@@ -1605,6 +1605,7 @@ class SmartPI(CycleManager):
 
         # FF gating (hard gate only)
         self._last_ff_raw = u_ff  # Store raw value before gating
+        prev_ff_reason = self._last_ff_reason  # Save previous cycle's FF reason before update
         ff_result = apply_ff_gate(
             u_ff_raw=u_ff,
             error=error,
@@ -1613,11 +1614,29 @@ class SmartPI(CycleManager):
         u_ff_eff = ff_result.u_ff_eff
         self._last_ff_reason = ff_result.ff_reason
 
-        # asymetric bumpless on ff
+        # Asymmetric bumpless on FF increase.
         # Skip if this is the first run after resume/startup, or if setpoint changed
         # (integral was just reset; applying bumpless here would undo that reset).
+        #
+        # Additional guards:
+        # 1. prev_ff_reason == "ff_cut_above_setpoint": FF was gated off because T > SP.
+        #    The FF jump is a gate opening, not a physical change. With small Ki the resulting
+        #    delta-I would be enormous ( delta_I = delta_u_ff / Ki ). Skip bumpless.
+        # 2. Last integrator mode was SKIP / HOLD / FREEZE: the integral is under explicit
+        #    control; perturbing it via bumpless here would contradict that decision.
         d_uff = u_ff_eff - self.ctl.u_ff
-        if not is_first_run and not setpoint_changed and d_uff > 0.05 and self.Ki > KI_MIN and not self.deadband_mgr.in_deadband:
+        _i_mode_frozen = any(
+            self.ctl.last_i_mode.startswith(p) for p in ("I:SKIP", "I:HOLD", "I:FREEZE")
+        )
+        if (
+            not is_first_run
+            and not setpoint_changed
+            and d_uff > 0.05
+            and self.Ki > KI_MIN
+            and not self.deadband_mgr.in_deadband
+            and prev_ff_reason != "ff_cut_above_setpoint"
+            and not _i_mode_frozen
+        ):
             target_u_pi = self.ctl.u_pi - d_uff
             self.ctl.adjust_integral_for_bumpless_transfer(target_u_pi, self.Kp, self.Ki, e_p)
 
