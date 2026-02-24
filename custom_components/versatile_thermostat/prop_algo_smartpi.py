@@ -790,16 +790,6 @@ class SmartPI(CycleManager):
     def last_decision_thermal(self) -> str:
         return self.gov.last_decision_thermal.value
 
-    @last_decision_thermal.setter
-    def last_decision_thermal(self, value: str | GovernanceDecision):
-        if isinstance(value, str):
-            try:
-                self.gov.last_decision_thermal = GovernanceDecision(value)
-            except ValueError:
-                pass
-        else:
-            self.gov.last_decision_thermal = value
-
     @property
     def freeze_reason_thermal(self) -> str:
         return self.gov.last_freeze_reason_thermal.value
@@ -807,16 +797,6 @@ class SmartPI(CycleManager):
     @property
     def last_decision_gains(self) -> str:
         return self.gov.last_decision_gains.value
-
-    @last_decision_gains.setter
-    def last_decision_gains(self, value: str | GovernanceDecision):
-        if isinstance(value, str):
-            try:
-                self.gov.last_decision_gains = GovernanceDecision(value)
-            except ValueError:
-                pass
-        else:
-            self.gov.last_decision_gains = value
 
     @property
     def freeze_reason_gains(self) -> str:

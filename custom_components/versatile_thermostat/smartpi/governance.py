@@ -58,58 +58,12 @@ class SmartPIGovernance:
         self.last_freeze_reason_gains = FreezeReason.NONE
 
     def load_state(self, state: dict):
-        """Load state from persistence."""
-        if not state:
-            return
-            
-        regime_val = state.get("governance_regime")
-        if regime_val:
-            try:
-                self._current_regime = GovernanceRegime(regime_val)
-            except ValueError:
-                self._current_regime = GovernanceRegime.WARMUP
-                
-        # We don't necessarily restore _cycle_regimes as it's cycle-local
-        # but we could if we wanted to be very precise after a reboot mid-cycle.
-        
-        # Last decisions for UI consistency
-        rdt = state.get("freeze_reason_thermal")
-        if rdt:
-            try:
-                self.last_freeze_reason_thermal = FreezeReason(rdt)
-            except ValueError:
-                pass
-        
-        rdg = state.get("freeze_reason_gains")
-        if rdg:
-            try:
-                self.last_freeze_reason_gains = FreezeReason(rdg)
-            except ValueError:
-                pass
-             
-        ddt = state.get("governance_decision_thermal")
-        if ddt:
-            try:
-                self.last_decision_thermal = GovernanceDecision(ddt)
-            except ValueError:
-                pass
-             
-        ddg = state.get("governance_decision_gains")
-        if ddg:
-            try:
-                self.last_decision_gains = GovernanceDecision(ddg)
-            except ValueError:
-                pass
+        """Load state from persistence. Nothing to restore: all governance state is recomputed."""
 
     def save_state(self) -> dict:
-        """Save state for persistence."""
-        return {
-            "governance_regime": self._current_regime.value,
-            "freeze_reason_thermal": self.last_freeze_reason_thermal.value,
-            "freeze_reason_gains": self.last_freeze_reason_gains.value,
-            "governance_decision_thermal": self.last_decision_thermal.value,
-            "governance_decision_gains": self.last_decision_gains.value,
-        }
+        """Save state for persistence. Governance state is not persisted:
+        it is fully recomputed on the first calculate() call after reboot."""
+        return {}
 
     def on_cycle_start(self):
         """Called at the start of a new cycle."""

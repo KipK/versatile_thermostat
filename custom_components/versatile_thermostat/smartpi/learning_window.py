@@ -150,14 +150,6 @@ class LearningWindowManager:
         if not state:
             return
 
-        self._active = state.get("learn_win_active", False)
-        self._start_ts = convert_wall_to_monotonic_ts(state.get("learn_win_start_ts"))
-        self._T_int_start = state.get("learn_T_int_start", 0.0)
-        self._T_ext_start = state.get("learn_T_ext_start", 0.0)
-        self._u_int = state.get("learn_u_int", 0.0)
-        self._t_int_s = state.get("learn_t_int_s", 0.0)
-        self._u_first = state.get("learn_u_first")
-        
         # Parse learning start date from ISO string
         start_date_str = state.get("learning_start_date")
         if start_date_str:
@@ -177,13 +169,6 @@ class LearningWindowManager:
             Dictionary containing the current state.
         """
         return {
-            "learn_win_active": self._active,
-            "learn_win_start_ts": convert_monotonic_to_wall_ts(self._start_ts),
-            "learn_T_int_start": self._T_int_start,
-            "learn_T_ext_start": self._T_ext_start,
-            "learn_u_int": self._u_int,
-            "learn_t_int_s": self._t_int_s,
-            "learn_u_first": self._u_first,
             "learning_start_date": (
                 self._learning_start_date.isoformat() 
                 if self._learning_start_date else None

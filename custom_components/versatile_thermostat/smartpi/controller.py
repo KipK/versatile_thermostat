@@ -243,14 +243,12 @@ class SmartPIController:
         if not state:
             return
         self.integral = float(state.get("integral") or 0.0)
-        self.u_prev = float(state.get("u_prev") or 0.0)
         self.hysteresis_thermal_guard = bool(state.get("hysteresis_thermal_guard") or False)
         # Note: other internal diagnositcs not critical to restore
         
     def save_state(self) -> dict:
         return {
             "integral": self.integral,
-            "u_prev": self.u_prev,
             "hysteresis_thermal_guard": self.hysteresis_thermal_guard
         }
 

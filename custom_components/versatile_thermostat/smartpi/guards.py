@@ -176,15 +176,11 @@ class SmartPIGuards:
     def save_state(self) -> GuardState:
         """Save state."""
         return {
-            "guard_cut_active": self._guard_cut_active,
             "guard_cut_count": self._guard_cut_count,
-            "guard_kick_active": self._guard_kick_active,
             "guard_kick_count": self._guard_kick_count,
         }
 
     def load_state(self, state: GuardState) -> None:
         """Load state."""
-        self._guard_cut_active = bool(state.get("guard_cut_active", False))
         self._guard_cut_count = int(state.get("guard_cut_count", 0))
-        self._guard_kick_active = bool(state.get("guard_kick_active", False))
         self._guard_kick_count = int(state.get("guard_kick_count", 0))

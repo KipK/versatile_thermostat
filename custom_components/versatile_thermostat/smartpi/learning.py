@@ -638,10 +638,6 @@ class ABEstimator:
             "b_meas_hist": list(self.b_meas_hist),
             "a_hat_hist": list(self._a_hat_hist),
             "b_hat_hist": list(self._b_hat_hist),
-            "diag_a_mad_over_med": self.diag_a_mad_over_med,
-            "diag_b_mad_over_med": self.diag_b_mad_over_med,
-            "learn_last_reason": self.learn_last_reason,
-            "diag_dTdt_method": self.diag_dTdt_method,
         }
 
     def load_state(self, state: dict) -> None:
@@ -666,8 +662,3 @@ class ABEstimator:
         b_hat = state.get("b_hat_hist", [])
         self._b_hat_hist = deque(b_hat, maxlen=20)
 
-        # Restore diagnostics
-        self.diag_a_mad_over_med = state.get("diag_a_mad_over_med")
-        self.diag_b_mad_over_med = state.get("diag_b_mad_over_med")
-        self.learn_last_reason = state.get("learn_last_reason", "init")
-        self.diag_dTdt_method = state.get("diag_dTdt_method", "init")
