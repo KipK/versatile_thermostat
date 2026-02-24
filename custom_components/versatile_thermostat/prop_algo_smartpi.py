@@ -1616,8 +1616,9 @@ class SmartPI(CycleManager):
         )
 
         # Condition for bumpless transfer on significant gain change.
-        # Skip if this is the first run after resume/startup.
-        if not is_first_run and (abs(self.Kp - kp_old) > 1e-6 or abs(self.Ki - ki_old) > 1e-9):
+        # Skip if this is the first run after resume/startup, or if a large setpoint
+        # change just reset the integral — bumpless must not overwrite that reset.
+        if not is_first_run and not setpoint_changed and (abs(self.Kp - kp_old) > 1e-6 or abs(self.Ki - ki_old) > 1e-9):
             self.ctl.adjust_integral_for_bumpless_transfer(u_pi_old, self.Kp, self.Ki, e_p)
 
         # Gains updated within GainScheduler component
