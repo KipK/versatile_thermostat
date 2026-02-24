@@ -199,6 +199,7 @@ class LearningWindowManager:
         deadtime_skip_count_a: int = 0,
         deadtime_skip_count_b: int = 0,
         is_calibrating: bool = False,
+        is_hysteresis: bool = False,
     ) -> tuple[int, int]:
         """
         Update learning window and submit to estimator if conditions met.
@@ -259,6 +260,23 @@ class LearningWindowManager:
             if gov_decision in (GovernanceDecision.HARD_FREEZE, GovernanceDecision.FREEZE):
                 estimator.learn_skip_count += 1
                 estimator.learn_last_reason = f"skip: governance ({gov_reason.value})"
+                if self._active:
+                    self.reset()
+                return deadtime_skip_count_a, deadtime_skip_count_b
+
+        # --- Bootstrap: require deadtime before A/B collection ---
+        # During hysteresis phase, A collection is gated on heat deadtime availability,
+        # and B collection is gated on cool deadtime availability.
+        if is_hysteresis:
+            if u_active > U_ON_MIN and not dt_est.deadtime_heat_reliable:
+                estimator.learn_skip_count += 1
+                estimator.learn_last_reason = "skip: bootstrap - heat deadtime not yet learned"
+                if self._active:
+                    self.reset()
+                return deadtime_skip_count_a, deadtime_skip_count_b
+            if u_active < U_OFF_MAX and not dt_est.deadtime_cool_reliable:
+                estimator.learn_skip_count += 1
+                estimator.learn_last_reason = "skip: bootstrap - cool deadtime not yet learned"
                 if self._active:
                     self.reset()
                 return deadtime_skip_count_a, deadtime_skip_count_b

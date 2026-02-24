@@ -666,6 +666,7 @@ class SmartPI(CycleManager):
             deadtime_skip_count_a=self._deadtime_skip_count_a,
             deadtime_skip_count_b=self._deadtime_skip_count_b,
             is_calibrating=self.calibration_mgr.is_calibrating,
+            is_hysteresis=(self.phase == SmartPIPhase.HYSTERESIS),
         )
 
     async def on_cycle_started(self, on_time_sec: float, off_time_sec: float, on_percent: float, hvac_mode: str) -> None:
@@ -824,21 +825,40 @@ class SmartPI(CycleManager):
         """
         Detailed state message for the bootstrap process.
         Returns None if not in Hysteresis phase.
+
+        Three steps:
+          step1: waiting for deadtimes (A/B collection blocked per mode)
+          step2: both deadtimes acquired, collecting initial emeas (<AB_MIN_SAMPLES)
+          step3: full thermal model learning in progress
         """
         if self.phase != SmartPIPhase.HYSTERESIS:
             return None
 
         nb_a = len(self.est.a_meas_hist)
         nb_b = len(self.est.b_meas_hist)
+
+        dt_heat_ok = self.dt_est.deadtime_heat_reliable
+        dt_cool_ok = self.dt_est.deadtime_cool_reliable
+
+        # Step 1: at least one deadtime missing
+        if not (dt_heat_ok and dt_cool_ok):
+            heat_str = f"{int(self.dt_est.deadtime_heat_s)}s" if dt_heat_ok and self.dt_est.deadtime_heat_s is not None else "null"
+            cool_str = f"{int(self.dt_est.deadtime_cool_s)}s" if dt_cool_ok and self.dt_est.deadtime_cool_s is not None else "null"
+            parts = [f"step1 - deadtime: heat:{heat_str} cool:{cool_str}"]
+            if dt_heat_ok and nb_a > 0:
+                parts.append(f"[A:{nb_a}/{AB_MIN_SAMPLES}]")
+            if dt_cool_ok and nb_b > 0:
+                parts.append(f"[B:{nb_b}/{AB_MIN_SAMPLES}]")
+            return " ".join(parts)
+
+        # Step 2: both deadtimes acquired, collecting initial emeas
+        if nb_a < AB_MIN_SAMPLES or nb_b < AB_MIN_SAMPLES:
+            return f"step2 - collecting emeas: A:{nb_a}/{AB_MIN_SAMPLES} B:{nb_b}/{AB_MIN_SAMPLES}"
+
+        # Step 3: full thermal model learning
         ok_a = self.est.learn_ok_count_a
         ok_b = self.est.learn_ok_count_b
-
-        # Phase 1: Collecting initial samples (min 11)
-        if nb_a < AB_MIN_SAMPLES or nb_b < AB_MIN_SAMPLES:
-            return f"collecting initial emeas : a:{nb_a}/{AB_MIN_SAMPLES} b:{nb_b}/{AB_MIN_SAMPLES}"
-
-        # Phase 2: Building full history (up to 31)
-        return f"learning thermal model a:{ok_a} b:{ok_b} emea_a:{nb_a}/{AB_HISTORY_SIZE} emea_b:{nb_b}/{AB_HISTORY_SIZE}"
+        return f"step3 - learning thermal model: A:{ok_a}/{AB_HISTORY_SIZE} B:{ok_b}/{AB_HISTORY_SIZE}"
 
     @property
     def last_i_mode(self) -> str:
