@@ -76,6 +76,8 @@ from .smartpi.const import (
     DEFAULT_KP_NEAR_FACTOR,
     DEFAULT_KI_NEAR_FACTOR,
     CALIBRATION_TIMEOUT_MIN,
+    AW_TRACK_TAU_S,
+    AW_TRACK_MAX_DELTA_I,
     clamp,
 )
 from .smartpi.autocalib import AutoCalibTrigger
@@ -1188,14 +1190,31 @@ class SmartPI(CycleManager):
         du = val - u_aw_ref
         self._last_aw_du = du
 
-        # Energy Awareness: Adjust integral if applied power differed from reference
+        # Energy Awareness: Adjust integral if applied power differed from reference.
+        # The integral is in °C·min; du is dimensionless duty [0,1].
+        # Convert: dI = du / Ki  (since u_I = Ki * I, correcting u_I by du requires I by du/Ki).
         if abs(du) > 0.001:
-            i_max = 2.0 / KI_MIN
+            ki_eff = max(abs(self.Ki), KI_MIN)
+
+            # 1. Unit conversion: duty -> °C·min
+            dI = du / ki_eff
+
+            # 2. Åström-like tracking dynamics — avoid brutal step correction
+            dt_sec = dt_min * 60.0
+            beta = clamp(dt_sec / max(AW_TRACK_TAU_S, dt_sec), 0.0, 1.0)
+            dI = beta * dI
+
+            # 3. Per-cycle bound
+            dI_max = AW_TRACK_MAX_DELTA_I * dt_min
+            dI = clamp(dI, -dI_max, dI_max)
+
+            # 4. Hard integral clamp (anti-windup barrier)
+            i_max = 2.0 / ki_eff
             old_i = self.integral
-            self.integral = clamp(self.integral + du, -i_max, i_max)
+            self.integral = clamp(self.integral + dI, -i_max, i_max)
             _LOGGER.debug(
-                "%s - Realized adjustment: du=%.3f -> integral %.2f -> %.2f",
-                self._name, du, old_i, self.integral
+                "%s - Realized adjustment: du=%.3f dI=%.4f (beta=%.2f) -> integral %.4f -> %.4f",
+                self._name, du, dI, beta, old_i, self.integral
             )
 
     def save_state(self) -> dict:
