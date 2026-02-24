@@ -238,16 +238,19 @@ class LearningWindowManager:
         if learning_resume_ts is not None:
             self._learning_resume_ts = learning_resume_ts
 
-        # --- Setpoint change aborts learning ---
-        if setpoint_changed:
+        # --- Setpoint change ---
+        # Active windows are allowed to continue:
+        # - B (OFF): cooling is purely physical, independent of setpoint.
+        # - A (ON):  power transition detection closes the window if u changes.
+        # In both cases the power-transition guard (u_active ≠ u_first) is the
+        # real safety net; a blind reset here would discard valid in-flight data.
+        # If no window is active there is nothing to do either way.
+        if setpoint_changed and self._active:
             _LOGGER.debug(
-                "%s - update_learning: aborting due to setpoint change", 
+                "%s - setpoint changed, window continues (power transition guards)",
                 self._name
             )
-            estimator.learn_skip_count += 1
-            estimator.learn_last_reason = "skip: setpoint change"
-            self.reset()
-            return deadtime_skip_count_a, deadtime_skip_count_b
+            estimator.learn_last_reason = "info: setpoint changed, window continues"
 
         # --- Governance gate (thermal domain: a/b learning) ---
         # During calibration, bypass governance to allow A/B learning
@@ -440,6 +443,31 @@ class LearningWindowManager:
                 self.reset()
                 estimator.learn_last_reason = "skip: delta too small"
                 return deadtime_skip_count_a, deadtime_skip_count_b
+
+            # --- Sliding start: discard data while slope direction is wrong ---
+            # B (OFF): temperature still rising after heater off (thermal flywheel) → dT > 0
+            # A (ON):  temperature still falling after heater on  (heat deadtime)   → dT < 0
+            # Slide the window anchor forward instead of resetting: this keeps the window
+            # open while ensuring tin_history[start_ts:] only captures post-anomaly data.
+            b_wrong_dir = (u_eff_pre < U_OFF_MAX and dT > 0)
+            a_wrong_dir = (u_eff_pre > U_ON_MIN  and dT < 0)
+            if b_wrong_dir or a_wrong_dir:
+                if window_dt_min < DT_MAX_MIN:
+                    self._start_ts = now
+                    self._T_int_start = current_temp
+                    self._T_ext_start = ext_temp
+                    self._t_int_s = 0.0
+                    self._u_int = 0.0
+                    label = f"B flywheel (+{dT:.2f}°C)" if b_wrong_dir else f"A deadtime ({dT:.2f}°C)"
+                    estimator.learn_last_reason = f"skip: {label}, sliding start"
+                    return deadtime_skip_count_a, deadtime_skip_count_b
+                else:
+                    # DT_MAX_MIN reached with slope still wrong → abandon
+                    self.reset()
+                    estimator.learn_last_reason = (
+                        "skip: B flywheel timeout" if b_wrong_dir else "skip: A deadtime timeout"
+                    )
+                    return deadtime_skip_count_a, deadtime_skip_count_b
 
             # Extend if duration not met or dT too small (and not timed out)
             duration_ok = self._t_int_s >= min_dur_s
