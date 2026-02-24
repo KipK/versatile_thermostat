@@ -309,11 +309,17 @@ async def test_smartpi_power_stability_abort():
     """
     algo = SmartPI(
         hass=MagicMock(),
-        cycle_min=10, 
-        minimal_activation_delay=0, 
-        minimal_deactivation_delay=0, 
+        cycle_min=10,
+        minimal_activation_delay=0,
+        minimal_deactivation_delay=0,
         name="TestAlgo"
     )
+    # Simulate deadtimes already learned so the bootstrap gate does not block A/B collection
+    algo.dt_est.deadtime_heat_reliable = True
+    algo.dt_est.deadtime_heat_s = 30.0
+    algo.dt_est.deadtime_cool_reliable = True
+    algo.dt_est.deadtime_cool_s = 30.0
+
     # 1. Start a cycle with 50% power
     start_ts_dt = datetime.now() - timedelta(minutes=10)
     algo._current_cycle_params = {

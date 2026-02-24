@@ -368,12 +368,11 @@ def test_save_and_load_state():
     smartpi1.est.b = 0.003
     smartpi1.est.learn_ok_count = 10
     smartpi1.integral = 5.0
-    smartpi1.u_prev = 0.6
 
     # Save and create new instance with saved state
     saved = smartpi1.save_state()
 
-    smartpi2 = SmartPI(hass=MagicMock(), 
+    smartpi2 = SmartPI(hass=MagicMock(),
         cycle_min=10,
         minimal_activation_delay=0,
         minimal_deactivation_delay=0,
@@ -385,7 +384,7 @@ def test_save_and_load_state():
     assert smartpi2.est.b == 0.003
     assert smartpi2.est.learn_ok_count == 10
     assert smartpi2.integral == 5.0
-    assert smartpi2.u_prev == 0.6
+    assert smartpi2.u_prev == 0.0  # u_prev is not persisted; resets to 0 on reboot
 
 
 def test_reset_learning():
@@ -845,6 +844,12 @@ async def test_update_learning_skips_when_resume_counter_active():
         minimal_deactivation_delay=0,
         name="TestSmartPI_Resume"
     )
+
+    # Simulate deadtimes already learned so the bootstrap gate does not block A/B collection
+    smartpi.dt_est.deadtime_heat_reliable = True
+    smartpi.dt_est.deadtime_heat_s = 30.0
+    smartpi.dt_est.deadtime_cool_reliable = True
+    smartpi.dt_est.deadtime_cool_s = 30.0
 
     # Setup initial state
     smartpi.est.learn_ok_count = 5

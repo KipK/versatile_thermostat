@@ -65,9 +65,21 @@ $$ u(t) = u_{PI}(t) + u_{FF}(t) $$
 
 L'estimation des paramètres $a$ et $b$ est réalisée par la classe `ABEstimator`. Elle utilise une approche hybride robuste pour rejeter le bruit de mesure et les perturbations (apports solaires, ouverture de fenêtres).
 
+### 3.0 Priorité d'apprentissage en phase Bootstrap (Hystérésis)
+
+Lorsque le système démarre pour la première fois (phase `HYSTERESIS`), l'apprentissage suit une **séquence obligatoire** en 3 étapes :
+
+1.  **Étape 1 — Temps Mort prioritaire** : Avant toute collecte de mesures `a`/`b`, le système attend d'avoir mesuré les temps morts. La collecte de `a` (chauffage) est bloquée jusqu'à `deadtime_heat_reliable = True`. La collecte de `b` (refroidissement) est bloquée jusqu'à `deadtime_cool_reliable = True`. Pendant cette étape, `bootstrap_state` affiche : `step1 - deadtime: heat:Xs [A:x/11] cool:null`.
+
+2.  **Étape 2 — Collecte initiale** : Une fois les deux temps morts acquis, le système collecte les premières `emeas` (minimum 11 points pour `a` et `b`). `bootstrap_state` : `step2 - collecting emeas: A:x/11 B:x/11`.
+
+3.  **Étape 3 — Apprentissage complet** : Construction de l'historique complet (31 mesures). `bootstrap_state` : `step3 - learning thermal model: A:x/31 B:x/31`.
+
+Ce séquencement garantit que les temps morts — indispensables au filtrage des fenêtres d'apprentissage — sont disponibles avant que les premières mesures de `a`/`b` ne soient acceptées, améliorant ainsi leur qualité.
+
 ### 3.1 Stratégie d'Apprentissage Continue (Window-Based)
 
-Contrairement à l'ancienne approche cycle par cycle, Smart-PI utilise un apprentissage **continu et asynchrone**.
+Smart-PI utilise un apprentissage **continu et asynchrone**.
 
 #### Fenêtre Glissante (Sliding Window)
 L'algorithme accumule les données (T_int, T_ext, Puissance) au fil de l'eau. Une tentative d'apprentissage est déclenchée dès qu'une "fenêtre" valide est détectée :

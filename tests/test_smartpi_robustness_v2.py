@@ -50,7 +50,12 @@ async def test_integration_robustness_end_outlier():
         name="test"
     )
     pi.est.reset()
-    
+    # Simulate deadtimes already learned so the bootstrap gate does not block A/B collection
+    pi.dt_est.deadtime_heat_reliable = True
+    pi.dt_est.deadtime_heat_s = 30.0
+    pi.dt_est.deadtime_cool_reliable = True
+    pi.dt_est.deadtime_cool_s = 30.0
+
     # Prepare data: 10 mins window
     # True slope: 0.05 C/min (0.5 deg / 10 min)
     # Start: 20.0, End expected: 20.5

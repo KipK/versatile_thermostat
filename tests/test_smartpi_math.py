@@ -85,11 +85,17 @@ async def test_smartpi_math_with_mocked_time(hass: HomeAssistant):
             minimal_deactivation_delay=0
         )
         algo.est = MagicMock()
+        # Simulate deadtimes already learned so the bootstrap gate does not block A/B collection
+        algo.dt_est.deadtime_heat_reliable = True
+        algo.dt_est.deadtime_heat_s = 30.0
+        algo.dt_est.deadtime_cool_reliable = True
+        algo.dt_est.deadtime_cool_s = 30.0
+
         # Remove len mocking, just need dt_est history
         # from custom_components.versatile_thermostat.prop_algo_smartpi import AB_HISTORY_SIZE
         # algo.est.a_meas_hist.__len__.return_value = AB_HISTORY_SIZE + 1
         # algo.est.b_meas_hist.__len__.return_value = AB_HISTORY_SIZE + 1
-       
+
         # Populate dt_est history for Robust calculation (required for learning to proceed)
         # Use simple decrease 20 -> 19 over 10 mins approx
         start_t = 1000.0

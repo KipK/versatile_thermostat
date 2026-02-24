@@ -65,6 +65,18 @@ $$ u(t) = u_{PI}(t) + u_{FF}(t) $$
 
 The estimation of parameters $a$ and $b$ is performed by the `ABEstimator` class. It uses a robust hybrid approach to reject measurement noise and disturbances (solar gains, window openings).
 
+### 3.0 Bootstrap Learning Priority (Hysteresis Phase)
+
+When the system starts for the first time (phase `HYSTERESIS`), learning follows a **mandatory 3-step sequence**:
+
+1.  **Step 1 — Dead Time first**: Before any `a`/`b` measurements are collected, the system waits until dead times are measured. Collection of `a` (heating) is blocked until `deadtime_heat_reliable = True`. Collection of `b` (cooling) is blocked until `deadtime_cool_reliable = True`. During this step, `bootstrap_state` shows: `step1 - deadtime: heat:Xs [A:x/11] cool:null`.
+
+2.  **Step 2 — Initial collection**: Once both dead times are acquired, the system collects the first `emeas` (minimum 11 points for `a` and `b`). `bootstrap_state`: `step2 - collecting emeas: A:x/11 B:x/11`.
+
+3.  **Step 3 — Full learning**: Builds the complete history (31 measurements). `bootstrap_state`: `step3 - learning thermal model: A:x/31 B:x/31`.
+
+This sequencing ensures that dead times — essential for filtering learning windows — are available before the first `a`/`b` measurements are accepted, improving their quality.
+
 ### 3.1 Continuous Learning Strategy (Window-Based)
 
 Smart-PI uses **continuous and asynchronous** learning.

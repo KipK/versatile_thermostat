@@ -13,7 +13,12 @@ from custom_components.versatile_thermostat.vtherm_hvac_mode import VThermHvacMo
 def test_heartbeat_accumulation():
     """Verify that learning window accumulates over multiple calculate calls."""
     smartpi = SmartPI(hass=MagicMock(), cycle_min=10, minimal_activation_delay=0, minimal_deactivation_delay=0, name="TestHB")
-    
+    # Simulate deadtimes already learned so the bootstrap gate does not block A/B collection
+    smartpi.dt_est.deadtime_heat_reliable = True
+    smartpi.dt_est.deadtime_heat_s = 30.0
+    smartpi.dt_est.deadtime_cool_reliable = True
+    smartpi.dt_est.deadtime_cool_s = 30.0
+
     # Initial state
     # Pre-warmup to stabilize power output (avoid power instability reset)
     smartpi.calculate(
@@ -26,6 +31,9 @@ def test_heartbeat_accumulation():
     # We advanced time? No, it used current time.
     # Now reset last_calculate_time for the test sequence
     smartpi._last_calculate_time = time.monotonic() - 60.0
+    # Clear episode start so the deadtime gating does not block the learning window
+    smartpi._t_heat_episode_start = None
+    smartpi._t_cool_episode_start = None
     
     # 1. Start accumulation
     # Call calculate: should start window (using the power from warmup)
@@ -60,7 +68,12 @@ def test_heartbeat_accumulation():
 def test_heartbeat_learning_trigger_on_duration():
     """Verify that learning triggers when duration threshold is met."""
     smartpi = SmartPI(hass=MagicMock(), cycle_min=10, minimal_activation_delay=0, minimal_deactivation_delay=0, name="TestHB_Trigger")
-    
+    # Simulate deadtimes already learned so the bootstrap gate does not block A/B collection
+    smartpi.dt_est.deadtime_heat_reliable = True
+    smartpi.dt_est.deadtime_heat_s = 30.0
+    smartpi.dt_est.deadtime_cool_reliable = True
+    smartpi.dt_est.deadtime_cool_s = 30.0
+
     # Cheat: set history manually so robustness checks pass
     smartpi.dt_est._tin_history = [(time.monotonic() - i*60, 20.0 - i*0.01) for i in range(20)]
     
@@ -89,7 +102,12 @@ def test_heartbeat_learning_trigger_on_duration():
 def test_learning_reset_on_setpoint_change():
     """Verify window reset on setpoint change."""
     smartpi = SmartPI(hass=MagicMock(), cycle_min=10, minimal_activation_delay=0, minimal_deactivation_delay=0, name="TestHB_Reset")
-    
+    # Simulate deadtimes already learned so the bootstrap gate does not block A/B collection
+    smartpi.dt_est.deadtime_heat_reliable = True
+    smartpi.dt_est.deadtime_heat_s = 30.0
+    smartpi.dt_est.deadtime_cool_reliable = True
+    smartpi.dt_est.deadtime_cool_s = 30.0
+
     # Start window
     smartpi.update_learning(1.0, 19.0, 10.0, 1.0)
     assert smartpi.learn_win_active

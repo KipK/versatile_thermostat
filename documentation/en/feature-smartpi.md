@@ -31,7 +31,11 @@ At the very first startup (or after a learning reset), the thermal model is empt
 *   **OFF**: When the temperature rises above `Setpoint + 0.5°C`.
 *   **Hold**: Between these two thresholds, the previous state is maintained.
 
-This phase generates clear and distinct heating cycles, essential for identifying parameters `a` and `b`, but most importantly for learning the initial **Dead Time**.
+This phase generates clear and distinct heating cycles. Learning proceeds through **3 sequential steps**, visible in the `bootstrap_state` attribute:
+
+1.  **Step 1 — Dead Time**: First, the system measures the thermal reaction delay (`deadtime_heat` and `deadtime_cool`). Collection of parameters `a` and `b` is only allowed once the corresponding dead time is available (heating → `a`, cooling → `b`).
+2.  **Step 2 — Initial collection**: Once both dead times are acquired, collects the first measurements (`emeas`) up to a minimum of 11 points for `a` and `b`.
+3.  **Step 3 — Full learning**: Builds the complete history up to 31 measurements to make the thermal model reliable.
 
 > **Transition**: The algorithm automatically switches to **STABLE** phase as soon as it has collected enough reliable measurements (minimum 31 measurements).
 > **Note**: In Hysteresis mode, shut-off is **immediate** as soon as the temperature exceeds the upper threshold, interrupting the current PWM cycle to prevent overheating.
@@ -156,6 +160,8 @@ For advanced users, the climate entity exposes detailed attributes:
 | `freeze_reason_gains` | Reason for freezing gains adaptation (Kp, Ki) |
 | `last_decision_thermal` | Governance decision for thermal learning |
 | `last_decision_gains` | Governance decision for gains adaptation |
+| `bootstrap_state` | Detailed Bootstrap phase progress: `step1 - deadtime: heat:Xs cool:null`, `step2 - collecting emeas: A:x/11 B:x/11`, `step3 - learning thermal model: A:x/31 B:x/31`. Absent outside Hysteresis phase. |
+| `bootstrap_progress` | Bootstrap completion percentage (0-100). Absent outside Hysteresis phase. |
 | `calibration_state` | Current calibration state: `Idle`, `CoolDown`, `HeatUp`, `CoolDownFinal` |
 | `last_calibration_time` | Timestamp of last successful calibration |
 | `calibration_retry_count` | Number of calibration retries |

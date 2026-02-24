@@ -31,7 +31,11 @@ Au tout premier démarrage (ou après un reset de l'apprentissage), le modèle t
 *   **OFF** : Quand la température dépasse `Consigne + 0.5°C`.
 *   **Maintien** : Entre les deux seuils, l'état précédent est conservé.
 
-Cette phase génère des cycles de chauffe francs et nets, essentiels pour identifier les paramètres `a` et `b` mais aussi et surtout pour apprendre le **Temps Mort** (Dead Time) initial.
+Cette phase génère des cycles de chauffe francs et nets. L'apprentissage se déroule en **3 étapes séquentielles**, visibles dans l'attribut `bootstrap_state` :
+
+1.  **Étape 1 — Temps Mort** : Avant tout, le système mesure le délai de réaction thermique (`deadtime_heat` et `deadtime_cool`). La collecte des paramètres `a` et `b` n'est autorisée que lorsque le temps mort correspondant est disponible (chauffage → `a`, refroidissement → `b`).
+2.  **Étape 2 — Collecte initiale** : Une fois les deux temps morts acquis, collecte des premières mesures (`emeas`) jusqu'à 11 points minimum pour `a` et `b`.
+3.  **Étape 3 — Apprentissage complet** : Construction de l'historique complet jusqu'à 31 mesures pour fiabiliser le modèle thermique.
 
 > **Transition** : L'algorithme passe automatiquement en phase **STABLE** dès qu'il a collecté assez de mesures fiables (31 mesures minimum).
 > **Note** : En mode Hystérésis, la coupure est **instantanée** dès que la température dépasse le seuil haut, interrompant le cycle PWM en cours pour éviter toute surchauffe.
@@ -156,6 +160,8 @@ Pour les utilisateurs avancés, l'entité climate expose des attributs détaill�
 | `freeze_reason_gains` | Raison du gel de l'adaptation des gains (Kp, Ki) |
 | `last_decision_thermal` | Décision de gouvernance pour l'apprentissage thermique |
 | `last_decision_gains` | Décision de gouvernance pour l'adaptation des gains |
+| `bootstrap_state` | Progression détaillée de la phase Bootstrap : `step1 - deadtime: heat:Xs cool:null`, `step2 - collecting emeas: A:x/11 B:x/11`, `step3 - learning thermal model: A:x/31 B:x/31`. Absent hors phase Hystérésis. |
+| `bootstrap_progress` | Pourcentage de progression du Bootstrap (0-100). Absent hors phase Hystérésis. |
 | `calibration_state` | État actuel de la calibration : `Idle`, `CoolDown`, `HeatUp`, `CoolDownFinal` |
 | `last_calibration_time` | Horodatage de la dernière calibration réussie |
 | `calibration_retry_count` | Nombre de tentatives de calibration |
