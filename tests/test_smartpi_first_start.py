@@ -233,3 +233,100 @@ class TestSmartPIMonotonicTime:
         )
         
         assert smartpi._last_calculate_time == 1000.0
+
+
+class TestSmartPIRebootBehavior:
+    """Tests for SmartPI behavior at HA reboot."""
+
+    def _make_saved_state(self, integral_value: float = 42.5) -> dict:
+        """Build a minimal saved_state with a non-zero integral."""
+        return {
+            "version": 2,
+            "on_percent": 0.6,
+            "last_target_temp": 20.0,
+            "cycles_since_reset": 10,
+            "accumulated_dt": 120.0,
+            "deadtime_skip_count_a": 0,
+            "deadtime_skip_count_b": 0,
+            "learning_resume_ts": None,
+            "learning_start_date": None,
+            "est_state": {},
+            "dt_est_state": {},
+            "gov_state": {},
+            "ctl_state": {
+                "integral": integral_value,
+                "hysteresis_thermal_guard": False,
+            },
+            "sp_mgr_state": {},
+            "lw_state": {},
+            "db_state": {},
+            "cal_state": {},
+            "gs_state": {},
+            "twin_state": {},
+            "guards_state": {},
+            "ac_state": {},
+        }
+
+    def test_reboot_integral_is_zero(self):
+        """At reboot, integral must be 0 regardless of persisted value."""
+        saved_state = self._make_saved_state(integral_value=42.5)
+        smartpi = SmartPI(
+            hass=MagicMock(),
+            cycle_min=10,
+            minimal_activation_delay=0,
+            minimal_deactivation_delay=0,
+            name="TestSmartPI_RebootIntegral",
+            saved_state=saved_state,
+        )
+        assert smartpi.integral == 0.0, (
+            f"Expected integral=0.0 after reboot, got {smartpi.integral}"
+        )
+
+    def test_reboot_u_prev_is_zero(self):
+        """At reboot, u_prev must be 0."""
+        saved_state = self._make_saved_state(integral_value=10.0)
+        smartpi = SmartPI(
+            hass=MagicMock(),
+            cycle_min=10,
+            minimal_activation_delay=0,
+            minimal_deactivation_delay=0,
+            name="TestSmartPI_RebootUPrev",
+            saved_state=saved_state,
+        )
+        assert smartpi.u_prev == 0.0, (
+            f"Expected u_prev=0.0 after reboot, got {smartpi.u_prev}"
+        )
+
+    @patch("custom_components.versatile_thermostat.prop_algo_smartpi.time.monotonic")
+    def test_reboot_learning_frozen_one_cycle(self, mock_mono):
+        """At reboot, learning must be frozen for exactly 1 cycle (cycle_min minutes)."""
+        mock_mono.return_value = 1000.0
+        cycle_min = 10
+        saved_state = self._make_saved_state()
+
+        smartpi = SmartPI(
+            hass=MagicMock(),
+            cycle_min=cycle_min,
+            minimal_activation_delay=0,
+            minimal_deactivation_delay=0,
+            name="TestSmartPI_RebootFreeze",
+            saved_state=saved_state,
+        )
+
+        # Trigger the first calculate() to activate the startup grace period logic
+        smartpi.calculate(
+            target_temp=20.0,
+            current_temp=19.0,
+            ext_current_temp=10.0,
+            slope=0,
+            hvac_mode=VThermHvacMode_HEAT,
+        )
+
+        expected_resume_ts = 1000.0 + (cycle_min * 60.0)
+        actual_resume_ts = smartpi.learn_win.learning_resume_ts
+
+        assert actual_resume_ts is not None, "learning_resume_ts must be set after reboot"
+        assert abs(actual_resume_ts - expected_resume_ts) < 1.0, (
+            f"Expected learning_resume_ts ~ {expected_resume_ts}, got {actual_resume_ts}"
+        )
+

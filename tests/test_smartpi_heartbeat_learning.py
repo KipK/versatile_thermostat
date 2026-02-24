@@ -31,6 +31,8 @@ def test_heartbeat_accumulation():
     # We advanced time? No, it used current time.
     # Now reset last_calculate_time for the test sequence
     smartpi._last_calculate_time = time.monotonic() - 60.0
+    # Clear the reboot learning freeze: this test doesn't concern reboot behavior
+    smartpi.learn_win.set_learning_resume_ts(None)
     # Clear episode start so the deadtime gating does not block the learning window
     smartpi._t_heat_episode_start = None
     smartpi._t_cool_episode_start = None

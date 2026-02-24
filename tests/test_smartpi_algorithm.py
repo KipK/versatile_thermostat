@@ -383,7 +383,7 @@ def test_save_and_load_state():
     assert smartpi2.est.a == 0.015
     assert smartpi2.est.b == 0.003
     assert smartpi2.est.learn_ok_count == 10
-    assert smartpi2.integral == 5.0
+    assert smartpi2.integral == 0.0  # PI state is always zeroed at reboot to avoid output jumps
     assert smartpi2.u_prev == 0.0  # u_prev is not persisted; resets to 0 on reboot
 
 

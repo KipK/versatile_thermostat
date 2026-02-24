@@ -1372,7 +1372,13 @@ class SmartPI(CycleManager):
         self.calibration_mgr.load_state(migrated.get("cal_state", {}))
         self.gain_scheduler.load_state(migrated.get("gs_state", {}))
         self.twin.load_state(migrated.get("twin_state", {}))
-        
+
+        # Always zero PI state after reboot to avoid output jumps.
+        # The integral restored from storage may be incoherent with current
+        # thermal reality; starting from 0 is safer.
+        self.ctl.integral = 0.0
+        self.ctl.u_prev = 0.0
+
         # Load main algorithm scalars
         self._deadtime_skip_count_a = int(migrated.get("deadtime_skip_count_a", 0))
         self._deadtime_skip_count_b = int(migrated.get("deadtime_skip_count_b", 0))
@@ -1446,10 +1452,15 @@ class SmartPI(CycleManager):
         # Resume from OFF/Shedding/Startup (Only on first run after OFF)
         if is_first_run:
             if self._startup_grace_period:
-                # startup/reboot -> NO learning pause
+                # After reboot: freeze learning for exactly 1 cycle to let
+                # the system reach a coherent state before collecting samples.
                 self._startup_grace_period = False
-                self.learn_win.set_learning_resume_ts(None)
-                _LOGGER.debug("%s - Startup/Reboot: No learning pause applied", self._name)
+                resume_ts = now + (self._cycle_min * 60.0)
+                self.learn_win.set_learning_resume_ts(resume_ts)
+                _LOGGER.info(
+                    "%s - Reboot: integral/u_prev zeroed, learning frozen for %.0f min (1 cycle)",
+                    self._name, self._cycle_min
+                )
             else:
                 # Resume from window/OFF -> Pause learning to let system stabilize
                 self.learn_win.set_learning_resume_ts(now + (LEARNING_PAUSE_RESUME_MIN * 60.0))
