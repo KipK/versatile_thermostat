@@ -1863,7 +1863,8 @@ class SmartPI(CycleManager):
             self._max_on_percent,
             current_temp,
             target_temp_filt,
-            self._hysteresis_thermal_guard
+            self._hysteresis_thermal_guard,
+            hvac_mode,
         )
 
         # --- 14. Update State & Diagnostics ---
