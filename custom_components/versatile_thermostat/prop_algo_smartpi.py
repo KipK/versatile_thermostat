@@ -228,6 +228,10 @@ class SmartPI(CycleManager):
         # Helper to distinguish Startup (Init) from Resume (OFF->ON)
         # We want to pause learning on Resume, but NOT on Startup/Reboot
         self._startup_grace_period: bool = True
+        # Anti-windup deadtime transition guard: True when the previous cycle had
+        # integrator hold due to deadtime window. Used to block AW on the first
+        # cycle after exiting the window (avoids massive catch-up correction).
+        self._prev_deadtime_hold: bool = False
 
         # Tracking anti-windup diagnostics
         self._last_u_cmd: float = 0.0       # command after [0,1] clamp
@@ -1405,6 +1409,7 @@ class SmartPI(CycleManager):
             self.deadband_mgr.in_near_band = False
             self._output_initialized = True
             self._last_calculate_time = None
+            self._prev_deadtime_hold = False
             return True
 
         # Handle explicit force off (shedding, windows)
@@ -1870,6 +1875,11 @@ class SmartPI(CycleManager):
         self._on_percent = u_final
         self._last_u_applied = u_final
 
+        # Block AW on the first cycle after exiting the deadtime window.
+        # When exiting, dt_min can span many minutes (beta → 1.0) while u_model
+        # reflects a hold state, causing a massive catch-up correction (du / Ki).
+        prev_deadtime_hold = self._prev_deadtime_hold
+        self._prev_deadtime_hold = self.in_deadtime_window
         self.ctl.update_anti_windup(
             u_limited,
             u_final,
@@ -1877,7 +1887,7 @@ class SmartPI(CycleManager):
             self.Ki,
             self.Kp,
             e_p,
-            integrator_hold,
+            integrator_hold or prev_deadtime_hold,
             in_deadband_now,
             self._max_on_percent,
             current_temp,
