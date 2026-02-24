@@ -1659,6 +1659,9 @@ class SmartPI(CycleManager):
         #    delta-I would be enormous ( delta_I = delta_u_ff / Ki ). Skip bumpless.
         # 2. Last integrator mode was SKIP / HOLD / FREEZE: the integral is under explicit
         #    control; perturbing it via bumpless here would contradict that decision.
+        # 3. cycles_since_reset < ff_warmup_cycles: during the FF ramp-up phase, u_ff rises
+        #    artificially by one warmup step per cycle. Applying bumpless here would drive
+        #    the integral by -d_uff/Ki per cycle, which with small Ki is enormous (e.g. -48°C·min)
         d_uff = u_ff_eff - self.ctl.u_ff
         _i_mode_frozen = any(
             self.ctl.last_i_mode.startswith(p) for p in ("I:SKIP", "I:HOLD", "I:FREEZE")
@@ -1671,6 +1674,7 @@ class SmartPI(CycleManager):
             and not self.deadband_mgr.in_deadband
             and prev_ff_reason != "ff_cut_above_setpoint"
             and not _i_mode_frozen
+            and self._cycles_since_reset >= self.ff_warmup_cycles  # FF must be stable (past warmup)
         ):
             target_u_pi = self.ctl.u_pi - d_uff
             self.ctl.adjust_integral_for_bumpless_transfer(target_u_pi, self.Kp, self.Ki, e_p)

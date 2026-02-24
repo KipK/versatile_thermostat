@@ -330,3 +330,77 @@ class TestSmartPIRebootBehavior:
             f"Expected learning_resume_ts ~ {expected_resume_ts}, got {actual_resume_ts}"
         )
 
+    @patch("custom_components.versatile_thermostat.prop_algo_smartpi.time.monotonic")
+    def test_ff_warmup_no_integral_collapse(self, mock_mono):
+        """Integral must stay bounded during the FF warmup phase after reboot.
+
+        Regression test: after reboot, u_ff ramps up by ~1/ff_warmup_cycles per cycle.
+        Without the guard, the asymmetric FF bumpless drives the integral by -d_uff/Ki
+        per cycle (e.g. -48 degrees C*min with salon params), collapsing to large negatives.
+        The guard (cycles_since_reset >= ff_warmup_cycles) must block this.
+        """
+        cycle_min = 10
+        ff_warmup_cycles = 6
+
+        # Saved state with a learned model (non-zero a/b) so FF is active.
+        # Salon-like params: a=0.025, b=0.001, Ki~0.00129
+        saved_state = {
+            "version": 2,
+            "on_percent": 0.0,
+            "last_target_temp": None,
+            "cycles_since_reset": 0,
+            "accumulated_dt": 0.0,
+            "deadtime_skip_count_a": 0,
+            "deadtime_skip_count_b": 0,
+            "learning_resume_ts": None,
+            "learning_start_date": None,
+            "est_state": {
+                "a": 0.025565,
+                "b": 0.001036,
+                "learn_ok_count": 254,
+                "learn_ok_count_a": 67,
+                "learn_ok_count_b": 187,
+                "a_meas_hist": [0.025] * 35,
+                "b_meas_hist": [0.001] * 35,
+            },
+            "dt_est_state": {},
+            "gov_state": {},
+            "ctl_state": {"integral": 0.0, "hysteresis_thermal_guard": False},
+            "sp_mgr_state": {},
+            "lw_state": {},
+            "db_state": {},
+            "cal_state": {},
+            "gs_state": {"kp": 0.948701, "ki": 0.00129},
+            "twin_state": {},
+            "guards_state": {},
+            "ac_state": {},
+        }
+
+        smartpi = SmartPI(
+            hass=MagicMock(),
+            cycle_min=cycle_min,
+            minimal_activation_delay=0,
+            minimal_deactivation_delay=0,
+            name="TestSmartPI_FFWarmupGuard",
+            saved_state=saved_state,
+        )
+
+        # Run ff_warmup_cycles + 2 cycles at cycle_min intervals.
+        # Near setpoint (salon: 19°C / 19.09°C), cold outside (5°C) -> FF active and growing.
+        t_start = 1000.0
+        for cycle_idx in range(ff_warmup_cycles + 2):
+            mock_mono.return_value = t_start + cycle_idx * (cycle_min * 60.0)
+            smartpi.calculate(
+                target_temp=19.0,
+                current_temp=19.09,
+                ext_current_temp=5.0,
+                hvac_mode=VThermHvacMode_HEAT,
+            )
+
+        # Without the guard, integral collapses to ~ -(ff_warmup_cycles * 48) = -384.
+        # With the guard, only normal PI accumulation occurs: |integral| << 5.
+        assert abs(smartpi.integral) < 5.0, (
+            f"Integral collapsed during FF warmup: {smartpi.integral:.2f} degrees C*min "
+            f"(expected |integral| < 5.0). FF bumpless guard may be missing."
+        )
+
