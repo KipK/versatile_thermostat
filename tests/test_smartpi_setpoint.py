@@ -5,13 +5,14 @@ from custom_components.versatile_thermostat.smartpi.setpoint import SmartPISetpo
 from custom_components.versatile_thermostat.smartpi.const import (
     SP_MIN_LANDING_ZONE,
     SP_MAX_LANDING_ZONE,
+    SP_LANDING_ZONE_FACTOR,
 )
 
 
 # Model parameters for tests
 A_TEST = 0.01         # °C/min per duty
-DEADTIME_TEST = 600.0  # seconds → landing_zone = 0.01 * 600/60 = 0.1°C
-LANDING_ZONE_TEST = A_TEST * DEADTIME_TEST / 60.0  # 0.1°C
+DEADTIME_TEST = 600.0  # seconds → raw = 0.01 * 600/60 = 0.1°C
+LANDING_ZONE_TEST = A_TEST * DEADTIME_TEST / 60.0 * SP_LANDING_ZONE_FACTOR  # 0.2°C
 
 
 def _make_manager(enabled: bool = True) -> SmartPISetpointManager:
@@ -237,16 +238,16 @@ class TestInstantDrop:
 class TestLandingZoneComputation:
 
     def test_landing_zone_from_model(self):
-        """landing_zone = a * deadtime / 60."""
+        """landing_zone = a * deadtime / 60 * factor = 0.01*600/60*2 = 0.2°C."""
         m = _make_manager()
-        # a=0.01, deadtime=600 → landing=0.1
-        # current=18.91 → remaining=0.09 < 0.1 → LANDING
-        result = _filter(m, target=19.0, current=18.91)
+        # landing_zone = 0.2°C → LANDING starts at 18.8
+        # current=18.85 → remaining=0.15 < 0.2 → LANDING
+        result = _filter(m, target=19.0, current=18.85)
         assert result < 19.0  # LANDING
 
-        # current=18.89 → remaining=0.11 > 0.1 → BOOST
+        # current=18.79 → remaining=0.21 > 0.2 → BOOST
         m2 = _make_manager()
-        result2 = _filter(m2, target=19.0, current=18.89)
+        result2 = _filter(m2, target=19.0, current=18.79)
         assert result2 == 19.0  # BOOST
 
     def test_landing_zone_clamped_min(self):

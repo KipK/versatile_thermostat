@@ -201,6 +201,7 @@ NEAR_BAND_HYSTERESIS_C = 0.05
 # Setpoint filter parameters (Dual-Track: BOOST + Quadratic Landing)
 SP_MIN_LANDING_ZONE = 0.05      # °C — minimum landing zone size
 SP_MAX_LANDING_ZONE = 2.0       # °C — maximum landing zone size (safety cap)
+SP_LANDING_ZONE_FACTOR = 1.4  # safety multiplier on landing zone to start braking earlier
 SP_HYST = 0.1                   # °C — direction hysteresis (UP/DOWN switching)
 
 # Error filter time constant

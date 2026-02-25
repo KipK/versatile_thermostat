@@ -9,6 +9,7 @@ from .const import (
     SETPOINT_BOOST_ERROR_MIN,
     SP_MIN_LANDING_ZONE,
     SP_MAX_LANDING_ZONE,
+    SP_LANDING_ZONE_FACTOR,
 )
 from ..vtherm_hvac_mode import VThermHvacMode
 
@@ -124,8 +125,10 @@ class SmartPISetpointManager:
             self.effective_setpoint = target_temp
             return target_temp
 
-        # Landing zone: temperature rise expected during deadtime at full power
-        landing_zone = a * deadtime_cool_s / 60.0  # a is °C/min, deadtime in s
+        # Landing zone: temperature rise expected during deadtime at full power,
+        # multiplied by SP_LANDING_ZONE_FACTOR to start braking earlier and
+        # prevent overshoot from thermal inertia.
+        landing_zone = a * deadtime_cool_s / 60.0 * SP_LANDING_ZONE_FACTOR
         landing_zone = max(SP_MIN_LANDING_ZONE, min(landing_zone, SP_MAX_LANDING_ZONE))
 
         if remaining > landing_zone:
