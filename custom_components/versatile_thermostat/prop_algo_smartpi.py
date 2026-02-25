@@ -1528,7 +1528,6 @@ class SmartPI(CycleManager):
             # Bypass filter and keep its state clean so it is ready when STABLE starts.
             self.sp_mgr.filtered_setpoint = target_temp
             target_temp_filt = target_temp
-        self._filtered_setpoint = target_temp_filt
 
         setpoint_changed = False
         old_target_temp = self._last_target_temp  # Save before update
@@ -1971,7 +1970,6 @@ class SmartPI(CycleManager):
 
         # --- 15. Thermal Twin & ETA (diagnostics-only) ---
         self._update_twin_diagnostics(current_temp, ext_current_temp, target_temp, hvac_mode)
-
 
     def _update_twin_diagnostics(
         self,
