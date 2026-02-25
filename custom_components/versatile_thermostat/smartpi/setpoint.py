@@ -1,4 +1,4 @@
-"""Setpoint filtering for Smart-PI: Dual-Track (BOOST + EMA Landing)."""
+"""Setpoint filtering for Smart-PI: Dual-Track (BOOST + Quadratic Landing)."""
 from __future__ import annotations
 
 import logging
@@ -23,10 +23,12 @@ class SmartPISetpointManager:
     Setpoint Management for Smart-PI.
 
     Responsible for:
-    1. Setpoint filtering — Dual-Track filter (BOOST phase + EMA Landing).
+    1. Setpoint filtering — Dual-Track filter (BOOST + Quadratic Landing).
        - BOOST phase  : current_temp far from target → SP_for_P = target (full power)
-       - LANDING phase: current_temp within landing zone → SP_for_P = EMA (soft approach)
-       The EMA runs continuously in background to ensure smooth transition.
+       - LANDING phase: current_temp within landing zone →
+         SP_for_P = current + remaining²/landing_zone (quadratic braking)
+       Stateless in LANDING: depends only on current_temp and target.
+       Works for both setpoint changes AND disturbance recovery.
     2. Setpoint boost detection (detecting manual overrides).
     """
 
@@ -34,14 +36,10 @@ class SmartPISetpointManager:
         self._name = name
         self.enabled = enabled
 
-        # Internal EMA state (used by the filter algorithm)
+        # Tracks last known target for drop detection
         self.filtered_setpoint: Optional[float] = None
         # Actual SP_for_P value returned to the controller (for diagnostics)
         self.effective_setpoint: Optional[float] = None
-
-        # Direction tracking with hysteresis
-        self._direction: str = "UP"
-        self._tau_f_prev: float = SP_TAU_SLOW
 
         # Boost state
         self.boost_active: bool = False
@@ -51,8 +49,6 @@ class SmartPISetpointManager:
         """Reset internal state."""
         self.filtered_setpoint = None
         self.effective_setpoint = None
-        self._direction = "UP"
-        self._tau_f_prev = SP_TAU_SLOW
         self.boost_active = False
         self.prev_setpoint_for_boost = None
 
@@ -65,14 +61,6 @@ class SmartPISetpointManager:
         if fs is not None:
             self.filtered_setpoint = float(fs)
 
-        direction = state.get("direction")
-        if direction in ("UP", "DOWN"):
-            self._direction = direction
-
-        tau_f_prev = state.get("tau_f_prev")
-        if tau_f_prev is not None:
-            self._tau_f_prev = float(tau_f_prev)
-
         self.boost_active = bool(state.get("setpoint_boost_active", False))
 
         ps = state.get("prev_setpoint_for_boost")
@@ -83,8 +71,6 @@ class SmartPISetpointManager:
         """Save state for persistence."""
         return {
             "filtered_setpoint": self.filtered_setpoint,
-            "direction": self._direction,
-            "tau_f_prev": self._tau_f_prev,
             "setpoint_boost_active": self.boost_active,
             "prev_setpoint_for_boost": self.prev_setpoint_for_boost,
         }
@@ -99,21 +85,21 @@ class SmartPISetpointManager:
         deadtime_cool_s: float = 0.0,
     ) -> float:
         """
-        Dual-Track setpoint filter: BOOST (full power) + EMA Landing (soft approach).
+        Dual-Track setpoint filter: BOOST (full power) + Quadratic Landing.
 
         Returns SP_for_P — the filtered setpoint for the proportional term.
         The integrator must always use SP_brut (target_temp), not this return value.
 
-        The EMA runs continuously in background. The returned value depends on the
-        distance between current_temp and target:
-        - BOOST (far):    return target directly → full P power
-        - LANDING (near): return EMA output → reduced P error for soft landing
+        Phase logic based on distance between current_temp and target:
+        - BOOST   (remaining > landing_zone): return target → full P power
+        - LANDING (remaining ≤ landing_zone): return current + remaining²/landing_zone
+          → quadratic braking, stateless, continuous with BOOST at boundary
 
         Args:
             target_temp:      Raw setpoint (SP_brut).
             current_temp:     Measured temperature. If None, no update is performed.
             dt_min:           Elapsed time since last call, in minutes.
-            tau_up:           Dynamic filter time constant for heating (seconds).
+            tau_up:           Filter time constant (kept for API compatibility).
             a:                Heating gain from ABEstimator (°C/min per duty).
             deadtime_cool_s:  Cooling dead time in seconds.
         """
@@ -122,31 +108,26 @@ class SmartPISetpointManager:
             self.effective_setpoint = target_temp
             return target_temp
 
-        # Bumpless transfer on first call: initialise filter state from
-        # current temperature so the first step starts without a discontinuity.
+        # First call: initialise filter state
         if self.filtered_setpoint is None:
             self.filtered_setpoint = current_temp if current_temp is not None else target_temp
-            self._direction = "UP"
-            self._tau_f_prev = tau_up
 
-        # No temperature measurement — keep current filter state
+        # No temperature measurement — keep current state
         if current_temp is None:
-            return self.effective_setpoint if self.effective_setpoint is not None else self.filtered_setpoint
-
-        dt_s = dt_min * 60.0  # convert minutes to seconds
+            return self.effective_setpoint if self.effective_setpoint is not None else target_temp
 
         # ── Drop: Instantaneous for energy savings ──
         if target_temp < self.filtered_setpoint:
             self.filtered_setpoint = target_temp
             self.effective_setpoint = target_temp
-            self._direction = "DOWN"
-            self._tau_f_prev = SP_TAU_FAST
             return target_temp
 
-        # ── Rise: Dual-Track (BOOST + EMA Landing) ──
+        # Track target for drop detection
+        self.filtered_setpoint = target_temp
+
+        # ── Rise: Dual-Track (BOOST + Quadratic Landing) ──
         remaining = target_temp - current_temp
         if remaining <= 0:
-            self.filtered_setpoint = target_temp
             self.effective_setpoint = target_temp
             return target_temp
 
@@ -154,22 +135,18 @@ class SmartPISetpointManager:
         landing_zone = a * deadtime_cool_s / 60.0  # a is °C/min, deadtime in s
         landing_zone = max(SP_MIN_LANDING_ZONE, min(landing_zone, SP_MAX_LANDING_ZONE))
 
-        # Always run the EMA in background (keeps filter_state lagging behind target)
-        self._direction = "UP"
-        tau_f = tau_up
-        alpha = dt_s / (tau_f + dt_s)
-        self.filtered_setpoint = alpha * target_temp + (1.0 - alpha) * self.filtered_setpoint
-        self._tau_f_prev = tau_f
-
-        # Phase decision based on distance to target
         if remaining > landing_zone:
-            # BOOST: full power — return target directly, EMA keeps running internally
+            # BOOST: full power — return target directly
             self.effective_setpoint = target_temp
             return target_temp
-        else:
-            # LANDING: soft approach — return EMA output (lagging behind target)
-            self.effective_setpoint = self.filtered_setpoint
-            return self.filtered_setpoint
+
+        # LANDING: quadratic braking — stateless, based on current distance
+        # SP_for_P = current + remaining² / landing_zone
+        # At boundary (remaining == landing_zone): SP_for_P = current + landing_zone = target ✓
+        # At target  (remaining == 0):             SP_for_P = current = target ✓
+        sp_for_p = current_temp + (remaining * remaining) / landing_zone
+        self.effective_setpoint = sp_for_p
+        return sp_for_p
 
     def update_boost_state(  # pylint: disable=unused-argument
         self, target_temp: float, error: float, hvac_mode: VThermHvacMode
