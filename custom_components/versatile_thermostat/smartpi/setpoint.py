@@ -121,28 +121,36 @@ class SmartPISetpointManager:
 
         dt_s = dt_min * 60.0  # convert minutes to seconds
 
-        # ── Step 1: True error ──
-        delta_sp = target_temp - current_temp
-
-        # ── BYPASS mode: large physical error OR filter state lags behind new setpoint ──
-        # The second condition catches setpoint steps (e.g. +0.5 °C from a converged state)
-        # where filter_state ≈ old_setpoint < current_temp: without bypass, error_p would
-        # be near-zero or negative, making the proportional term unable to drive the system.
-        if (abs(delta_sp) >= SP_SATURATION_THRESHOLD or
-                abs(target_temp - self.filtered_setpoint) >= SP_SETPOINT_JUMP_THRESHOLD):
-            self.filtered_setpoint = target_temp
-            return target_temp
-
-        # ── FILTER mode: asymmetric EMA with direction hysteresis ──
         filter_state = self.filtered_setpoint
 
-        if target_temp >= filter_state + SP_HYST:
-            self._direction = "UP"
-        elif target_temp <= filter_state - SP_HYST:
+        # ── Drop: Instantaneous for energy savings ──
+        if target_temp < filter_state:
+            self.filtered_setpoint = target_temp
             self._direction = "DOWN"
-        # else: keep previous direction (hysteresis)
+            self._tau_f_prev = SP_TAU_FAST
+            return target_temp
 
-        tau_f = SP_TAU_SLOW if self._direction == "UP" else SP_TAU_FAST
+        # ── Rise: Saturation Guard ──
+        # 1. Kick Initial for responsiveness
+        #    Ensures the internal setpoint exceeds ambient by at least half of
+        #    SP_SATURATION_THRESHOLD (e.g., +0.5°C) to force immediate 
+        #    heating without sacrificing the soft landing curve.
+        min_start_error = SP_SATURATION_THRESHOLD / 2.0
+        if filter_state < current_temp + min_start_error:
+            filter_state = min(target_temp, current_temp + min_start_error)
+
+        # 2. Ceiling Saturation (Overrides initial kick)
+        #    Never lag behind target by more than SP_SATURATION_THRESHOLD (e.g. 1.0)
+        #    If ambient = 14°C and target = 19°C:
+        #    The kick gives 14.5°C. But max lag is 19.0 - 1.0 = 18.0°C.
+        #    -> filter_state is forced to 18.0°C for maximum initial power.
+        if filter_state < target_temp - SP_SATURATION_THRESHOLD:
+            filter_state = target_temp - SP_SATURATION_THRESHOLD
+
+        # ── FILTER mode: EMA (Soft Landing) ──
+        self._direction = "UP"
+        tau_f = SP_TAU_SLOW
+
         alpha = dt_s / (tau_f + dt_s)
         self.filtered_setpoint = alpha * target_temp + (1.0 - alpha) * filter_state
         self._tau_f_prev = tau_f
