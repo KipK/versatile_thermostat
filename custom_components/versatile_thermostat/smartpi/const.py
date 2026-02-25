@@ -198,10 +198,7 @@ INTEGRAL_DEADBAND_MICROLEAK = 0.999
 NEAR_BAND_ABOVE_FACTOR = 0.40
 NEAR_BAND_HYSTERESIS_C = 0.05
 
-# Setpoint filter parameters (Dual-Track: BOOST + EMA Landing)
-# alpha = dt_s / (tau_f + dt_s)  [Euler explicit discretisation]
-SP_TAU_SLOW = 900.0              # seconds — default filter time constant on setpoint rise
-SP_TAU_FAST = 300.0              # seconds — filter time constant on setpoint drop
+# Setpoint filter parameters (Dual-Track: BOOST + Quadratic Landing)
 SP_MIN_LANDING_ZONE = 0.05      # °C — minimum landing zone size
 SP_MAX_LANDING_ZONE = 2.0       # °C — maximum landing zone size (safety cap)
 SP_HYST = 0.1                   # °C — direction hysteresis (UP/DOWN switching)

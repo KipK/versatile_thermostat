@@ -3,16 +3,10 @@ import pytest
 
 from custom_components.versatile_thermostat.smartpi.setpoint import SmartPISetpointManager
 from custom_components.versatile_thermostat.smartpi.const import (
-    SP_TAU_SLOW,
-    SP_TAU_FAST,
     SP_MIN_LANDING_ZONE,
     SP_MAX_LANDING_ZONE,
-    SP_HYST,
 )
 
-
-DT_MIN = 1.0  # 1-minute cycle (= 60 s)
-DT_S = DT_MIN * 60.0
 
 # Model parameters for tests
 A_TEST = 0.01         # °C/min per duty
@@ -24,11 +18,11 @@ def _make_manager(enabled: bool = True) -> SmartPISetpointManager:
     return SmartPISetpointManager(name="test", enabled=enabled)
 
 
-def _filter(m, target, current, dt_min=DT_MIN, tau_up=SP_TAU_SLOW, a=A_TEST, deadtime=DEADTIME_TEST):
+def _filter(m, target, current, a=A_TEST, deadtime=DEADTIME_TEST):
     """Shorthand for filter_setpoint with default test model params."""
     return m.filter_setpoint(
-        target_temp=target, current_temp=current, dt_min=dt_min,
-        tau_up=tau_up, a=a, deadtime_cool_s=deadtime,
+        target_temp=target, current_temp=current,
+        a=a, deadtime_cool_s=deadtime,
     )
 
 

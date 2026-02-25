@@ -7,11 +7,8 @@ from typing import Optional
 from .const import (
     SETPOINT_BOOST_THRESHOLD,
     SETPOINT_BOOST_ERROR_MIN,
-    SP_TAU_SLOW,
-    SP_TAU_FAST,
     SP_MIN_LANDING_ZONE,
     SP_MAX_LANDING_ZONE,
-    SP_HYST,
 )
 from ..vtherm_hvac_mode import VThermHvacMode
 
@@ -79,8 +76,6 @@ class SmartPISetpointManager:
         self,
         target_temp: float,
         current_temp: float | None,
-        dt_min: float,
-        tau_up: float = SP_TAU_SLOW,
         a: float = 0.0,
         deadtime_cool_s: float = 0.0,
     ) -> float:
@@ -98,8 +93,6 @@ class SmartPISetpointManager:
         Args:
             target_temp:      Raw setpoint (SP_brut).
             current_temp:     Measured temperature. If None, no update is performed.
-            dt_min:           Elapsed time since last call, in minutes.
-            tau_up:           Filter time constant (kept for API compatibility).
             a:                Heating gain from ABEstimator (°C/min per duty).
             deadtime_cool_s:  Cooling dead time in seconds.
         """
