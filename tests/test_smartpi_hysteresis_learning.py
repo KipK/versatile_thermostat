@@ -72,6 +72,7 @@ class TestSmartPiIntegration:
         pi.dt_est = MagicMock()
         pi.dt_est.deadtime_heat_reliable = False # Ensure Hysteresis phase
         pi.dt_est.deadtime_cool_reliable = True
+        pi.dt_est.deadtime_cool_s = 120.0
         # Override phase property? SmartPI.phase checks history size.
         # History is empty by default -> HYSTERESIS.
         assert pi.phase == SmartPIPhase.HYSTERESIS
@@ -95,6 +96,7 @@ class TestSmartPiIntegration:
         pi.dt_est.deadtime_heat_s = 120.0 # Set valid float
         pi.dt_est.deadtime_heat_reliable = True # Set valid bool
         pi.dt_est.deadtime_cool_reliable = True
+        pi.dt_est.deadtime_cool_s = 120.0
 
         # Force STABLE phase by populating history
         # We need AB_HISTORY_SIZE (31) measurements

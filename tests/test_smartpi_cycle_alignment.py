@@ -239,6 +239,7 @@ async def test_smartpi_frozen_power_snapshot():
     # Let's perform a calculate with specific errors to get a result.
     # Target=20, Cur=19 -> Error=1. Proportional part active.
     algo.target_temperature = 20.0
+    algo.integral = 10.0 # Force a positive integral to ensure u_applied > 0
     algo.calculate(20.0, 19.0, 5.0, 0.0, VThermHvacMode_HEAT)
     
     # Capture the result

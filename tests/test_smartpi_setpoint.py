@@ -34,15 +34,18 @@ class TestBumplessTransfer:
     def test_init_from_current_temp(self):
         """On first call (FILTER mode), filter_state must start from min_error jump, bounded by target."""
         m = _make_manager()
-        # delta 0.3 < SP_SETPOINT_JUMP_THRESHOLD (0.5) and < SP_SATURATION_THRESHOLD (1.0)
-        target = 18.3
+        # To trigger Kick Initial, delta between target and filter_state (current)
+        # must be > SP_SATURATION_THRESHOLD (1.0).
+        target = 19.5
         current = 18.0
         result = m.filter_setpoint(target_temp=target, current_temp=current, dt_min=DT_MIN)
         # filter_state is initialised to current_temp=18.0.
-        # Kick initial guard sets filter_state = min(18.3, 18.5) = 18.3
-        # Then EMA applies, but state = target, so it stays at 18.3
-        assert result == 18.3
-        assert m.filtered_setpoint == 18.3
+        # Kick initial guard sets filter_state = min(19.5, 18.5) = 18.5
+        # Then EMA applies from 18.5 towards 19.5
+        alpha = _alpha(SP_TAU_SLOW)
+        expected = alpha * target + (1.0 - alpha) * 18.5
+        assert abs(result - expected) < 1e-9
+        assert abs(m.filtered_setpoint - expected) < 1e-9
 
     def test_init_fallback_when_no_current_temp(self):
         m = _make_manager()
@@ -169,15 +172,16 @@ class TestAmbiantGuard:
     def test_filter_state_not_below_current_temp_when_heating(self):
         m = _make_manager()
         m.filter_setpoint(target_temp=19.0, current_temp=19.0, dt_min=DT_MIN)
-        # Target is 20.0, room is 19.4. Filter was 19.0.
+        # Target is 20.5, room is 19.4. Filter was 19.0.
+        # Target (20.5) - Filter (19.0) = 1.5 > SP_SATURATION_THRESHOLD (1.0)
         # min_start_error = 1.0 / 2 = 0.5.
         # Guard 2: filter_state (19.0) < current_temp (19.4) + 0.5 (19.9) 
-        # -> filter_state = min(20.0, 19.9) = 19.9
-        result = m.filter_setpoint(target_temp=20.0, current_temp=19.4, dt_min=DT_MIN)
+        # -> filter_state = min(20.5, 19.9) = 19.9
+        result = m.filter_setpoint(target_temp=20.5, current_temp=19.4, dt_min=DT_MIN)
         
-        # State jumps to 19.9, then EMA towards 20.0
+        # State jumps to 19.9, then EMA towards 20.5
         alpha = _alpha(SP_TAU_SLOW)
-        expected = alpha * 20.0 + (1.0 - alpha) * 19.9
+        expected = alpha * 20.5 + (1.0 - alpha) * 19.9
         assert abs(result - expected) < 1e-9 
 
 

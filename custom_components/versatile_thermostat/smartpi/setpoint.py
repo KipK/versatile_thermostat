@@ -90,6 +90,7 @@ class SmartPISetpointManager:
         target_temp: float,
         current_temp: float | None,
         dt_min: float,
+        tau_up: float = SP_TAU_SLOW,
     ) -> float:
         """
         Apply Saturation Guard + asymmetric first-order low-pass filter to setpoint.
@@ -101,6 +102,7 @@ class SmartPISetpointManager:
             target_temp:  Raw setpoint (SP_brut).
             current_temp: Measured temperature. If None, no update is performed.
             dt_min:       Elapsed time since last call, in minutes.
+            tau_up:       Dynamic filter time constant for heating (seconds).
         """
         if not self.enabled:
             self.filtered_setpoint = target_temp
@@ -113,7 +115,7 @@ class SmartPISetpointManager:
         if self.filtered_setpoint is None:
             self.filtered_setpoint = current_temp if current_temp is not None else target_temp
             self._direction = "UP"
-            self._tau_f_prev = SP_TAU_SLOW
+            self._tau_f_prev = tau_up
 
         # No temperature measurement — keep current filter state
         if current_temp is None:
@@ -135,8 +137,10 @@ class SmartPISetpointManager:
         #    Ensures the internal setpoint exceeds ambient by at least half of
         #    SP_SATURATION_THRESHOLD (e.g., +0.5°C) to force immediate 
         #    heating without sacrificing the soft landing curve.
+        #    Applied ONLY if we are far from the target (setpoint step), 
+        #    to avoid ruining the soft landing at the end of the ramp.
         min_start_error = SP_SATURATION_THRESHOLD / 2.0
-        if filter_state < current_temp + min_start_error:
+        if filter_state < current_temp + min_start_error and target_temp - filter_state > SP_SATURATION_THRESHOLD:
             filter_state = min(target_temp, current_temp + min_start_error)
 
         # 2. Ceiling Saturation (Overrides initial kick)
@@ -149,7 +153,7 @@ class SmartPISetpointManager:
 
         # ── FILTER mode: EMA (Soft Landing) ──
         self._direction = "UP"
-        tau_f = SP_TAU_SLOW
+        tau_f = tau_up
 
         alpha = dt_s / (tau_f + dt_s)
         self.filtered_setpoint = alpha * target_temp + (1.0 - alpha) * filter_state
