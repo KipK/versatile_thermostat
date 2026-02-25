@@ -1,4 +1,4 @@
-"""Setpoint filtering for Smart-PI: Saturation Guard + asymmetric first-order low-pass."""
+"""Setpoint filtering for Smart-PI: Dual-Track (BOOST + EMA Landing)."""
 from __future__ import annotations
 
 import logging
@@ -9,8 +9,8 @@ from .const import (
     SETPOINT_BOOST_ERROR_MIN,
     SP_TAU_SLOW,
     SP_TAU_FAST,
-    SP_SATURATION_THRESHOLD,
-    SP_SETPOINT_JUMP_THRESHOLD,
+    SP_MIN_LANDING_ZONE,
+    SP_MAX_LANDING_ZONE,
     SP_HYST,
 )
 from ..vtherm_hvac_mode import VThermHvacMode
@@ -23,9 +23,10 @@ class SmartPISetpointManager:
     Setpoint Management for Smart-PI.
 
     Responsible for:
-    1. Setpoint filtering — Saturation Guard + asymmetric first-order low-pass filter.
-       - BYPASS mode  : |SP_brut - y| >= SATURATION_THRESHOLD  →  SP_for_P = SP_brut
-       - FILTER mode  : |SP_brut - y| <  SATURATION_THRESHOLD  →  SP_for_P tracks via EMA
+    1. Setpoint filtering — Dual-Track filter (BOOST phase + EMA Landing).
+       - BOOST phase  : current_temp far from target → SP_for_P = target (full power)
+       - LANDING phase: current_temp within landing zone → SP_for_P = EMA (soft approach)
+       The EMA runs continuously in background to ensure smooth transition.
     2. Setpoint boost detection (detecting manual overrides).
     """
 
@@ -91,27 +92,34 @@ class SmartPISetpointManager:
         current_temp: float | None,
         dt_min: float,
         tau_up: float = SP_TAU_SLOW,
+        a: float = 0.0,
+        deadtime_cool_s: float = 0.0,
     ) -> float:
         """
-        Apply Saturation Guard + asymmetric first-order low-pass filter to setpoint.
+        Dual-Track setpoint filter: BOOST (full power) + EMA Landing (soft approach).
 
         Returns SP_for_P — the filtered setpoint for the proportional term.
         The integrator must always use SP_brut (target_temp), not this return value.
 
+        The EMA runs continuously in background. The returned value depends on the
+        distance between current_temp and target:
+        - BOOST (far):    return target directly → full P power
+        - LANDING (near): return EMA output → reduced P error for soft landing
+
         Args:
-            target_temp:  Raw setpoint (SP_brut).
-            current_temp: Measured temperature. If None, no update is performed.
-            dt_min:       Elapsed time since last call, in minutes.
-            tau_up:       Dynamic filter time constant for heating (seconds).
+            target_temp:      Raw setpoint (SP_brut).
+            current_temp:     Measured temperature. If None, no update is performed.
+            dt_min:           Elapsed time since last call, in minutes.
+            tau_up:           Dynamic filter time constant for heating (seconds).
+            a:                Heating gain from ABEstimator (°C/min per duty).
+            deadtime_cool_s:  Cooling dead time in seconds.
         """
         if not self.enabled:
             self.filtered_setpoint = target_temp
             return target_temp
 
-        # Bumpless transfer on first call (spec §6.5): initialise filter state from
+        # Bumpless transfer on first call: initialise filter state from
         # current temperature so the first step starts without a discontinuity.
-        # Do NOT return early — continue immediately into the Saturation Guard so
-        # the first calculate() call already produces a meaningful SP_for_P.
         if self.filtered_setpoint is None:
             self.filtered_setpoint = current_temp if current_temp is not None else target_temp
             self._direction = "UP"
@@ -123,43 +131,37 @@ class SmartPISetpointManager:
 
         dt_s = dt_min * 60.0  # convert minutes to seconds
 
-        filter_state = self.filtered_setpoint
-
         # ── Drop: Instantaneous for energy savings ──
-        if target_temp < filter_state:
+        if target_temp < self.filtered_setpoint:
             self.filtered_setpoint = target_temp
             self._direction = "DOWN"
             self._tau_f_prev = SP_TAU_FAST
             return target_temp
 
-        # ── Rise: Saturation Guard ──
-        # 1. Kick Initial for responsiveness
-        #    Ensures the internal setpoint exceeds ambient by at least half of
-        #    SP_SATURATION_THRESHOLD (e.g., +0.5°C) to force immediate 
-        #    heating without sacrificing the soft landing curve.
-        #    Applied ONLY if we are far from the target (setpoint step), 
-        #    to avoid ruining the soft landing at the end of the ramp.
-        min_start_error = SP_SATURATION_THRESHOLD / 2.0
-        if filter_state < current_temp + min_start_error and target_temp - filter_state > SP_SATURATION_THRESHOLD:
-            filter_state = min(target_temp, current_temp + min_start_error)
+        # ── Rise: Dual-Track (BOOST + EMA Landing) ──
+        remaining = target_temp - current_temp
+        if remaining <= 0:
+            self.filtered_setpoint = target_temp
+            return target_temp
 
-        # 2. Ceiling Saturation (Overrides initial kick)
-        #    Never lag behind target by more than SP_SATURATION_THRESHOLD (e.g. 1.0)
-        #    If ambient = 14°C and target = 19°C:
-        #    The kick gives 14.5°C. But max lag is 19.0 - 1.0 = 18.0°C.
-        #    -> filter_state is forced to 18.0°C for maximum initial power.
-        if filter_state < target_temp - SP_SATURATION_THRESHOLD:
-            filter_state = target_temp - SP_SATURATION_THRESHOLD
+        # Landing zone: temperature rise expected during deadtime at full power
+        landing_zone = a * deadtime_cool_s / 60.0  # a is °C/min, deadtime in s
+        landing_zone = max(SP_MIN_LANDING_ZONE, min(landing_zone, SP_MAX_LANDING_ZONE))
 
-        # ── FILTER mode: EMA (Soft Landing) ──
+        # Always run the EMA in background (keeps filter_state lagging behind target)
         self._direction = "UP"
         tau_f = tau_up
-
         alpha = dt_s / (tau_f + dt_s)
-        self.filtered_setpoint = alpha * target_temp + (1.0 - alpha) * filter_state
+        self.filtered_setpoint = alpha * target_temp + (1.0 - alpha) * self.filtered_setpoint
         self._tau_f_prev = tau_f
 
-        return self.filtered_setpoint
+        # Phase decision based on distance to target
+        if remaining > landing_zone:
+            # BOOST: full power — return target directly, EMA keeps running internally
+            return target_temp
+        else:
+            # LANDING: soft approach — return EMA output (lagging behind target)
+            return self.filtered_setpoint
 
     def update_boost_state(  # pylint: disable=unused-argument
         self, target_temp: float, error: float, hvac_mode: VThermHvacMode

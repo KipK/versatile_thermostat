@@ -1509,15 +1509,21 @@ class SmartPI(CycleManager):
         # Filter setpoint — only apply in STABLE phase.
         # During HYSTERESIS and CALIBRATION the raw setpoint must be used directly
         # to avoid disrupting bang-bang control and model identification.
-        
-        # Calculate dynamic tau_up based on deadtime_cool
-        # We purely use deadtime_cool_s to counteract the exact heat inertia delay
+
+        # Dynamic tau_up based on deadtime_cool (IMC theory)
         tau_up_dyn = SP_TAU_SLOW
+        deadtime_cool = 0.0
         if hasattr(self, 'dt_est') and self.dt_est.deadtime_cool_s is not None and self.dt_est.deadtime_cool_s > 0:
             tau_up_dyn = self.dt_est.deadtime_cool_s
-            
+            deadtime_cool = self.dt_est.deadtime_cool_s
+
         if self.phase == SmartPIPhase.STABLE:
-            target_temp_filt = self.sp_mgr.filter_setpoint(target_temp, current_temp, dt_min, tau_up=tau_up_dyn)
+            target_temp_filt = self.sp_mgr.filter_setpoint(
+                target_temp, current_temp, dt_min,
+                tau_up=tau_up_dyn,
+                a=self.est.a,
+                deadtime_cool_s=deadtime_cool,
+            )
         else:
             # Bypass filter and keep its state clean so it is ready when STABLE starts.
             self.sp_mgr.filtered_setpoint = target_temp
