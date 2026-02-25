@@ -10,6 +10,7 @@ from .const import (
     SP_MIN_LANDING_ZONE,
     SP_MAX_LANDING_ZONE,
     SP_LANDING_ZONE_FACTOR,
+    SP_LANDING_ZONE_MIN_P_FRACTION,
 )
 from ..vtherm_hvac_mode import VThermHvacMode
 
@@ -136,11 +137,13 @@ class SmartPISetpointManager:
             self.effective_setpoint = target_temp
             return target_temp
 
-        # LANDING: quadratic braking — stateless, based on current distance
-        # SP_for_P = current + remaining² / landing_zone
-        # At boundary (remaining == landing_zone): SP_for_P = current + landing_zone = target ✓
-        # At target  (remaining == 0):             SP_for_P = current = target ✓
-        sp_for_p = current_temp + (remaining * remaining) / landing_zone
+        # LANDING: quadratic braking with linear floor
+        # Quadratic alone gives P_error → 0 near target (remaining² → 0 fast).
+        # The linear floor SP_LANDING_ZONE_MIN_P_FRACTION ensures the P term
+        # keeps contributing during the final approach, preventing stalling.
+        p_error = (remaining * remaining) / landing_zone
+        p_error = max(p_error, remaining * SP_LANDING_ZONE_MIN_P_FRACTION)
+        sp_for_p = current_temp + p_error
         self.effective_setpoint = sp_for_p
         return sp_for_p
 

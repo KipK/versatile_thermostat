@@ -6,6 +6,7 @@ from custom_components.versatile_thermostat.smartpi.const import (
     SP_MIN_LANDING_ZONE,
     SP_MAX_LANDING_ZONE,
     SP_LANDING_ZONE_FACTOR,
+    SP_LANDING_ZONE_MIN_P_FRACTION,
 )
 
 
@@ -27,10 +28,16 @@ def _filter(m, target, current, a=A_TEST, deadtime=DEADTIME_TEST):
     )
 
 
-def _quadratic(current, target, landing_zone):
-    """Expected quadratic landing value."""
+def _expected_sp(current, target, landing_zone):
+    """Expected landing value: quadratic with linear floor (mirrors filter formula)."""
     remaining = target - current
-    return current + (remaining * remaining) / landing_zone
+    p_error = (remaining * remaining) / landing_zone
+    p_error = max(p_error, remaining * SP_LANDING_ZONE_MIN_P_FRACTION)
+    return current + p_error
+
+
+# Kept for backward compatibility in tests that pass explicit landing_zone
+_quadratic = _expected_sp
 
 
 # ---------------------------------------------------------------------------
@@ -290,15 +297,33 @@ class TestQuadraticFormula:
         assert abs(result - expected) < 1e-9
 
     def test_quadratic_half_landing_zone(self):
-        """At remaining = landing_zone/2, SP_for_P gives 25% of landing_zone as P_error."""
+        """At remaining = landing_zone/2, quadratic still dominates over linear floor."""
         m = _make_manager()
         target = 20.0
-        lz = LANDING_ZONE_TEST  # 0.1
-        current = target - lz / 2  # 19.95
+        lz = LANDING_ZONE_TEST  # 0.2 (with factor=2)
+        current = target - lz / 2  # 19.9, remaining=0.1
         result = _filter(m, target=target, current=current)
-        remaining = target - current  # 0.05
-        expected_p_error = remaining ** 2 / lz  # 0.025
+        remaining = target - current  # 0.1
+        # quadratic=0.1²/0.2=0.05, linear_floor=0.1*0.3=0.03 → quadratic wins
+        expected_p_error = remaining ** 2 / lz  # 0.05
         assert abs((result - current) - expected_p_error) < 1e-9
+
+    def test_linear_floor_near_setpoint(self):
+        """Very close to setpoint, linear floor dominates over quadratic (prevents stall)."""
+        m = _make_manager()
+        target = 20.0
+        lz = LANDING_ZONE_TEST  # 0.2
+        # remaining=0.04 < lz*fraction=0.06 → linear floor kicks in
+        current = target - 0.04  # 19.96
+        result = _filter(m, target=target, current=current)
+        remaining = 0.04
+        quadratic_p_error = remaining ** 2 / lz   # 0.008
+        linear_p_error = remaining * SP_LANDING_ZONE_MIN_P_FRACTION  # 0.012
+        # Linear floor dominates
+        assert linear_p_error > quadratic_p_error
+        assert abs((result - current) - linear_p_error) < 1e-9
+        # P_error is significantly larger than pure quadratic → no stall
+        assert (result - current) > quadratic_p_error
 
 
 # ---------------------------------------------------------------------------
