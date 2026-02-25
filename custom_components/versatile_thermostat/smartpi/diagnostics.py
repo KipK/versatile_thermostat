@@ -116,7 +116,7 @@ def build_diagnostics(algo: SmartPI, debug_mode: bool = False) -> Dict[str, Any]
         "on_percent": round(algo.on_percent, 6),
         "cycle_min": round(algo.cycle_min, 3),
         # Setpoint filter
-        "filtered_setpoint": None if algo.sp_mgr.filtered_setpoint is None else round(algo.sp_mgr.filtered_setpoint, 2),
+        "filtered_setpoint": None if algo.sp_mgr.effective_setpoint is None else round(algo.sp_mgr.effective_setpoint, 2),
         # Resume skip
         "learning_resume_ts": int(algo._learning_resume_ts) if algo._learning_resume_ts else None,
         # Anti-windup tracking diagnostics

@@ -958,7 +958,7 @@ class SmartPI(CycleManager):
 
     @property
     def filtered_setpoint(self) -> float:
-        return self._filtered_setpoint
+        return self.sp_mgr.effective_setpoint
 
     @property
     def learning_resume_ts(self) -> float:

@@ -34,8 +34,10 @@ class SmartPISetpointManager:
         self._name = name
         self.enabled = enabled
 
-        # Filter state (spec: filter_state)
+        # Internal EMA state (used by the filter algorithm)
         self.filtered_setpoint: Optional[float] = None
+        # Actual SP_for_P value returned to the controller (for diagnostics)
+        self.effective_setpoint: Optional[float] = None
 
         # Direction tracking with hysteresis
         self._direction: str = "UP"
@@ -48,6 +50,7 @@ class SmartPISetpointManager:
     def reset(self):
         """Reset internal state."""
         self.filtered_setpoint = None
+        self.effective_setpoint = None
         self._direction = "UP"
         self._tau_f_prev = SP_TAU_SLOW
         self.boost_active = False
@@ -116,6 +119,7 @@ class SmartPISetpointManager:
         """
         if not self.enabled:
             self.filtered_setpoint = target_temp
+            self.effective_setpoint = target_temp
             return target_temp
 
         # Bumpless transfer on first call: initialise filter state from
@@ -127,13 +131,14 @@ class SmartPISetpointManager:
 
         # No temperature measurement — keep current filter state
         if current_temp is None:
-            return self.filtered_setpoint
+            return self.effective_setpoint if self.effective_setpoint is not None else self.filtered_setpoint
 
         dt_s = dt_min * 60.0  # convert minutes to seconds
 
         # ── Drop: Instantaneous for energy savings ──
         if target_temp < self.filtered_setpoint:
             self.filtered_setpoint = target_temp
+            self.effective_setpoint = target_temp
             self._direction = "DOWN"
             self._tau_f_prev = SP_TAU_FAST
             return target_temp
@@ -142,6 +147,7 @@ class SmartPISetpointManager:
         remaining = target_temp - current_temp
         if remaining <= 0:
             self.filtered_setpoint = target_temp
+            self.effective_setpoint = target_temp
             return target_temp
 
         # Landing zone: temperature rise expected during deadtime at full power
@@ -158,9 +164,11 @@ class SmartPISetpointManager:
         # Phase decision based on distance to target
         if remaining > landing_zone:
             # BOOST: full power — return target directly, EMA keeps running internally
+            self.effective_setpoint = target_temp
             return target_temp
         else:
             # LANDING: soft approach — return EMA output (lagging behind target)
+            self.effective_setpoint = self.filtered_setpoint
             return self.filtered_setpoint
 
     def update_boost_state(  # pylint: disable=unused-argument
