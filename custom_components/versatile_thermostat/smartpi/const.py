@@ -261,7 +261,7 @@ EPISODE_MIN_DURATION_OFF_S = 900  # 15 min
 # --- SmartPI Near Band Defaults ---
 DEFAULT_NEAR_BAND_DEG = 0.40
 DEFAULT_KP_NEAR_FACTOR = 0.7
-DEFAULT_KI_NEAR_FACTOR = 0.8
+DEFAULT_KI_NEAR_FACTOR = 0.6
 
 
 # --- Forced Calibration Constants ---
