@@ -11,6 +11,8 @@ from .const import (
     SP_MAX_LANDING_ZONE,
     SP_LANDING_ZONE_FACTOR,
     SP_LANDING_ZONE_MIN_P_FRACTION,
+    SP_FILTER_DISABLE_THRESHOLD,
+    SP_FILTER_ENABLE_THRESHOLD,
 )
 from ..vtherm_hvac_mode import VThermHvacMode
 
@@ -44,12 +46,16 @@ class SmartPISetpointManager:
         self.boost_active: bool = False
         self.prev_setpoint_for_boost: Optional[float] = None
 
+        # Filter state machine (Tracking vs Regulation)
+        self.filter_active: bool = False
+
     def reset(self):
         """Reset internal state."""
         self.filtered_setpoint = None
         self.effective_setpoint = None
         self.boost_active = False
         self.prev_setpoint_for_boost = None
+        self.filter_active = False
 
     def load_state(self, state: dict):
         """Load state from persistence."""
@@ -66,12 +72,15 @@ class SmartPISetpointManager:
         if ps is not None:
             self.prev_setpoint_for_boost = float(ps)
 
+        self.filter_active = bool(state.get("setpoint_filter_active", False))
+
     def save_state(self) -> dict:
         """Save state for persistence."""
         return {
             "filtered_setpoint": self.filtered_setpoint,
             "setpoint_boost_active": self.boost_active,
             "prev_setpoint_for_boost": self.prev_setpoint_for_boost,
+            "setpoint_filter_active": self.filter_active,
         }
 
     def filter_setpoint(
@@ -115,17 +124,34 @@ class SmartPISetpointManager:
         if target_temp < self.filtered_setpoint:
             self.filtered_setpoint = target_temp
             self.effective_setpoint = target_temp
+            self.filter_active = False  # Drop disables filter immediately
             return target_temp
 
-        # Track target for drop detection
+        # Track target for rise detection
+        sp_delta = target_temp - self.filtered_setpoint
         self.filtered_setpoint = target_temp
 
-        # ── Rise: Dual-Track (BOOST + Quadratic Landing) ──
+        # ── State Machine: Tracking vs Regulation ──
         remaining = target_temp - current_temp
         if remaining <= 0:
+            self.filter_active = False
             self.effective_setpoint = target_temp
             return target_temp
 
+        # Activation: Large setpoint increase or large temperature drop (perturbation)
+        if sp_delta >= SP_FILTER_ENABLE_THRESHOLD or remaining >= SP_FILTER_ENABLE_THRESHOLD:
+            self.filter_active = True
+
+        # Deactivation: Reached the landing zone core (lock-in)
+        if remaining <= SP_FILTER_DISABLE_THRESHOLD:
+            self.filter_active = False
+
+        if not self.filter_active:
+            # Regulation mode: transparent signal for full stiffness
+            self.effective_setpoint = target_temp
+            return target_temp
+
+        # ── Rise: Dual-Track (BOOST + Quadratic Landing) ──
         # Landing zone: temperature rise expected during deadtime at full power,
         # multiplied by SP_LANDING_ZONE_FACTOR to start braking earlier and
         # prevent overshoot from thermal inertia.

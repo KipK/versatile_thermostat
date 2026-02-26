@@ -203,6 +203,8 @@ SP_MIN_LANDING_ZONE = 0.05      # °C — minimum landing zone size
 SP_MAX_LANDING_ZONE = 2.0       # °C — maximum landing zone size (safety cap)
 SP_LANDING_ZONE_FACTOR = 1.6  # safety multiplier on landing zone to start braking earlier
 SP_LANDING_ZONE_MIN_P_FRACTION = 0.3  # minimum P_error as fraction of remaining in landing zone
+SP_FILTER_DISABLE_THRESHOLD = 0.10  # °C — below this error, filter turns off to restore stiffness
+SP_FILTER_ENABLE_THRESHOLD = 0.50   # °C — delta SP or error needed to reactivate filter
 
 # Error filter time constant
 ERROR_FILTER_TAU = 25.0 # Minutes (matches alpha ~0.35 at 10min)
